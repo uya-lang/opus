@@ -10,6 +10,7 @@ use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
 use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
 use src.opus.silk.shell_coder.silk_shell_abs_sum;
+use src.opus.silk.shell_coder.silk_shell_decode_blocks;
 use src.opus.silk.shell_coder.silk_shell_decoder;
 use src.opus.silk.shell_coder.silk_shell_encoder;
 use src.opus.silk.tables.silk_shell_table_hash;
@@ -93,5 +94,51 @@ test "silk shell coder validates pulse counts and output buffers" {
     match short_output {
         error.SilkShellCoderError => {}
         else => { try assert(false, "decoder must require a full 16-pulse output block"); }
+    }
+}
+
+test "silk shell decode restores consecutive shell blocks from known totals" {
+    var block0: [i16: 16] = [3, 0, 1, 0, 0, 2, 0, 0, 4, 0, 0, 1, 0, 0, 0, 5];
+    var block1: [i16: 16] = [8, 4, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var packet: [byte: 96] = [0: 96];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:96]);
+    const total0: i32 = try silk_shell_encoder(&enc, &block0[0:16]);
+    const total1: i32 = try silk_shell_encoder(&enc, &block1[0:16]);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:96]);
+    var totals: [i32: 2] = [total0, total1];
+    var decoded: [i16: 32] = [77: 32];
+    try silk_shell_decode_blocks(&dec, &totals[0:2], &decoded[0:32]);
+    try ec_dec_check(&dec);
+
+    var i: usize = 0;
+    while i < 16 {
+        try assert_eq_i32(decoded[i] as i32, block0[i] as i32);
+        try assert_eq_i32(decoded[16 + i] as i32, block1[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "silk shell decode validates block totals and output capacity" {
+    var packet: [byte: 8] = [0: 8];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:8]);
+    var totals: [i32: 2] = [0, 0];
+    var decoded: [i16: 32] = [1: 32];
+
+    const short_output: !void = silk_shell_decode_blocks(&dec, &totals[0:2], &decoded[0:31]);
+    match short_output {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "block decode must require 16 samples per shell block"); }
+    }
+
+    totals[1] = 17;
+    const bad_total: !void = silk_shell_decode_blocks(&dec, &totals[0:2], &decoded[0:32]);
+    match bad_total {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "block decode must reject total pulse counts above 16"); }
     }
 }
