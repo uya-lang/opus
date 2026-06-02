@@ -1,0 +1,105 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.mdct_bridge.celt_imdct_overlap_q15;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
+
+test "celt imdct bridge mixes and updates channel overlap history" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+    state.overlap_mem_q15[0] = 100;
+    state.overlap_mem_q15[119] = -100;
+    state.overlap_mem_q15[120] = 300;
+
+    var coeff: [i16: 120] = [0: 120];
+    var twiddle: [i16: 28800] = [0: 28800];
+    var window: [i16: 120] = [32767: 120];
+    var scratch: [i16: 240] = [7: 240];
+    var output: [i16: 120] = [9: 120];
+
+    try celt_imdct_overlap_q15(
+        &state,
+        0,
+        &coeff[0:120],
+        &twiddle[0:28800],
+        &window[0:120],
+        &scratch[0:240],
+        &output[0:120],
+    );
+
+    try assert_eq_i32(output[0] as i32, 100);
+    try assert_eq_i32(output[119] as i32, -100);
+    try assert_eq_i32(state.overlap_mem_q15[0] as i32, 0);
+    try assert_eq_i32(state.overlap_mem_q15[119] as i32, 0);
+    try assert_eq_i32(state.overlap_mem_q15[120] as i32, 300);
+}
+
+test "celt imdct bridge produces scalar imdct output for a nonzero basis" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+
+    var coeff: [i16: 120] = [0: 120];
+    coeff[0] = 32767;
+    var twiddle: [i16: 28800] = [0: 28800];
+    try mdct_imdct_init_twiddle_q15(240, &twiddle[0:28800]);
+    var window: [i16: 120] = [32767: 120];
+    var scratch: [i16: 240] = [0: 240];
+    var output: [i16: 120] = [0: 120];
+
+    try celt_imdct_overlap_q15(
+        &state,
+        0,
+        &coeff[0:120],
+        &twiddle[0:28800],
+        &window[0:120],
+        &scratch[0:240],
+        &output[0:120],
+    );
+
+    try assert(output[0] != 0, "nonzero coefficient must reach PCM-domain output");
+    try assert(state.overlap_mem_q15[0] != 0, "bridge must preserve tail for next frame");
+}
+
+test "celt imdct bridge validates channel and scratch buffers" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+
+    var coeff: [i16: 120] = [0: 120];
+    var twiddle: [i16: 28800] = [0: 28800];
+    var window: [i16: 120] = [32767: 120];
+    var short_scratch: [i16: 239] = [0: 239];
+    var output: [i16: 120] = [0: 120];
+
+    const bad_channel: !void = celt_imdct_overlap_q15(
+        &state,
+        1,
+        &coeff[0:120],
+        &twiddle[0:28800],
+        &window[0:120],
+        &short_scratch[0:239],
+        &output[0:120],
+    );
+    match bad_channel {
+        error.CeltMdctBridgeError => {}
+        else => { try assert(false, "channel past CELT layout must fail"); }
+    }
+
+    const bad_scratch: !void = celt_imdct_overlap_q15(
+        &state,
+        0,
+        &coeff[0:120],
+        &twiddle[0:28800],
+        &window[0:120],
+        &short_scratch[0:239],
+        &output[0:120],
+    );
+    match bad_scratch {
+        error.CeltMdctBridgeError => {}
+        else => { try assert(false, "short IMDCT scratch must fail"); }
+    }
+}

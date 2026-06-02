@@ -1,0 +1,54 @@
+use src.opus.celt.state.CELT_MAX_OVERLAP;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_overlap_index;
+use src.opus.dsp.mdct.mdct_imdct_scalar_q15;
+use src.opus.dsp.mdct.mdct_imdct_twiddle_q15_len;
+use src.opus.dsp.mdct.mdct_overlap_add_q15;
+
+export error CeltMdctBridgeError;
+
+export fn celt_imdct_overlap_q15(
+    state: &CeltDecoderState,
+    channel: i32,
+    coeff_q15: &[i16],
+    twiddle_q15: &[i16],
+    window_q15: &[i16],
+    scratch_imdct_q15: &[i16],
+    output_q15: &[i16],
+) !void {
+    if channel < 0 || channel >= state.channels || state.frame_size <= 0 || state.overlap <= 0 {
+        return error.CeltMdctBridgeError;
+    }
+    if state.overlap > (CELT_MAX_OVERLAP as i32) {
+        return error.CeltMdctBridgeError;
+    }
+
+    const frame_size: usize = state.frame_size as usize;
+    const overlap: usize = state.overlap as usize;
+    const imdct_len: usize = frame_size + overlap;
+    if coeff_q15.len != imdct_len / 2 || scratch_imdct_q15.len < imdct_len || output_q15.len < frame_size {
+        return error.CeltMdctBridgeError;
+    }
+    const twiddle_needed: usize = mdct_imdct_twiddle_q15_len(imdct_len) catch {
+        return error.CeltMdctBridgeError;
+    };
+    if twiddle_q15.len < twiddle_needed || window_q15.len < overlap {
+        return error.CeltMdctBridgeError;
+    }
+
+    mdct_imdct_scalar_q15(coeff_q15, twiddle_q15, &scratch_imdct_q15[0:imdct_len]) catch {
+        return error.CeltMdctBridgeError;
+    };
+
+    const overlap_index: usize = celt_state_overlap_index(state, channel, 0) catch {
+        return error.CeltMdctBridgeError;
+    };
+    mdct_overlap_add_q15(
+        &scratch_imdct_q15[0:imdct_len],
+        window_q15,
+        &state.overlap_mem_q15[overlap_index:overlap],
+        &output_q15[0:frame_size],
+    ) catch {
+        return error.CeltMdctBridgeError;
+    };
+}

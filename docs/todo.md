@@ -221,7 +221,7 @@
 - [x] 实现 stereo intensity decode。
 - [x] 实现 anti-collapse decode。
 - [x] 实现 denormalize bands。
-- [ ] 实现 IMDCT integration。
+- [x] 实现 IMDCT integration。
 - [ ] 实现 CELT-only mono decode。
 - [ ] 实现 CELT-only stereo decode。
 - [ ] 支持 NB/WB/SWB/FB。
