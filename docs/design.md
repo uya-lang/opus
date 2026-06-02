@@ -12,6 +12,13 @@
 - CLI 工具名称：`uopusdec`、`uopusenc`、`uopusinfo`，输出路径固定为 `bin/`。
 - `opusdec`、`opusenc`、`opusinfo` 只作为外部参考工具名称或源码文件名使用，避免和系统 libopus CLI 混淆。
 
+Uya 编译器基线：
+
+- 当前项目使用 `/media/winger/_dde_data/winger/uya/uya/bin/uya` 作为本地编译器路径。
+- 最低版本固定为 `v0.9.9`。
+- 当前确认的编译器源码提交为 `7fa4e34d248088e2c5dda14f61cc6df060e1e775`。
+- 构建脚本必须允许通过 `UYA` 环境变量覆盖编译器路径，但默认值必须指向上述本地路径。
+
 参考规范：
 
 - RFC 6716: Definition of the Opus Audio Codec, https://www.rfc-editor.org/rfc/rfc6716
