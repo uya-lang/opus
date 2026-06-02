@@ -1,0 +1,88 @@
+export error CeltCwrsError;
+
+export const CELT_CWRS_MAX_N: i32 = 16;
+export const CELT_CWRS_MAX_K: i32 = 32;
+const U32_MAX_U64: u64 = 4294967295;
+
+fn cwrs_cap_u64(value: u64) u64 {
+    if value > U32_MAX_U64 {
+        return U32_MAX_U64;
+    }
+    return value;
+}
+
+export fn celt_cwrs_count(n: i32, k: i32) !u32 {
+    if n < 0 || k < 0 || n > CELT_CWRS_MAX_N || k > CELT_CWRS_MAX_K {
+        return error.CeltCwrsError;
+    }
+
+    var prev: [u64: 33] = [0: 33];
+    var next: [u64: 33] = [0: 33];
+    prev[0] = 1;
+    const limit: usize = k as usize;
+
+    var dim: i32 = 1;
+    while dim <= n {
+        var prev_prev_value: u64 = 0;
+        var prev_next_value: u64 = 0;
+        var pulses: usize = 0;
+        while pulses < 33 {
+            if pulses > limit {
+                break;
+            }
+            const prev_value: u64 = prev[pulses];
+            if pulses == 0 {
+                next[pulses] = prev_value;
+            } else {
+                next[pulses] = cwrs_cap_u64(prev_next_value + prev_value + prev_prev_value);
+            }
+            prev_prev_value = prev_value;
+            prev_next_value = next[pulses];
+            pulses = pulses + 1;
+        }
+
+        pulses = 0;
+        while pulses < 33 {
+            if pulses > limit {
+                break;
+            }
+            prev[pulses] = next[pulses];
+            next[pulses] = 0;
+            pulses = pulses + 1;
+        }
+        dim = dim + 1;
+    }
+
+    return prev[limit] as u32;
+}
+
+export fn celt_cwrs_abs_sum(pulses: &[i32]) !i32 {
+    if pulses.len > (CELT_CWRS_MAX_N as usize) {
+        return error.CeltCwrsError;
+    }
+
+    var total: i32 = 0;
+    var i: usize = 0;
+    while i < pulses.len {
+        var value: i32 = pulses.ptr[i];
+        if value < 0 {
+            value = -value;
+        }
+        total = total + value;
+        if total > CELT_CWRS_MAX_K {
+            return error.CeltCwrsError;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+export fn celt_cwrs_validate_pulses(pulses: &[i32], k: i32) !void {
+    if k < 0 || k > CELT_CWRS_MAX_K {
+        return error.CeltCwrsError;
+    }
+    const total: i32 = try celt_cwrs_abs_sum(pulses);
+    if total != k {
+        return error.CeltCwrsError;
+    }
+}

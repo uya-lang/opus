@@ -193,7 +193,7 @@
 - [x] 实现 eBands 查询。
 - [x] 实现 frame size/LM 映射。
 - [x] 实现 `celt/rate.uya` bit allocation 初版。
-- [ ] 实现 `celt/cwrs.uya`。
+- [x] 实现 `celt/cwrs.uya`。
 - [ ] 实现 `icwrs`。
 - [ ] 实现 pulse encode/decode roundtrip。
 - [ ] 实现 `dsp/mdct.uya` 标量 IMDCT。

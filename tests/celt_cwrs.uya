@@ -1,0 +1,48 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.cwrs.celt_cwrs_abs_sum;
+use src.opus.celt.cwrs.celt_cwrs_count;
+use src.opus.celt.cwrs.celt_cwrs_validate_pulses;
+
+test "celt cwrs counts small pulse shell sizes" {
+    try assert_eq_i32((try celt_cwrs_count(0, 0)) as i32, 1);
+    try assert_eq_i32((try celt_cwrs_count(0, 1)) as i32, 0);
+    try assert_eq_i32((try celt_cwrs_count(1, 0)) as i32, 1);
+    try assert_eq_i32((try celt_cwrs_count(1, 3)) as i32, 2);
+    try assert_eq_i32((try celt_cwrs_count(2, 1)) as i32, 4);
+    try assert_eq_i32((try celt_cwrs_count(2, 2)) as i32, 8);
+    try assert_eq_i32((try celt_cwrs_count(3, 2)) as i32, 18);
+}
+
+test "celt cwrs validates pulse absolute sums" {
+    var pulses: [i32: 4] = [2, -1, 0, 3];
+    try assert_eq_i32(try celt_cwrs_abs_sum(&pulses[0:4]), 6);
+    try celt_cwrs_validate_pulses(&pulses[0:4], 6);
+
+    const wrong_k: !void = celt_cwrs_validate_pulses(&pulses[0:4], 5);
+    match wrong_k {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "wrong pulse sum must fail"); }
+    }
+}
+
+test "celt cwrs rejects unsupported dimensions and pulse counts" {
+    const bad_n: !u32 = celt_cwrs_count(17, 0);
+    match bad_n {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "dimension past bound must fail"); }
+    }
+
+    const bad_k: !u32 = celt_cwrs_count(1, 33);
+    match bad_k {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "pulse count past bound must fail"); }
+    }
+
+    var too_many: [i32: 17] = [0: 17];
+    const bad_len: !i32 = celt_cwrs_abs_sum(&too_many[0:17]);
+    match bad_len {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "pulse vector past bound must fail"); }
+    }
+}
