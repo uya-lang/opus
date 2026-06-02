@@ -180,6 +180,43 @@ test "celt stereo decode supports 5ms interleaved frames" {
     try assert(pcm[478] != 66 && pcm[479] != 66, "5ms stereo decode must write interleaved output");
 }
 
+test "celt mono decode supports 10ms frames" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+
+    var payload: [byte: 160] = [0: 160];
+    var pcm: [i16: 480] = [44: 480];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    const decoded: usize = try celt_decode_mono_i16(&state, &payload[0:160], &pcm[0:480], &scratch);
+
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(state.lm, 2);
+    try assert_eq_i32(scratch.twiddle_imdct_len, 960);
+    try assert(state.old_loge_q8[20] == state.old_ebands_q8[20], "10ms mono decode must update fullband energy state");
+    try assert(pcm[479] != 44, "10ms mono decode must write the whole output frame");
+}
+
+test "celt stereo decode supports 10ms interleaved frames" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+
+    var payload: [byte: 320] = [0: 320];
+    var pcm: [i16: 960] = [33: 960];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    const decoded: usize = try celt_decode_stereo_i16(&state, &payload[0:320], &pcm[0:960], &scratch);
+
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(state.lm, 2);
+    try assert_eq_i32(scratch.twiddle_imdct_len, 960);
+    try assert(state.old_loge_q8[20] == state.old_ebands_q8[20], "10ms stereo decode must update left fullband energy state");
+    try assert(state.old_loge_q8[41] == state.old_ebands_q8[41], "10ms stereo decode must update right fullband energy state");
+    try assert(pcm[958] != 33 && pcm[959] != 33, "10ms stereo decode must write interleaved output");
+}
+
 test "celt mono decode rejects unsupported current configurations" {
     var stereo: CeltDecoderState = CeltDecoderState{};
     try celt_state_init(&stereo, 2);
@@ -196,10 +233,10 @@ test "celt mono decode rejects unsupported current configurations" {
 
     var mono: CeltDecoderState = CeltDecoderState{};
     try celt_state_init(&mono, 1);
-    try celt_state_configure_frame(&mono, 480, 0, 3);
+    try celt_state_configure_frame(&mono, 960, 0, 3);
     const bad_duration: !usize = celt_decode_mono_i16(&mono, &payload[0:8], &pcm[0:120], &scratch);
     match bad_duration {
         error.CeltDecodeError => {}
-        else => { try assert(false, "10ms duration support is a separate CELT-only task"); }
+        else => { try assert(false, "20ms duration support is a separate CELT-only task"); }
     };
 }

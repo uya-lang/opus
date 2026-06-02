@@ -227,7 +227,7 @@
 - [x] 支持 NB/WB/SWB/FB。
 - [x] 支持 2.5ms。
 - [x] 支持 5ms。
-- [ ] 支持 10ms。
+- [x] 支持 10ms。
 - [ ] 支持 20ms。
 - [ ] 测试 CELT-only conformance vectors。
 - [ ] 测试随机合法 CELT packets 不崩溃。
