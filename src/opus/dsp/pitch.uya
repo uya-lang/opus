@@ -1,0 +1,76 @@
+use src.opus.core.qformat.mul16_16_i64;
+
+export error DspPitchError;
+
+export struct PitchCorrelationResult {
+    lag: usize,
+    correlation: i64,
+    energy: i64,
+}
+
+export fn pitch_xcorr_i16(reference: &[i16], candidate: &[i16], length: usize) !i64 {
+    if length == 0 || reference.len < length || candidate.len < length {
+        return error.DspPitchError;
+    }
+
+    var acc: i64 = 0L;
+    var i: usize = 0;
+    while i < length {
+        acc = acc + mul16_16_i64(reference.ptr[i], candidate.ptr[i]);
+        i = i + 1;
+    }
+    return acc;
+}
+
+export fn pitch_energy_i16(input: &[i16], length: usize) !i64 {
+    if length == 0 || input.len < length {
+        return error.DspPitchError;
+    }
+
+    var acc: i64 = 0L;
+    var i: usize = 0;
+    while i < length {
+        acc = acc + mul16_16_i64(input.ptr[i], input.ptr[i]);
+        i = i + 1;
+    }
+    return acc;
+}
+
+export fn pitch_search_lag_i16(signal: &[i16], current_offset: usize, frame_len: usize, min_lag: usize, max_lag: usize) !PitchCorrelationResult {
+    if frame_len == 0 || min_lag == 0 || min_lag > max_lag {
+        return error.DspPitchError;
+    }
+    if current_offset < max_lag || current_offset + frame_len > signal.len {
+        return error.DspPitchError;
+    }
+
+    var best_lag: usize = min_lag;
+    var best_corr: i64 = -9223372036854775807L - 1L;
+    var best_energy: i64 = 0L;
+    var lag: usize = min_lag;
+    while lag <= max_lag {
+        var corr: i64 = 0L;
+        var energy: i64 = 0L;
+        var i: usize = 0;
+        const past_offset: usize = current_offset - lag;
+        while i < frame_len {
+            const cur: i16 = signal.ptr[current_offset + i];
+            const past: i16 = signal.ptr[past_offset + i];
+            corr = corr + mul16_16_i64(cur, past);
+            energy = energy + mul16_16_i64(past, past);
+            i = i + 1;
+        }
+        if corr > best_corr {
+            best_corr = corr;
+            best_lag = lag;
+            best_energy = energy;
+        }
+        lag = lag + 1;
+    }
+
+    return PitchCorrelationResult{
+        lag: best_lag,
+        correlation: best_corr,
+        energy: best_energy,
+    };
+}

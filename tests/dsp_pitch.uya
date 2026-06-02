@@ -1,0 +1,41 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use std.testing.assert_eq_i64;
+use src.opus.dsp.pitch.DspPitchError;
+use src.opus.dsp.pitch.PitchCorrelationResult;
+use src.opus.dsp.pitch.pitch_energy_i16;
+use src.opus.dsp.pitch.pitch_search_lag_i16;
+use src.opus.dsp.pitch.pitch_xcorr_i16;
+
+test "pitch xcorr and energy use i64 accumulation" {
+    var a: [i16: 4] = [1000, -1000, 2000, -2000];
+    var b: [i16: 4] = [1000, 1000, 1000, 1000];
+    try assert_eq_i64(try pitch_xcorr_i16(&a[0:4], &b[0:4], 4), 0L);
+    try assert_eq_i64(try pitch_energy_i16(&a[0:4], 4), 10000000L);
+
+    var loud: [i16: 2] = [32767, -32768 as i16];
+    try assert_eq_i64(try pitch_energy_i16(&loud[0:2], 2), 2147418113L);
+}
+
+test "pitch search finds strongest lag in bounded history" {
+    var signal: [i16: 12] = [100, -50, 25, 75, 100, -50, 25, 75, 100, -50, 25, 75];
+    const result: PitchCorrelationResult = try pitch_search_lag_i16(&signal[0:12], 8, 4, 3, 5);
+    try assert_eq_i32(result.lag as i32, 4);
+    try assert_eq_i64(result.correlation, 18750L);
+    try assert_eq_i64(result.energy, 18750L);
+}
+
+test "pitch search rejects invalid windows" {
+    var signal: [i16: 4] = [1, 2, 3, 4];
+    const bad_lag: !PitchCorrelationResult = pitch_search_lag_i16(&signal[0:4], 2, 2, 3, 1);
+    match bad_lag {
+        error.DspPitchError => {}
+        else => { try assert(false, "invalid lag range must fail"); }
+    }
+
+    const bad_window: !i64 = pitch_xcorr_i16(&signal[0:2], &signal[2:4], 3);
+    match bad_window {
+        error.DspPitchError => {}
+        else => { try assert(false, "oversized correlation must fail"); }
+    }
+}
