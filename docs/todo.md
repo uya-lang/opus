@@ -215,7 +215,7 @@
 - [x] 实现 `celt/quant_bands.uya` coarse energy decode。
 - [x] 实现 fine energy decode。
 - [x] 实现 TF changes decode。
-- [ ] 实现 spreading decision decode。
+- [x] 实现 spreading decision decode。
 - [ ] 实现 bit allocation integration。
 - [ ] 实现 PVQ band shape decode。
 - [ ] 实现 stereo intensity decode。

@@ -1,0 +1,73 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.spread.CELT_SPREAD_AGGRESSIVE;
+use src.opus.celt.spread.CELT_SPREAD_NORMAL;
+use src.opus.celt.spread.celt_decode_spread_decision;
+use src.opus.celt.tables.celt_spread_icdf_value;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_encode;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_init;
+
+fn spread_symbol_low(symbol: usize) u32 {
+    if symbol == 0 {
+        return 0;
+    }
+    return 32 - (celt_spread_icdf_value(symbol - 1) as u32);
+}
+
+fn spread_symbol_high(symbol: usize) u32 {
+    return 32 - (celt_spread_icdf_value(symbol) as u32);
+}
+
+fn encode_spread(packet: &[byte], decision: i32) !usize {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    ec_encode(&enc, spread_symbol_low(decision as usize), spread_symbol_high(decision as usize), 32);
+    try ec_enc_check(&enc);
+    return try ec_enc_done(&enc);
+}
+
+test "spreading decision decodes iCDF symbol when budget allows" {
+    var packet: [byte: 16] = [0: 16];
+    _ = try encode_spread(&packet[0:16], CELT_SPREAD_AGGRESSIVE);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    const decision: i32 = try celt_decode_spread_decision(&dec, 16 * 8);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decision, CELT_SPREAD_AGGRESSIVE);
+}
+
+test "spreading decision defaults to normal when four bits are unavailable" {
+    var packet: [byte: 16] = [0: 16];
+    _ = try encode_spread(&packet[0:16], CELT_SPREAD_AGGRESSIVE);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    const before: u32 = ec_tell(&dec);
+    const decision: i32 = try celt_decode_spread_decision(&dec, (before + 3) as i32);
+    const after: u32 = ec_tell(&dec);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decision, CELT_SPREAD_NORMAL);
+    try assert_eq_i32(after as i32, before as i32);
+}
+
+test "spreading decision validates total bit budget" {
+    var packet: [byte: 1] = [0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:1]);
+
+    const bad_budget: !i32 = celt_decode_spread_decision(&dec, -1);
+    match bad_budget {
+        error.CeltSpreadError => {}
+        else => { try assert(false, "negative total_bits must fail"); }
+    }
+}

@@ -108,6 +108,13 @@ export fn celt_tf_select_value(lm: usize, index: usize) i8 {
     return 0;
 }
 
+export fn celt_spread_icdf_value(index: usize) byte {
+    if index < 4 {
+        return CELT_SPREAD_ICDF[index];
+    }
+    return 0;
+}
+
 export fn celt_energy_pred_coef_q15(lm: usize) i16 {
     if lm < 4 {
         return CELT_PRED_COEF_Q15[lm];

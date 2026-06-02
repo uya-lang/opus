@@ -1,0 +1,56 @@
+use src.opus.celt.tables.celt_spread_icdf_value;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_update;
+use src.opus.entropy.range_dec.ec_decode;
+use src.opus.entropy.range_dec.ec_tell;
+
+export error CeltSpreadError;
+
+export const CELT_SPREAD_NONE: i32 = 0;
+export const CELT_SPREAD_LIGHT: i32 = 1;
+export const CELT_SPREAD_NORMAL: i32 = 2;
+export const CELT_SPREAD_AGGRESSIVE: i32 = 3;
+
+const CELT_SPREAD_ICDF_FTB: u32 = 5;
+const CELT_SPREAD_ICDF_SYMBOLS: usize = 4;
+
+fn spread_symbol_low(symbol: usize) u32 {
+    if symbol == 0 {
+        return 0;
+    }
+    return (1 << (CELT_SPREAD_ICDF_FTB as i32)) - (celt_spread_icdf_value(symbol - 1) as u32);
+}
+
+fn spread_symbol_high(symbol: usize) u32 {
+    return (1 << (CELT_SPREAD_ICDF_FTB as i32)) - (celt_spread_icdf_value(symbol) as u32);
+}
+
+fn decode_spread_icdf(dec: &EcDec) i32 {
+    const ft: u32 = 1 << (CELT_SPREAD_ICDF_FTB as i32);
+    const s: u32 = ec_decode(dec, ft);
+    var symbol: usize = 0;
+    while symbol < CELT_SPREAD_ICDF_SYMBOLS {
+        const low: u32 = spread_symbol_low(symbol);
+        const high: u32 = spread_symbol_high(symbol);
+        if s >= low && s < high {
+            ec_dec_update(dec, low, high, ft);
+            return symbol as i32;
+        }
+        symbol = symbol + 1;
+    }
+    ec_dec_update(dec, 0, ft, ft);
+    return CELT_SPREAD_NORMAL;
+}
+
+export fn celt_decode_spread_decision(dec: &EcDec, total_bits: i32) !i32 {
+    if total_bits < 0 {
+        return error.CeltSpreadError;
+    }
+
+    var decision: i32 = CELT_SPREAD_NORMAL;
+    const tell: u32 = ec_tell(dec);
+    if tell + 4 <= (total_bits as u32) {
+        decision = decode_spread_icdf(dec);
+    }
+    return decision;
+}
