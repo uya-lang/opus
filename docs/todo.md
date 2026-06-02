@@ -11,7 +11,7 @@
 - [x] 确认 Uya 编译器路径和最低版本。
 - [x] 建立 `docs/references.md`，记录 RFC 6716/RFC 8251/RFC 7845/RFC 7587 和 upstream 表来源。
 - [x] 建立 `docs/uya-compiler-bugs.md`，保存本项目触发的 Uya 编译器最小复现。
-- [ ] 建立 `docs/conformance.md`，定义 bit-exact、误差容忍、测试 corpus 来源和验收命令。
+- [x] 建立 `docs/conformance.md`，定义 bit-exact、误差容忍、测试 corpus 来源和验收命令。
 
 ## 1. 工程骨架
 
