@@ -230,7 +230,7 @@
 - [x] 支持 10ms。
 - [x] 支持 20ms。
 - [ ] 测试 CELT-only conformance vectors。
-- [ ] 测试随机合法 CELT packets 不崩溃。
+- [x] 测试随机合法 CELT packets 不崩溃。
 - [ ] benchmark CELT-only FB/20ms stereo decode。
 
 验收标准：

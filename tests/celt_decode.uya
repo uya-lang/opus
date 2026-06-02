@@ -1,6 +1,7 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
 use src.opus.celt.decode.CeltMonoDecodeScratch;
 use src.opus.celt.decode.celt_decode_mono_i16;
 use src.opus.celt.decode.celt_decode_stereo_i16;
@@ -8,6 +9,8 @@ use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
+use src.opus.packet.toc.PacketParseResult;
+use src.opus.packet.toc.parse_packet;
 
 test "celt mono decode integrates entropy bands imdct and deemphasis" {
     var state: CeltDecoderState = CeltDecoderState{};
@@ -252,6 +255,69 @@ test "celt stereo decode supports 20ms interleaved frames" {
     try assert(state.old_loge_q8[20] == state.old_ebands_q8[20], "20ms stereo decode must update left fullband energy state");
     try assert(state.old_loge_q8[41] == state.old_ebands_q8[41], "20ms stereo decode must update right fullband energy state");
     try assert(pcm[1918] != 11 && pcm[1919] != 11, "20ms stereo decode must write interleaved output");
+}
+
+fn celt_decode_random_packet_once(packet: &[byte], scratch: &CeltMonoDecodeScratch) !void {
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(packet, &parsed);
+    if parsed.info.mode != OpusMode.CELT || parsed.info.frame_count != 1 {
+        return error.CeltDecodeError;
+    }
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, parsed.info.channels as i32);
+    const end_band: i32 = try celt_mode_end_band_for_bandwidth(&state.mode, parsed.info.bandwidth);
+    try celt_state_configure_frame(&state, parsed.info.duration_samples_48k as i32, 0, end_band);
+
+    var pcm: [i16: 1920] = [0: 1920];
+    const frame: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
+    if parsed.info.channels == 1 {
+        const res_mono: !usize = celt_decode_mono_i16(&state, frame, &pcm[0:(parsed.info.duration_samples_48k as usize)], scratch);
+        match res_mono {
+            error.CeltDecodeError => {}
+            else => {
+                const decoded: usize = try res_mono;
+                try assert_eq_i32(decoded as i32, parsed.info.duration_samples_48k as i32);
+            }
+        };
+        return;
+    }
+
+    const samples: usize = (parsed.info.duration_samples_48k as usize) * 2;
+    const res_stereo: !usize = celt_decode_stereo_i16(&state, frame, &pcm[0:samples], scratch);
+    match res_stereo {
+        error.CeltDecodeError => {}
+        else => {
+            const decoded: usize = try res_stereo;
+            try assert_eq_i32(decoded as i32, parsed.info.duration_samples_48k as i32);
+        }
+    };
+}
+
+test "celt decode handles random legal CELT packets without crashing" {
+    var packet: [byte: 161] = [0: 161];
+    var rng: u32 = 0x12345678;
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    var i: usize = 0;
+    while i < 96 {
+        rng = rng * 1664525 + 1013904223;
+        const config_index: u32 = (16 as u32) + ((rng >> 24) % (16 as u32));
+        const config: byte = ((config_index << (3 as u32)) as! byte).value;
+        const stereo_bit: byte = (((rng >> 7) & (1 as u32)) as! byte).value * 4;
+        packet[0] = config | stereo_bit;
+
+        rng = rng * 1664525 + 1013904223;
+        const payload_len: usize = 1 + (((rng >> 24) as usize) % (160 as usize));
+        var j: usize = 0;
+        while j < payload_len {
+            rng = rng * 1664525 + 1013904223;
+            packet[1 + j] = ((rng >> 24) as! byte).value;
+            j = j + 1;
+        }
+
+        try celt_decode_random_packet_once(&packet[0:(payload_len + 1)], &scratch);
+        i = i + 1;
+    }
 }
 
 test "celt mono decode rejects unsupported current configurations" {
