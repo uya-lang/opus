@@ -37,5 +37,9 @@ Baseline rows must record:
 date, commit, target, backend, opt, input, samples_or_symbols, time_ns, ns_per_unit, allocations, notes
 ```
 
-No baseline result is recorded until a benchmark target measures real codec or
-entropy work.
+## Current Results
+
+```text
+date, commit, target, backend, opt, input, samples_or_symbols, time_ns, ns_per_unit, allocations, notes
+2026-06-02, working-tree, entropy_decode, Uya C99 backend, default, deterministic range symbols ft=2..33, 1024000 symbols, 51839000, 50 ns/symbol, 0, static buffers; checksum printed to keep decode work live
+```

@@ -1,0 +1,108 @@
+use libc.clock;
+use libc.printf;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_dec_update;
+use src.opus.entropy.range_dec.ec_decode;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.entropy.range_enc.ec_encode;
+
+const SYMBOL_COUNT: usize = 512;
+const ITERATIONS: usize = 2000;
+const PACKET_BYTES: usize = 2048;
+
+error EntropyBenchmarkError;
+
+fn next_seed(seed: u32) u32 {
+    return seed * 1103515245 + 12345;
+}
+
+fn symbol_ft(seed: u32) u32 {
+    const mask: u32 = 31;
+    return 2 + (seed & mask);
+}
+
+fn symbol_value(seed: u32, ft: u32) u32 {
+    return (seed >> 8) % ft;
+}
+
+fn make_packet(packet: &[byte]) !usize {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var seed: u32 = 1;
+    var i: usize = 0;
+    while i < SYMBOL_COUNT {
+        seed = next_seed(seed);
+        const ft: u32 = symbol_ft(seed);
+        const sym: u32 = symbol_value(seed, ft);
+        ec_encode(&enc, sym, sym + 1, ft);
+        i = i + 1;
+    }
+
+    try ec_enc_check(&enc);
+    return try ec_enc_done(&enc);
+}
+
+fn decode_once(packet: &[byte]) !u32 {
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, packet);
+
+    var checksum: u32 = 0;
+    var seed: u32 = 1;
+    var i: usize = 0;
+    while i < SYMBOL_COUNT {
+        seed = next_seed(seed);
+        const ft: u32 = symbol_ft(seed);
+        const expected: u32 = symbol_value(seed, ft);
+        const decoded: u32 = ec_decode(&dec, ft);
+        if decoded != expected {
+            return error.EntropyBenchmarkError;
+        }
+        ec_dec_update(&dec, decoded, decoded + 1, ft);
+        checksum = checksum + decoded;
+        i = i + 1;
+    }
+
+    try ec_dec_check(&dec);
+    return checksum;
+}
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    var packet_storage: [byte: PACKET_BYTES] = [0: PACKET_BYTES];
+    const packet_len: usize = make_packet(&packet_storage[0:PACKET_BYTES]) catch {
+        _ = printf("entropy_decode_bench: setup failed\n" as *byte);
+        return 1;
+    };
+
+    const start: u64 = clock();
+    var checksum: u32 = 0;
+    var i: usize = 0;
+    while i < ITERATIONS {
+        const value: u32 = decode_once(&packet_storage[0:PACKET_BYTES]) catch {
+            _ = printf("entropy_decode_bench: decode failed\n" as *byte);
+            return 1;
+        };
+        checksum = checksum + value;
+        i = i + 1;
+    }
+    const end: u64 = clock();
+
+    const symbols: u64 = (SYMBOL_COUNT * ITERATIONS) as u64;
+    var elapsed_ns: u64 = (end - start) * 1000;
+    if elapsed_ns == 0 {
+        elapsed_ns = 1;
+    }
+    const ns_per_symbol: u64 = elapsed_ns / symbols;
+
+    _ = printf("entropy_decode, symbols=%lu, time_ns=%lu, ns_per_symbol=%lu, allocations=0, checksum=%u, packet_bytes=%lu\n" as *byte,
+        symbols, elapsed_ns, ns_per_symbol, checksum, packet_len as u64);
+    return 0;
+}

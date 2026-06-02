@@ -4,6 +4,8 @@ BUILD_DIR := build
 BIN_DIR := bin
 SMOKE_SRC := src/opus/main.uya
 SMOKE_BIN := $(BUILD_DIR)/opus-smoke
+ENTROPY_DECODE_BENCH_SRC := bench/entropy_decode.uya
+ENTROPY_DECODE_BENCH_BIN := $(BUILD_DIR)/entropy-decode-bench
 TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/packet_toc.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
@@ -43,8 +45,9 @@ test: check
 	done
 
 bench: require-uya
-	@printf '%s\n' "bench: no benchmark targets registered yet"
-	@printf '%s\n' "bench: no performance numbers are reported in the scaffold stage"
+	@mkdir -p $(BUILD_DIR)
+	@$(UYA) build $(ENTROPY_DECODE_BENCH_SRC) --project-root . -o $(ENTROPY_DECODE_BENCH_BIN)
+	@$(ENTROPY_DECODE_BENCH_BIN)
 
 require-uya:
 	@if ! command -v "$(UYA)" >/dev/null 2>&1 && ! test -x "$(UYA)"; then \
