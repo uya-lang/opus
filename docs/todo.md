@@ -200,7 +200,7 @@
 - [x] 实现 overlap-add。
 - [x] 实现 deemphasis。
 - [x] 测试 mode table。
-- [ ] 测试 cwrs 小维度 exhaustive。
+- [x] 测试 cwrs 小维度 exhaustive。
 - [ ] 测试 MDCT/IMDCT golden。
 - [ ] benchmark MDCT 标量版本。
 

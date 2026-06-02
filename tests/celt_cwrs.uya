@@ -96,20 +96,21 @@ test "celt pulse decode inverts encode for representative ranks" {
     try assert_eq_i32((try celt_encode_pulses(&decoded[0:3])) as i32, 17);
 }
 
-test "celt pulse roundtrip covers small rank ranges" {
-    var decoded: [i32: 3] = [0: 3];
+test "celt pulse roundtrip exhaustively covers small dimensions" {
+    var decoded: [i32: 4] = [0: 4];
     var n: i32 = 1;
-    while n <= 3 {
+    while n <= 4 {
         var k: i32 = 0;
-        while k <= 2 {
+        while k <= 3 {
             const total: i32 = (try celt_cwrs_count(n, k)) as i32;
             var rank: i32 = 0;
             while rank < total {
-                try celt_decode_pulses(n, k, rank as u32, &decoded[0:3]);
+                try celt_decode_pulses(n, k, rank as u32, &decoded[0:4]);
                 try assert_eq_i32(try celt_cwrs_abs_sum(&decoded[0:(n as usize)]), k);
                 try assert_eq_i32((try celt_encode_pulses(&decoded[0:(n as usize)])) as i32, rank);
                 rank = rank + 1;
             }
+            try assert_eq_i32(rank, total);
             k = k + 1;
         }
         n = n + 1;
