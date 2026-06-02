@@ -42,6 +42,7 @@ TABLES = [
     ("src/opus/celt/tables.uya", "CELT_BAND_ALLOCATION_Q5", 231, 305564943, 0, None),
     ("src/opus/celt/tables.uya", "CELT_LOGN400", 21, 874482495, 32768, None),
     ("src/opus/celt/tables.uya", "CELT_TRIM_ICDF", 11, 441834106, 0, 7),
+    ("src/opus/celt/tables.uya", "CELT_ENERGY_PROB_MODEL_Q8", 336, 265233239, 0, None),
     ("src/opus/celt/tables.uya", "CELT_TO_OPUS_BANDWIDTH_TABLE", 20, 745419304, 0, None),
     ("src/opus/celt/tables.uya", "CELT_FROM_OPUS_BANDWIDTH_TABLE", 16, 111883760, 0, None),
     ("src/opus/dsp/window.uya", "CELT_WINDOW_120_Q15", 120, 992882619, 32768, None),

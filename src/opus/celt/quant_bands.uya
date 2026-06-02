@@ -1,0 +1,111 @@
+use src.opus.celt.state.CELT_MAX_BANDS;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_energy_index;
+use src.opus.celt.tables.CELT_BETA_INTRA_Q15;
+use src.opus.celt.tables.celt_energy_beta_coef_q15;
+use src.opus.celt.tables.celt_energy_pred_coef_q15;
+use src.opus.celt.tables.celt_energy_prob_model_q8;
+use src.opus.core.saturate.sat32;
+use src.opus.entropy.laplace.ec_laplace_decode;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.entropy.range_dec.ec_tell;
+
+export error CeltQuantBandsError;
+
+export const CELT_ENERGY_DB_SHIFT: i32 = 10;
+const CELT_COARSE_MIN_Q10: i32 = -9 << CELT_ENERGY_DB_SHIFT;
+const CELT_COARSE_TMP_MIN_Q17: i32 = -28 << (CELT_ENERGY_DB_SHIFT + 7);
+const CELT_SMALL_ENERGY_ICDF_FTB: u32 = 2;
+
+fn round_shift_i64(value: i64, shift: i32) i32 {
+    const half: i64 = 1L << (shift - 1);
+    if value >= 0L {
+        return sat32((value + half) >> shift);
+    }
+    return sat32(0L - (((0L - value) + half) >> shift));
+}
+
+fn max_i32(a: i32, b: i32) i32 {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+fn min_i32(a: i32, b: i32) i32 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn small_energy_symbol_to_qi(symbol: i32) i32 {
+    if symbol == 0 {
+        return 0;
+    }
+    if symbol == 1 {
+        return -1;
+    }
+    return 1;
+}
+
+fn decode_coarse_qi(dec: &EcDec, lm: usize, intra: bool, band: i32, budget_bits: i32) i32 {
+    const tell: i32 = ec_tell(dec) as i32;
+    const bits_left: i32 = budget_bits - tell;
+    if bits_left >= 15 {
+        const prob_index: usize = (2 * min_i32(band, 20)) as usize;
+        const fs: u32 = (celt_energy_prob_model_q8(lm, intra, prob_index) as u32) << 7;
+        const decay: i32 = (celt_energy_prob_model_q8(lm, intra, prob_index + 1) as i32) << 6;
+        return ec_laplace_decode(dec, fs, decay);
+    }
+    if bits_left >= 2 {
+        var small_icdf: [byte: 3] = [2, 1, 0];
+        const symbol: i32 = ec_dec_icdf(dec, &small_icdf[0:3], CELT_SMALL_ENERGY_ICDF_FTB);
+        return small_energy_symbol_to_qi(symbol);
+    }
+    if bits_left >= 1 {
+        return -ec_dec_bit_logp(dec, 1);
+    }
+    return -1;
+}
+
+export fn celt_decode_coarse_energy(state: &CeltDecoderState, dec: &EcDec, intra: bool) !void {
+    if state.channels < 1 || state.channels > 2 || state.start_band < 0 || state.end_band <= state.start_band {
+        return error.CeltQuantBandsError;
+    }
+    if state.end_band > state.mode.nb_ebands || state.lm < 0 || state.lm > state.mode.max_lm {
+        return error.CeltQuantBandsError;
+    }
+
+    const lm: usize = state.lm as usize;
+    var coef_q15: i16 = celt_energy_pred_coef_q15(lm);
+    var beta_q15: i16 = celt_energy_beta_coef_q15(lm);
+    if intra {
+        coef_q15 = 0;
+        beta_q15 = CELT_BETA_INTRA_Q15;
+    }
+
+    const budget_bits: i32 = (dec.storage * 8) as i32;
+    var prev_q17: [i32: 2] = [0: 2];
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        var channel: i32 = 0;
+        while channel < state.channels {
+            const qi: i32 = decode_coarse_qi(dec, lm, intra, band, budget_bits);
+            const q_q10: i32 = qi << CELT_ENERGY_DB_SHIFT;
+            const index: usize = try celt_state_energy_index(state, channel, band);
+            const old_q10: i32 = max_i32(CELT_COARSE_MIN_Q10, state.old_ebands_q8[index] as i32);
+            var tmp_q17: i32 = round_shift_i64((coef_q15 as i64) * (old_q10 as i64), 8);
+            tmp_q17 = sat32((tmp_q17 as i64) + (prev_q17[channel as usize] as i64) + (((q_q10 as i64) << 7)));
+            tmp_q17 = max_i32(CELT_COARSE_TMP_MIN_Q17, tmp_q17);
+            state.old_ebands_q8[index] = round_shift_i64(tmp_q17 as i64, 7) as i16;
+
+            const beta_term: i32 = (beta_q15 as i32) * round_shift_i64(q_q10 as i64, 8);
+            prev_q17[channel as usize] = sat32((prev_q17[channel as usize] as i64) + (((q_q10 as i64) << 7)) - (beta_term as i64));
+            channel = channel + 1;
+        }
+        band = band + 1;
+    }
+}
