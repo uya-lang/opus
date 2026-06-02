@@ -1,0 +1,26 @@
+use libc.printf;
+use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
+use src.opus.dsp.mdct.mdct_imdct_scalar_q15;
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    var twiddle: [i16: 32] = [0: 32];
+    mdct_imdct_init_twiddle_q15(8, &twiddle[0:32]) catch {
+        _ = printf("debug_mdct: twiddle init failed\n" as *byte);
+        return 1;
+    };
+
+    var coeff: [i16: 4] = [32767, -16384, 8192, -4096];
+    var output: [i16: 8] = [0: 8];
+    mdct_imdct_scalar_q15(&coeff[0:4], &twiddle[0:32], &output[0:8]) catch {
+        _ = printf("debug_mdct: imdct failed\n" as *byte);
+        return 1;
+    };
+
+    _ = printf("mdct_debug, n=8, coeff=[%d,%d,%d,%d], output=[%d,%d,%d,%d,%d,%d,%d,%d]\n" as *byte,
+        coeff[0], coeff[1], coeff[2], coeff[3],
+        output[0], output[1], output[2], output[3], output[4], output[5], output[6], output[7]);
+    return 0;
+}

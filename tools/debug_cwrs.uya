@@ -1,0 +1,37 @@
+use libc.printf;
+use src.opus.celt.cwrs.celt_cwrs_abs_sum;
+use src.opus.celt.cwrs.celt_cwrs_count;
+use src.opus.celt.cwrs.celt_decode_pulses;
+use src.opus.celt.cwrs.celt_encode_pulses;
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    const n: i32 = 3;
+    const k: i32 = 2;
+    const rank: u32 = 17;
+    const count: u32 = celt_cwrs_count(n, k) catch {
+        _ = printf("debug_cwrs: count failed\n" as *byte);
+        return 1;
+    };
+
+    var pulses: [i32: 3] = [0: 3];
+    celt_decode_pulses(n, k, rank, &pulses[0:3]) catch {
+        _ = printf("debug_cwrs: decode failed\n" as *byte);
+        return 1;
+    };
+
+    const encoded: u32 = celt_encode_pulses(&pulses[0:3]) catch {
+        _ = printf("debug_cwrs: encode failed\n" as *byte);
+        return 1;
+    };
+    const abs_sum: i32 = celt_cwrs_abs_sum(&pulses[0:3]) catch {
+        _ = printf("debug_cwrs: abs sum failed\n" as *byte);
+        return 1;
+    };
+
+    _ = printf("cwrs_debug, n=%d, k=%d, count=%u, rank=%u, pulses=[%d,%d,%d], abs_sum=%d, encoded=%u\n" as *byte,
+        n, k, count, rank, pulses[0], pulses[1], pulses[2], abs_sum, encoded);
+    return 0;
+}
