@@ -201,7 +201,7 @@
 - [x] 实现 deemphasis。
 - [x] 测试 mode table。
 - [x] 测试 cwrs 小维度 exhaustive。
-- [ ] 测试 MDCT/IMDCT golden。
+- [x] 测试 MDCT/IMDCT golden。
 - [ ] benchmark MDCT 标量版本。
 
 验收标准：
