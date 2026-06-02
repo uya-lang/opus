@@ -30,9 +30,9 @@ test "celt cwrs validates pulse absolute sums" {
 }
 
 test "celt cwrs rejects unsupported dimensions and pulse counts" {
-    try assert_eq_i32((try celt_cwrs_count(22, 0)) as i32, 1);
+    try assert_eq_i32((try celt_cwrs_count(44, 0)) as i32, 1);
 
-    const bad_n: !u32 = celt_cwrs_count(23, 0);
+    const bad_n: !u32 = celt_cwrs_count(45, 0);
     match bad_n {
         error.CeltCwrsError => {}
         else => { try assert(false, "dimension past bound must fail"); }
@@ -44,8 +44,8 @@ test "celt cwrs rejects unsupported dimensions and pulse counts" {
         else => { try assert(false, "pulse count past bound must fail"); }
     }
 
-    var too_many: [i32: 23] = [0: 23];
-    const bad_len: !i32 = celt_cwrs_abs_sum(&too_many[0:23]);
+    var too_many: [i32: 45] = [0: 45];
+    const bad_len: !i32 = celt_cwrs_abs_sum(&too_many[0:45]);
     match bad_len {
         error.CeltCwrsError => {}
         else => { try assert(false, "pulse vector past bound must fail"); }

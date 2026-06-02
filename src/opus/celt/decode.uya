@@ -26,11 +26,11 @@ use src.opus.entropy.range_dec.ec_dec_init;
 
 export error CeltDecodeError;
 
-export const CELT_MONO_DECODE_FRAME_SIZE: i32 = 120;
-export const CELT_MONO_DECODE_MAX_COEFFS: usize = 120;
-export const CELT_MONO_DECODE_MAX_IMDCT: usize = 240;
-export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 28800;
-export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 240;
+export const CELT_MONO_DECODE_MAX_FRAME_SIZE: i32 = 240;
+export const CELT_MONO_DECODE_MAX_COEFFS: usize = 240;
+export const CELT_MONO_DECODE_MAX_IMDCT: usize = 480;
+export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 115200;
+export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 400;
 const CELT_MONO_DECODE_DEEMPHASIS_Q15: i16 = 27853;
 
 export struct CeltMonoDecodeScratch {
@@ -47,11 +47,12 @@ export struct CeltMonoDecodeScratch {
     coeff_q15: [i16: CELT_MONO_DECODE_MAX_COEFFS],
     freq_q15: [i16: CELT_MONO_DECODE_MAX_SPECTRAL],
     imdct_q15: [i16: CELT_MONO_DECODE_MAX_IMDCT],
-    pcm_q15: [i16: CELT_MONO_DECODE_FRAME_SIZE as usize],
-    pcm_i16: [i16: CELT_MONO_DECODE_FRAME_SIZE as usize],
+    pcm_q15: [i16: CELT_MONO_DECODE_MAX_FRAME_SIZE as usize],
+    pcm_i16: [i16: CELT_MONO_DECODE_MAX_FRAME_SIZE as usize],
     window_q15: [i16: CELT_MAX_OVERLAP],
     twiddle_q15: [i16: CELT_MONO_DECODE_MAX_TWIDDLE],
     twiddle_ready: bool,
+    twiddle_imdct_len: i32,
     spread_decision: i32,
 }
 
@@ -106,7 +107,7 @@ fn celt_mono_deemphasis_i16(input: &[i16], mem_q15: &i32, output: &[i16]) !void 
 }
 
 fn celt_mono_build_band_dims(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !usize {
-    if state.lm != 0 || state.frame_size != CELT_MONO_DECODE_FRAME_SIZE {
+    if state.lm < 0 || state.lm > 1 || state.frame_size <= 0 || state.frame_size > CELT_MONO_DECODE_MAX_FRAME_SIZE {
         return error.CeltDecodeError;
     }
     if state.start_band < 0 || state.end_band <= state.start_band || state.end_band > state.mode.nb_ebands {
@@ -115,11 +116,13 @@ fn celt_mono_build_band_dims(state: &const CeltDecoderState, scratch: &CeltMonoD
 
     clear_i32(&scratch.band_dims[0:CELT_MAX_BANDS]);
     var total: usize = 0;
+    const lm_scale: i32 = 1 << state.lm;
     var band: i32 = state.start_band;
     while band < state.end_band {
-        const width: i32 = (celt_mode_eband_width_5ms(&state.mode, band) catch {
+        const width_5ms: i32 = (celt_mode_eband_width_5ms(&state.mode, band) catch {
             return error.CeltDecodeError;
         }) as i32;
+        const width: i32 = width_5ms * lm_scale;
         if width <= 0 || width > CELT_BAND_SHAPE_MAX_DIM {
             return error.CeltDecodeError;
         }
@@ -237,15 +240,21 @@ fn celt_mono_build_collapse_masks(state: &const CeltDecoderState, total_dim: usi
     }
 }
 
-fn celt_mono_prepare_tables(scratch: &CeltMonoDecodeScratch) !void {
-    if !scratch.twiddle_ready {
+fn celt_mono_prepare_tables(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !void {
+    const imdct_len: i32 = state.frame_size * 2;
+    if imdct_len <= 0 || imdct_len > (CELT_MONO_DECODE_MAX_IMDCT as i32) {
+        return error.CeltDecodeError;
+    }
+
+    if !scratch.twiddle_ready || scratch.twiddle_imdct_len != imdct_len {
         mdct_imdct_init_twiddle_q15(
-            CELT_MONO_DECODE_MAX_IMDCT,
+            imdct_len as usize,
             &scratch.twiddle_q15[0:CELT_MONO_DECODE_MAX_TWIDDLE],
         ) catch {
             return error.CeltDecodeError;
         };
         scratch.twiddle_ready = true;
+        scratch.twiddle_imdct_len = imdct_len;
     }
 
     var i: usize = 0;
@@ -267,7 +276,7 @@ fn celt_decode_channels_i16(
 
     try celt_state_configure_frame(state, state.frame_size, state.start_band, state.end_band);
     const total_dim: usize = try celt_mono_build_band_dims(state, scratch);
-    try celt_mono_prepare_tables(scratch);
+    try celt_mono_prepare_tables(state, scratch);
 
     clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
@@ -276,7 +285,7 @@ fn celt_decode_channels_i16(
     clear_i16(&scratch.shape_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
     clear_i16(&scratch.freq_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
     clear_i16(&scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS]);
-    clear_i16(&scratch.pcm_i16[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)]);
+    clear_i16(&scratch.pcm_i16[0:(CELT_MONO_DECODE_MAX_FRAME_SIZE as usize)]);
 
     var dec: EcDec = EcDec{};
     ec_dec_init(&dec, payload);
@@ -366,24 +375,24 @@ fn celt_decode_channels_i16(
         celt_imdct_overlap_q15(
             state,
             channel,
-            &scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS],
+            &scratch.coeff_q15[0:(state.frame_size as usize)],
             &scratch.twiddle_q15[0:CELT_MONO_DECODE_MAX_TWIDDLE],
             &scratch.window_q15[0:CELT_MAX_OVERLAP],
             &scratch.imdct_q15[0:CELT_MONO_DECODE_MAX_IMDCT],
-            &scratch.pcm_q15[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+            &scratch.pcm_q15[0:(state.frame_size as usize)],
         ) catch {
             return error.CeltDecodeError;
         };
         celt_mono_deemphasis_i16(
-            &scratch.pcm_q15[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+            &scratch.pcm_q15[0:(state.frame_size as usize)],
             &state.preemph_mem_q15[channel as usize],
-            &scratch.pcm_i16[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+            &scratch.pcm_i16[0:(state.frame_size as usize)],
         ) catch {
             return error.CeltDecodeError;
         };
 
         var sample: usize = 0;
-        while sample < (CELT_MONO_DECODE_FRAME_SIZE as usize) {
+        while sample < (state.frame_size as usize) {
             pcm.ptr[sample * (state.channels as usize) + (channel as usize)] = scratch.pcm_i16[sample];
             sample = sample + 1;
         }
@@ -395,7 +404,7 @@ fn celt_decode_channels_i16(
     };
     try celt_mono_update_energy_history(state);
     state.loss_count = 0;
-    return CELT_MONO_DECODE_FRAME_SIZE as usize;
+    return state.frame_size as usize;
 }
 
 export fn celt_decode_mono_i16(

@@ -1,11 +1,24 @@
 use src.opus.celt.state.CELT_MAX_OVERLAP;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_overlap_index;
+use src.opus.core.saturate.sat16;
 use src.opus.dsp.mdct.mdct_imdct_scalar_q15;
 use src.opus.dsp.mdct.mdct_imdct_twiddle_q15_len;
-use src.opus.dsp.mdct.mdct_overlap_add_q15;
 
 export error CeltMdctBridgeError;
+
+fn round_shift_q30_to_q15(value_q30: i64) i32 {
+    const half: i64 = 1L << 14;
+    if value_q30 >= 0L {
+        return ((value_q30 + half) >> 15) as i32;
+    }
+    return (0L - (((0L - value_q30) + half) >> 15)) as i32;
+}
+
+fn mul_q15_i16(sample: i16, gain_q15: i16) i16 {
+    const product_q30: i64 = (sample as i64) * (gain_q15 as i64);
+    return sat16(round_shift_q30_to_q15(product_q30));
+}
 
 export fn celt_imdct_overlap_q15(
     state: &CeltDecoderState,
@@ -25,8 +38,8 @@ export fn celt_imdct_overlap_q15(
 
     const frame_size: usize = state.frame_size as usize;
     const overlap: usize = state.overlap as usize;
-    const imdct_len: usize = frame_size + overlap;
-    if coeff_q15.len != imdct_len / 2 || scratch_imdct_q15.len < imdct_len || output_q15.len < frame_size {
+    const imdct_len: usize = frame_size * 2;
+    if coeff_q15.len != frame_size || scratch_imdct_q15.len < imdct_len || output_q15.len < frame_size {
         return error.CeltMdctBridgeError;
     }
     const twiddle_needed: usize = mdct_imdct_twiddle_q15_len(imdct_len) catch {
@@ -43,12 +56,23 @@ export fn celt_imdct_overlap_q15(
     const overlap_index: usize = celt_state_overlap_index(state, channel, 0) catch {
         return error.CeltMdctBridgeError;
     };
-    mdct_overlap_add_q15(
-        &scratch_imdct_q15[0:imdct_len],
-        window_q15,
-        &state.overlap_mem_q15[overlap_index:overlap],
-        &output_q15[0:frame_size],
-    ) catch {
-        return error.CeltMdctBridgeError;
-    };
+    var i: usize = 0;
+    while i < overlap {
+        const faded_in: i16 = mul_q15_i16(scratch_imdct_q15.ptr[i], window_q15.ptr[i]);
+        output_q15.ptr[i] = sat16((state.overlap_mem_q15[overlap_index + i] as i32) + (faded_in as i32));
+        i = i + 1;
+    }
+
+    while i < frame_size {
+        output_q15.ptr[i] = scratch_imdct_q15.ptr[i];
+        i = i + 1;
+    }
+
+    var j: usize = 0;
+    while j < overlap {
+        const tail_index: usize = frame_size + j;
+        const window_index: usize = overlap - 1 - j;
+        state.overlap_mem_q15[overlap_index + j] = mul_q15_i16(scratch_imdct_q15.ptr[tail_index], window_q15.ptr[window_index]);
+        j = j + 1;
+    }
 }
