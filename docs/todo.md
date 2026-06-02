@@ -33,7 +33,7 @@
 - [x] 创建 `bin/` 和 `build/` 输出目录，并加入忽略规则。
 - [x] 创建 Makefile 或 uyabuild 配置。
 - [x] 提供 `make check`。
-- [ ] 提供 `make test`。
+- [x] 提供 `make test`。
 - [ ] 提供 `make bench` 占位。
 - [ ] 创建 `bench/baseline.md`，记录机器、编译器、backend、优化级别和基线格式。
 - [ ] 提供最小 smoke 文件，确认 Uya 编译器可构建项目。
