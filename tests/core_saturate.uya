@@ -1,0 +1,28 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use std.testing.assert_eq_i64;
+use src.opus.core.saturate.I16_MAX_I32;
+use src.opus.core.saturate.I16_MIN_I32;
+use src.opus.core.saturate.I32_MAX_I64;
+use src.opus.core.saturate.I32_MIN_I64;
+use src.opus.core.saturate.fits_i16_i32;
+use src.opus.core.saturate.fits_i32_i64;
+
+test "saturate module exposes stable signed bounds" {
+    try assert_eq_i32(I16_MIN_I32, -32768);
+    try assert_eq_i32(I16_MAX_I32, 32767);
+    try assert_eq_i64(I32_MIN_I64, -2147483647L - 1L);
+    try assert_eq_i64(I32_MAX_I64, 2147483647L);
+}
+
+test "saturate range predicates cover inclusive boundaries" {
+    try assert(fits_i16_i32(I16_MIN_I32), "i16 minimum is representable");
+    try assert(fits_i16_i32(I16_MAX_I32), "i16 maximum is representable");
+    try assert(!fits_i16_i32(I16_MIN_I32 - 1), "below i16 minimum is rejected");
+    try assert(!fits_i16_i32(I16_MAX_I32 + 1), "above i16 maximum is rejected");
+
+    try assert(fits_i32_i64(I32_MIN_I64), "i32 minimum is representable");
+    try assert(fits_i32_i64(I32_MAX_I64), "i32 maximum is representable");
+    try assert(!fits_i32_i64(I32_MIN_I64 - 1L), "below i32 minimum is rejected");
+    try assert(!fits_i32_i64(I32_MAX_I64 + 1L), "above i32 maximum is rejected");
+}

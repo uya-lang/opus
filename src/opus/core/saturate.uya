@@ -1,0 +1,12 @@
+export const I16_MIN_I32: i32 = -32768;
+export const I16_MAX_I32: i32 = 32767;
+export const I32_MIN_I64: i64 = -2147483647L - 1L;
+export const I32_MAX_I64: i64 = 2147483647L;
+
+export fn fits_i16_i32(value: i32) bool {
+    return value >= I16_MIN_I32 && value <= I16_MAX_I32;
+}
+
+export fn fits_i32_i64(value: i64) bool {
+    return value >= I32_MIN_I64 && value <= I32_MAX_I64;
+}

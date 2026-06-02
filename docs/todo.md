@@ -144,7 +144,7 @@
 ## 5. 定点算术和 DSP 基础
 
 - [x] 实现 `core/qformat.uya`。
-- [ ] 实现 `core/saturate.uya`。
+- [x] 实现 `core/saturate.uya`。
 - [ ] 实现 `sat16`。
 - [ ] 实现 `sat32`。
 - [ ] 实现 saturating add/sub。
