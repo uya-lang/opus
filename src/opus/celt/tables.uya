@@ -68,3 +68,10 @@ export fn celt_eband_5ms_boundary(index: usize) i16 {
     }
     return 0;
 }
+
+export fn celt_band_allocation_q5(row: usize, band: usize) byte {
+    if row < CELT_BAND_ALLOCATION_ROWS && band < CELT_BAND_ALLOCATION_COLS {
+        return CELT_BAND_ALLOCATION_Q5[row * CELT_BAND_ALLOCATION_COLS + band];
+    }
+    return 0;
+}

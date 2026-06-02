@@ -1,0 +1,97 @@
+use src.opus.celt.mode.CeltMode;
+use src.opus.celt.mode.celt_mode_eband_width_5ms;
+use src.opus.celt.mode.celt_mode_frame_size_from_lm;
+use src.opus.celt.tables.CELT_BAND_ALLOCATION_COLS;
+use src.opus.celt.tables.CELT_BAND_ALLOCATION_ROWS;
+use src.opus.celt.tables.celt_band_allocation_q5;
+
+export error CeltRateError;
+
+export struct CeltRateAllocation {
+    row: i32,
+    band_count: i32,
+    used_bits: i32,
+    remaining_bits: i32,
+}
+
+export fn celt_rate_allocation_q5(row: i32, band: i32) !i32 {
+    if row < 0 || band < 0 {
+        return error.CeltRateError;
+    }
+    if row >= (CELT_BAND_ALLOCATION_ROWS as i32) || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+        return error.CeltRateError;
+    }
+    return celt_band_allocation_q5(row as usize, band as usize) as i32;
+}
+
+fn celt_rate_band_bits(mode: &const CeltMode, channels: i32, lm: i32, row: i32, band: i32) !i32 {
+    const q5: i32 = try celt_rate_allocation_q5(row, band);
+    const width: i32 = (try celt_mode_eband_width_5ms(mode, band)) as i32;
+    const scale: i32 = channels * (1 << lm);
+    return (q5 * width * scale) / 32;
+}
+
+export fn celt_rate_row_total_bits(mode: &const CeltMode, channels: i32, lm: i32, row: i32) !i32 {
+    try celt_mode_frame_size_from_lm(mode, lm);
+    if channels < 1 || channels > 2 {
+        return error.CeltRateError;
+    }
+    if row < 0 || row >= mode.nb_alloc_vectors {
+        return error.CeltRateError;
+    }
+
+    var total: i32 = 0;
+    var band: i32 = 0;
+    while band < mode.nb_ebands {
+        total = total + (try celt_rate_band_bits(mode, channels, lm, row, band));
+        band = band + 1;
+    }
+    return total;
+}
+
+export fn celt_rate_compute_allocation(
+    mode: &const CeltMode,
+    channels: i32,
+    lm: i32,
+    total_bits: i32,
+    band_bits: &[i32],
+) !CeltRateAllocation {
+    try celt_mode_frame_size_from_lm(mode, lm);
+    if channels < 1 || channels > 2 {
+        return error.CeltRateError;
+    }
+    if total_bits < 0 {
+        return error.CeltRateError;
+    }
+    if band_bits.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+
+    var best_row: i32 = 0;
+    var best_total: i32 = 0;
+    var row: i32 = 0;
+    while row < mode.nb_alloc_vectors {
+        const row_total: i32 = try celt_rate_row_total_bits(mode, channels, lm, row);
+        if row_total <= total_bits && row_total >= best_total {
+            best_row = row;
+            best_total = row_total;
+        }
+        row = row + 1;
+    }
+
+    var used: i32 = 0;
+    var band: i32 = 0;
+    while band < mode.nb_ebands {
+        const bits: i32 = try celt_rate_band_bits(mode, channels, lm, best_row, band);
+        band_bits.ptr[band as usize] = bits;
+        used = used + bits;
+        band = band + 1;
+    }
+
+    return CeltRateAllocation{
+        row: best_row,
+        band_count: mode.nb_ebands,
+        used_bits: used,
+        remaining_bits: total_bits - used,
+    };
+}

@@ -192,7 +192,7 @@
 - [x] 实现 CELT mode 常量。
 - [x] 实现 eBands 查询。
 - [x] 实现 frame size/LM 映射。
-- [ ] 实现 `celt/rate.uya` bit allocation 初版。
+- [x] 实现 `celt/rate.uya` bit allocation 初版。
 - [ ] 实现 `celt/cwrs.uya`。
 - [ ] 实现 `icwrs`。
 - [ ] 实现 pulse encode/decode roundtrip。

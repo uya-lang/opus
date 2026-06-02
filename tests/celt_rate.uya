@@ -1,0 +1,78 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.mode.CeltMode;
+use src.opus.celt.mode.celt_mode_48000;
+use src.opus.celt.rate.CeltRateAllocation;
+use src.opus.celt.rate.celt_rate_allocation_q5;
+use src.opus.celt.rate.celt_rate_compute_allocation;
+use src.opus.celt.rate.celt_rate_row_total_bits;
+
+test "celt rate exposes band allocation q5 table entries" {
+    try assert_eq_i32(try celt_rate_allocation_q5(0, 0), 0);
+    try assert_eq_i32(try celt_rate_allocation_q5(1, 0), 90);
+    try assert_eq_i32(try celt_rate_allocation_q5(10, 20), 104);
+
+    const bad_row: !i32 = celt_rate_allocation_q5(11, 0);
+    match bad_row {
+        error.CeltRateError => {}
+        else => { try assert(false, "allocation row out of range must fail"); }
+    }
+}
+
+test "celt rate computes table driven row totals" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32(try celt_rate_row_total_bits(&mode, 1, 0, 0), 0);
+    try assert_eq_i32(try celt_rate_row_total_bits(&mode, 1, 0, 1), 18);
+    try assert_eq_i32(try celt_rate_row_total_bits(&mode, 1, 0, 4), 57);
+    try assert_eq_i32(try celt_rate_row_total_bits(&mode, 1, 0, 10), 453);
+    try assert_eq_i32(try celt_rate_row_total_bits(&mode, 2, 1, 1), 92);
+}
+
+test "celt rate chooses highest row within budget and reports remaining bits" {
+    const mode: CeltMode = celt_mode_48000();
+    var band_bits: [i32: 21] = [0: 21];
+    const alloc: CeltRateAllocation = try celt_rate_compute_allocation(&mode, 1, 0, 60, &band_bits[0:21]);
+
+    try assert_eq_i32(alloc.row, 4);
+    try assert_eq_i32(alloc.band_count, 21);
+    try assert_eq_i32(alloc.used_bits, 57);
+    try assert_eq_i32(alloc.remaining_bits, 3);
+    try assert_eq_i32(band_bits[0], 3);
+    try assert_eq_i32(band_bits[8], 4);
+    try assert_eq_i32(band_bits[20], 0);
+}
+
+test "celt rate leaves low budgets for row zero without overspending" {
+    const mode: CeltMode = celt_mode_48000();
+    var band_bits: [i32: 21] = [99: 21];
+    const alloc: CeltRateAllocation = try celt_rate_compute_allocation(&mode, 1, 0, 10, &band_bits[0:21]);
+
+    try assert_eq_i32(alloc.row, 0);
+    try assert_eq_i32(alloc.used_bits, 0);
+    try assert_eq_i32(alloc.remaining_bits, 10);
+    try assert_eq_i32(band_bits[0], 0);
+    try assert_eq_i32(band_bits[20], 0);
+}
+
+test "celt rate rejects invalid allocation parameters" {
+    const mode: CeltMode = celt_mode_48000();
+    var band_bits: [i32: 20] = [0: 20];
+    const short_output: !CeltRateAllocation = celt_rate_compute_allocation(&mode, 1, 0, 100, &band_bits[0:20]);
+    match short_output {
+        error.CeltRateError => {}
+        else => { try assert(false, "short band output must fail"); }
+    }
+
+    var enough_bits: [i32: 21] = [0: 21];
+    const bad_channels: !CeltRateAllocation = celt_rate_compute_allocation(&mode, 3, 0, 100, &enough_bits[0:21]);
+    match bad_channels {
+        error.CeltRateError => {}
+        else => { try assert(false, "invalid channel count must fail"); }
+    }
+
+    const bad_lm: !CeltRateAllocation = celt_rate_compute_allocation(&mode, 1, 4, 100, &enough_bits[0:21]);
+    match bad_lm {
+        error.CeltModeError => {}
+        else => { try assert(false, "invalid LM must fail"); }
+    }
+}
