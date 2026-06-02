@@ -32,7 +32,7 @@
 - [x] 创建 `tools/`。
 - [x] 创建 `bin/` 和 `build/` 输出目录，并加入忽略规则。
 - [x] 创建 Makefile 或 uyabuild 配置。
-- [ ] 提供 `make check`。
+- [x] 提供 `make check`。
 - [ ] 提供 `make test`。
 - [ ] 提供 `make bench` 占位。
 - [ ] 创建 `bench/baseline.md`，记录机器、编译器、backend、优化级别和基线格式。
