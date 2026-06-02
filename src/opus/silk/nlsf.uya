@@ -1,0 +1,99 @@
+use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SILK_NB_LPC_ORDER;
+
+export error SilkNlsfError;
+
+export const SILK_NLSF_Q15_ONE: i32 = 32768;
+export const SILK_NLSF_NB_ORDER: usize = SILK_NB_LPC_ORDER;
+export const SILK_NLSF_MAX_ORDER: usize = SILK_MAX_LPC_ORDER;
+export const SILK_NLSF_MAX_INTERPOLATION_Q2: i32 = 4;
+
+export fn silk_nlsf_validate_order(order: i32) !void {
+    if order != (SILK_NLSF_NB_ORDER as i32) && order != (SILK_NLSF_MAX_ORDER as i32) {
+        return error.SilkNlsfError;
+    }
+}
+
+fn validate_q15_slice(values: &[i16], order: i32) !void {
+    try silk_nlsf_validate_order(order);
+    if values.len < (order as usize) {
+        return error.SilkNlsfError;
+    }
+    var i: usize = 0;
+    while i < (order as usize) {
+        if values.ptr[i] < 0 {
+            return error.SilkNlsfError;
+        }
+        i = i + 1;
+    }
+}
+
+export fn silk_nlsf_is_sorted_q15(nlsf_q15: &[i16], order: i32) !bool {
+    try validate_q15_slice(nlsf_q15, order);
+    if order <= 1 {
+        return true;
+    }
+    var i: usize = 1;
+    while i < (order as usize) {
+        if nlsf_q15.ptr[i] <= nlsf_q15.ptr[i - 1] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+export fn silk_nlsf_validate_stable_q15(nlsf_q15: &[i16], delta_min_q15: &[i16], order: i32) !void {
+    try validate_q15_slice(nlsf_q15, order);
+    if delta_min_q15.len < (order as usize) + 1 {
+        return error.SilkNlsfError;
+    }
+
+    var i: usize = 0;
+    while i < (order as usize) + 1 {
+        if delta_min_q15.ptr[i] <= 0 {
+            return error.SilkNlsfError;
+        }
+        i = i + 1;
+    }
+
+    if (nlsf_q15.ptr[0] as i32) < (delta_min_q15.ptr[0] as i32) {
+        return error.SilkNlsfError;
+    }
+
+    i = 1;
+    while i < (order as usize) {
+        const prev: i32 = nlsf_q15.ptr[i - 1] as i32;
+        const current: i32 = nlsf_q15.ptr[i] as i32;
+        const min_delta: i32 = delta_min_q15.ptr[i] as i32;
+        if current < prev + min_delta {
+            return error.SilkNlsfError;
+        }
+        i = i + 1;
+    }
+
+    const upper_delta: i32 = delta_min_q15.ptr[order as usize] as i32;
+    if (nlsf_q15.ptr[(order as usize) - 1] as i32) > SILK_NLSF_Q15_ONE - upper_delta {
+        return error.SilkNlsfError;
+    }
+}
+
+export fn silk_nlsf_interpolate_q15(out_q15: &[i16], current_q15: &[i16], previous_q15: &[i16], order: i32, interpolation_factor_q2: i32) !void {
+    try validate_q15_slice(current_q15, order);
+    try validate_q15_slice(previous_q15, order);
+    if out_q15.len < (order as usize) || interpolation_factor_q2 < 0 || interpolation_factor_q2 > SILK_NLSF_MAX_INTERPOLATION_Q2 {
+        return error.SilkNlsfError;
+    }
+
+    var i: usize = 0;
+    while i < (order as usize) {
+        const prev: i32 = previous_q15.ptr[i] as i32;
+        const current: i32 = current_q15.ptr[i] as i32;
+        const interpolated: i32 = prev + ((interpolation_factor_q2 * (current - prev)) >> 2);
+        if interpolated < 0 || interpolated >= SILK_NLSF_Q15_ONE {
+            return error.SilkNlsfError;
+        }
+        out_q15.ptr[i] = interpolated as i16;
+        i = i + 1;
+    }
+}

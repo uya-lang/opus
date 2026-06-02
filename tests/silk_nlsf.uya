@@ -1,0 +1,76 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_INTERPOLATION_Q2;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_NB_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_Q15_ONE;
+use src.opus.silk.nlsf.silk_nlsf_interpolate_q15;
+use src.opus.silk.nlsf.silk_nlsf_is_sorted_q15;
+use src.opus.silk.nlsf.silk_nlsf_validate_order;
+use src.opus.silk.nlsf.silk_nlsf_validate_stable_q15;
+
+test "silk nlsf exposes q15 and order constants" {
+    try assert_eq_i32(SILK_NLSF_Q15_ONE, 32768);
+    try assert_eq_i32(SILK_NLSF_NB_ORDER as i32, 10);
+    try assert_eq_i32(SILK_NLSF_MAX_ORDER as i32, 16);
+    try assert_eq_i32(SILK_NLSF_MAX_INTERPOLATION_Q2, 4);
+    try silk_nlsf_validate_order(10);
+    try silk_nlsf_validate_order(16);
+
+    const bad_order: !void = silk_nlsf_validate_order(12);
+    match bad_order {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "NLSF order must be one of the SILK decoder orders"); }
+    }
+}
+
+test "silk nlsf validates sorted q15 vectors against delta min" {
+    var nlsf: [i16: 10] = [1200, 3200, 5600, 8200, 11000, 14200, 17800, 21400, 25200, 29600];
+    var delta_min: [i16: 11] = [1000, 800, 900, 1000, 1000, 1200, 1200, 1200, 1200, 1400, 1600];
+
+    try assert(try silk_nlsf_is_sorted_q15(&nlsf[0:10], 10), "stable NLSF should be sorted");
+    try silk_nlsf_validate_stable_q15(&nlsf[0:10], &delta_min[0:11], 10);
+
+    nlsf[4] = 8100;
+    try assert(!(try silk_nlsf_is_sorted_q15(&nlsf[0:10], 10)), "reversed NLSF pair should not be sorted");
+    const too_close: !void = silk_nlsf_validate_stable_q15(&nlsf[0:10], &delta_min[0:11], 10);
+    match too_close {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "NLSF stability check must enforce middle deltas"); }
+    }
+
+    nlsf[4] = 11000;
+    nlsf[9] = 32000;
+    const high_edge: !void = silk_nlsf_validate_stable_q15(&nlsf[0:10], &delta_min[0:11], 10);
+    match high_edge {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "NLSF stability check must enforce upper edge"); }
+    }
+}
+
+test "silk nlsf interpolation follows upstream q2 factor semantics" {
+    var previous: [i16: 16] = [
+        1000, 2200, 3400, 4600, 5800, 7000, 8200, 9400,
+        10600, 11800, 13000, 14200, 15400, 16600, 17800, 19000,
+    ];
+    var current: [i16: 16] = [
+        2000, 4200, 6400, 8600, 10800, 13000, 15200, 17400,
+        19600, 21800, 24000, 26200, 28400, 30600, 31600, 32600,
+    ];
+    var out: [i16: 16] = [0: 16];
+
+    try silk_nlsf_interpolate_q15(&out[0:16], &current[0:16], &previous[0:16], 16, 1);
+    try assert_eq_i32(out[0] as i32, 1250);
+    try assert_eq_i32(out[7] as i32, 11400);
+    try assert_eq_i32(out[15] as i32, 22400);
+
+    try silk_nlsf_interpolate_q15(&out[0:16], &current[0:16], &previous[0:16], 16, 4);
+    try assert_eq_i32(out[0] as i32, current[0] as i32);
+    try assert_eq_i32(out[15] as i32, current[15] as i32);
+
+    const bad_coef: !void = silk_nlsf_interpolate_q15(&out[0:16], &current[0:16], &previous[0:16], 16, 5);
+    match bad_coef {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "interpolation factor is Q2 and must be in 0..4"); }
+    }
+}

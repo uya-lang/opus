@@ -246,7 +246,7 @@
 - [x] 实现 `silk/shell_coder.uya`。
 - [x] 实现 shell decode。
 - [x] 实现 pulse sign decode。
-- [ ] 实现 `silk/nlsf.uya`。
+- [x] 实现 `silk/nlsf.uya`。
 - [ ] 实现 NLSF decode。
 - [ ] 实现 NLSF stabilization。
 - [ ] 实现 NLSF -> LPC。
