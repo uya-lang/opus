@@ -86,3 +86,49 @@ export fn celt_cwrs_validate_pulses(pulses: &[i32], k: i32) !void {
         return error.CeltCwrsError;
     }
 }
+
+export fn celt_icwrs(pulses: &[i32]) !u32 {
+    if pulses.len > (CELT_CWRS_MAX_N as usize) {
+        return error.CeltCwrsError;
+    }
+    const k_total: i32 = try celt_cwrs_abs_sum(pulses);
+
+    var rank: u64 = 0;
+    var remaining_k: i32 = k_total;
+    var i: usize = 0;
+    while i < pulses.len {
+        const dims_left: i32 = (pulses.len - i - 1) as i32;
+        const value: i32 = pulses.ptr[i];
+        var abs_value: i32 = value;
+        if abs_value < 0 {
+            abs_value = -abs_value;
+        }
+
+        if abs_value > remaining_k {
+            return error.CeltCwrsError;
+        }
+
+        if abs_value > 0 {
+            rank = rank + ((try celt_cwrs_count(dims_left, remaining_k)) as u64);
+        }
+
+        var amp: i32 = 1;
+        while amp < abs_value {
+            const count: u64 = (try celt_cwrs_count(dims_left, remaining_k - amp)) as u64;
+            rank = rank + count + count;
+            amp = amp + 1;
+        }
+
+        if value < 0 {
+            rank = rank + ((try celt_cwrs_count(dims_left, remaining_k - abs_value)) as u64);
+        }
+
+        remaining_k = remaining_k - abs_value;
+        i = i + 1;
+    }
+
+    if remaining_k != 0 || rank > U32_MAX_U64 {
+        return error.CeltCwrsError;
+    }
+    return rank as u32;
+}

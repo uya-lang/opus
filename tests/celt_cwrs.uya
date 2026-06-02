@@ -3,6 +3,7 @@ use std.testing.assert_eq_i32;
 use src.opus.celt.cwrs.celt_cwrs_abs_sum;
 use src.opus.celt.cwrs.celt_cwrs_count;
 use src.opus.celt.cwrs.celt_cwrs_validate_pulses;
+use src.opus.celt.cwrs.celt_icwrs;
 
 test "celt cwrs counts small pulse shell sizes" {
     try assert_eq_i32((try celt_cwrs_count(0, 0)) as i32, 1);
@@ -44,5 +45,34 @@ test "celt cwrs rejects unsupported dimensions and pulse counts" {
     match bad_len {
         error.CeltCwrsError => {}
         else => { try assert(false, "pulse vector past bound must fail"); }
+    }
+}
+
+test "celt icwrs ranks small vectors in stable pulse order" {
+    var n2_k1_0: [i32: 2] = [0, 1];
+    var n2_k1_1: [i32: 2] = [0, -1];
+    var n2_k1_2: [i32: 2] = [1, 0];
+    var n2_k1_3: [i32: 2] = [-1, 0];
+    try assert_eq_i32((try celt_icwrs(&n2_k1_0[0:2])) as i32, 0);
+    try assert_eq_i32((try celt_icwrs(&n2_k1_1[0:2])) as i32, 1);
+    try assert_eq_i32((try celt_icwrs(&n2_k1_2[0:2])) as i32, 2);
+    try assert_eq_i32((try celt_icwrs(&n2_k1_3[0:2])) as i32, 3);
+
+    var n2_k2_0: [i32: 2] = [0, 2];
+    var n2_k2_2: [i32: 2] = [1, 1];
+    var n2_k2_5: [i32: 2] = [-1, -1];
+    var n2_k2_7: [i32: 2] = [-2, 0];
+    try assert_eq_i32((try celt_icwrs(&n2_k2_0[0:2])) as i32, 0);
+    try assert_eq_i32((try celt_icwrs(&n2_k2_2[0:2])) as i32, 2);
+    try assert_eq_i32((try celt_icwrs(&n2_k2_5[0:2])) as i32, 5);
+    try assert_eq_i32((try celt_icwrs(&n2_k2_7[0:2])) as i32, 7);
+}
+
+test "celt icwrs rejects vectors outside supported bounds" {
+    var too_many_pulses: [i32: 2] = [33, 0];
+    const bad_k: !u32 = celt_icwrs(&too_many_pulses[0:2]);
+    match bad_k {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "icwrs pulse count past bound must fail"); }
     }
 }
