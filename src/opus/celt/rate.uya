@@ -1,9 +1,12 @@
 use src.opus.celt.mode.CeltMode;
 use src.opus.celt.mode.celt_mode_eband_width_5ms;
 use src.opus.celt.mode.celt_mode_frame_size_from_lm;
+use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.tables.CELT_BAND_ALLOCATION_COLS;
 use src.opus.celt.tables.CELT_BAND_ALLOCATION_ROWS;
 use src.opus.celt.tables.celt_band_allocation_q5;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_tell;
 
 export error CeltRateError;
 
@@ -11,6 +14,18 @@ export struct CeltRateAllocation {
     row: i32,
     band_count: i32,
     used_bits: i32,
+    remaining_bits: i32,
+}
+
+export struct CeltRateFrameAllocation {
+    row: i32,
+    start_band: i32,
+    end_band: i32,
+    band_count: i32,
+    consumed_bits: i32,
+    allocation_bits: i32,
+    fine_bits: i32,
+    pulse_bits: i32,
     remaining_bits: i32,
 }
 
@@ -29,6 +44,45 @@ fn celt_rate_band_bits(mode: &const CeltMode, channels: i32, lm: i32, row: i32, 
     const width: i32 = (try celt_mode_eband_width_5ms(mode, band)) as i32;
     const scale: i32 = channels * (1 << lm);
     return (q5 * width * scale) / 32;
+}
+
+fn celt_rate_clear_i32(values: &[i32], count: i32) !void {
+    if count < 0 || values.len < (count as usize) {
+        return error.CeltRateError;
+    }
+    var i: i32 = 0;
+    while i < count {
+        values.ptr[i as usize] = 0;
+        i = i + 1;
+    }
+}
+
+fn celt_rate_active_row_total_bits(
+    mode: &const CeltMode,
+    channels: i32,
+    lm: i32,
+    start_band: i32,
+    end_band: i32,
+    row: i32,
+) !i32 {
+    var total: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        total = total + (try celt_rate_band_bits(mode, channels, lm, row, band));
+        band = band + 1;
+    }
+    return total;
+}
+
+fn celt_rate_fine_bits_for_band(bits: i32, channels: i32) i32 {
+    if bits <= 0 {
+        return 0;
+    }
+    var fine: i32 = (bits + (channels * 4)) / (channels * 8);
+    if fine > 8 {
+        fine = 8;
+    }
+    return fine;
 }
 
 export fn celt_rate_row_total_bits(mode: &const CeltMode, channels: i32, lm: i32, row: i32) !i32 {
@@ -94,4 +148,96 @@ export fn celt_rate_compute_allocation(
         used_bits: used,
         remaining_bits: total_bits - used,
     };
+}
+
+export fn celt_rate_compute_frame_allocation(
+    mode: &const CeltMode,
+    channels: i32,
+    lm: i32,
+    start_band: i32,
+    end_band: i32,
+    total_bits: i32,
+    pulse_bits: &[i32],
+    fine_quant: &[i32],
+) !CeltRateFrameAllocation {
+    try celt_mode_frame_size_from_lm(mode, lm);
+    if channels < 1 || channels > 2 || total_bits < 0 {
+        return error.CeltRateError;
+    }
+    if start_band < 0 || end_band <= start_band || end_band > mode.nb_ebands {
+        return error.CeltRateError;
+    }
+    if pulse_bits.len < (mode.nb_ebands as usize) || fine_quant.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+
+    try celt_rate_clear_i32(pulse_bits, mode.nb_ebands);
+    try celt_rate_clear_i32(fine_quant, mode.nb_ebands);
+
+    var best_row: i32 = 0;
+    var best_total: i32 = 0;
+    var row: i32 = 0;
+    while row < mode.nb_alloc_vectors {
+        const row_total: i32 = try celt_rate_active_row_total_bits(mode, channels, lm, start_band, end_band, row);
+        if row_total <= total_bits && row_total >= best_total {
+            best_row = row;
+            best_total = row_total;
+        }
+        row = row + 1;
+    }
+
+    var fine_total: i32 = 0;
+    var pulse_total: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const bits: i32 = try celt_rate_band_bits(mode, channels, lm, best_row, band);
+        const fine: i32 = celt_rate_fine_bits_for_band(bits, channels);
+        const fine_cost: i32 = fine * channels;
+        fine_quant.ptr[band as usize] = fine;
+        pulse_bits.ptr[band as usize] = bits - fine_cost;
+        fine_total = fine_total + fine_cost;
+        pulse_total = pulse_total + pulse_bits.ptr[band as usize];
+        band = band + 1;
+    }
+
+    return CeltRateFrameAllocation{
+        row: best_row,
+        start_band: start_band,
+        end_band: end_band,
+        band_count: end_band - start_band,
+        consumed_bits: 0,
+        allocation_bits: best_total,
+        fine_bits: fine_total,
+        pulse_bits: pulse_total,
+        remaining_bits: total_bits - best_total,
+    };
+}
+
+export fn celt_rate_decode_allocation(
+    state: &const CeltDecoderState,
+    dec: &EcDec,
+    total_bits: i32,
+    pulse_bits: &[i32],
+    fine_quant: &[i32],
+) !CeltRateFrameAllocation {
+    if total_bits < 0 {
+        return error.CeltRateError;
+    }
+    const consumed: i32 = ec_tell(dec) as i32;
+    if consumed > total_bits {
+        return error.CeltRateError;
+    }
+
+    var alloc: CeltRateFrameAllocation = try celt_rate_compute_frame_allocation(
+        &state.mode,
+        state.channels,
+        state.lm,
+        state.start_band,
+        state.end_band,
+        total_bits - consumed,
+        pulse_bits,
+        fine_quant,
+    );
+    alloc.consumed_bits = consumed;
+    return alloc;
 }

@@ -3,9 +3,18 @@ use std.testing.assert_eq_i32;
 use src.opus.celt.mode.CeltMode;
 use src.opus.celt.mode.celt_mode_48000;
 use src.opus.celt.rate.CeltRateAllocation;
+use src.opus.celt.rate.CeltRateFrameAllocation;
 use src.opus.celt.rate.celt_rate_allocation_q5;
 use src.opus.celt.rate.celt_rate_compute_allocation;
+use src.opus.celt.rate.celt_rate_compute_frame_allocation;
+use src.opus.celt.rate.celt_rate_decode_allocation;
 use src.opus.celt.rate.celt_rate_row_total_bits;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bits;
+use src.opus.entropy.range_dec.ec_dec_init;
 
 test "celt rate exposes band allocation q5 table entries" {
     try assert_eq_i32(try celt_rate_allocation_q5(0, 0), 0);
@@ -54,6 +63,69 @@ test "celt rate leaves low budgets for row zero without overspending" {
     try assert_eq_i32(band_bits[20], 0);
 }
 
+test "celt rate integrates active frame band allocation" {
+    const mode: CeltMode = celt_mode_48000();
+    var pulse_bits: [i32: 21] = [99: 21];
+    var fine_quant: [i32: 21] = [99: 21];
+    const alloc: CeltRateFrameAllocation = try celt_rate_compute_frame_allocation(
+        &mode,
+        1,
+        0,
+        1,
+        4,
+        12,
+        &pulse_bits[0:21],
+        &fine_quant[0:21],
+    );
+
+    try assert_eq_i32(alloc.row, 8);
+    try assert_eq_i32(alloc.start_band, 1);
+    try assert_eq_i32(alloc.end_band, 4);
+    try assert_eq_i32(alloc.band_count, 3);
+    try assert_eq_i32(alloc.consumed_bits, 0);
+    try assert_eq_i32(alloc.allocation_bits, 12);
+    try assert_eq_i32(alloc.fine_bits, 3);
+    try assert_eq_i32(alloc.pulse_bits, 9);
+    try assert_eq_i32(alloc.remaining_bits, 0);
+
+    try assert_eq_i32(pulse_bits[0], 0);
+    try assert_eq_i32(fine_quant[0], 0);
+    try assert_eq_i32(pulse_bits[1], 3);
+    try assert_eq_i32(fine_quant[1], 1);
+    try assert_eq_i32(pulse_bits[2], 3);
+    try assert_eq_i32(fine_quant[2], 1);
+    try assert_eq_i32(pulse_bits[3], 3);
+    try assert_eq_i32(fine_quant[3], 1);
+    try assert_eq_i32(pulse_bits[4], 0);
+    try assert_eq_i32(fine_quant[4], 0);
+}
+
+test "celt rate decode allocation subtracts range coder tell" {
+    var packet: [byte: 2] = [0: 2];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:2]);
+    _ = ec_dec_bits(&dec, 3);
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 1, 4);
+
+    var pulse_bits: [i32: 21] = [0: 21];
+    var fine_quant: [i32: 21] = [0: 21];
+    const alloc: CeltRateFrameAllocation = try celt_rate_decode_allocation(
+        &state,
+        &dec,
+        16,
+        &pulse_bits[0:21],
+        &fine_quant[0:21],
+    );
+
+    try assert_eq_i32(alloc.consumed_bits, 4);
+    try assert_eq_i32(alloc.row, 8);
+    try assert_eq_i32(alloc.allocation_bits, 12);
+    try assert_eq_i32(alloc.remaining_bits, 0);
+}
+
 test "celt rate rejects invalid allocation parameters" {
     const mode: CeltMode = celt_mode_48000();
     var band_bits: [i32: 20] = [0: 20];
@@ -74,5 +146,20 @@ test "celt rate rejects invalid allocation parameters" {
     match bad_lm {
         error.CeltModeError => {}
         else => { try assert(false, "invalid LM must fail"); }
+    }
+
+    const bad_range: !CeltRateFrameAllocation = celt_rate_compute_frame_allocation(
+        &mode,
+        1,
+        0,
+        4,
+        4,
+        100,
+        &enough_bits[0:21],
+        &enough_bits[0:21],
+    );
+    match bad_range {
+        error.CeltRateError => {}
+        else => { try assert(false, "empty active band range must fail"); }
     }
 }

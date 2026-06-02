@@ -216,7 +216,7 @@
 - [x] 实现 fine energy decode。
 - [x] 实现 TF changes decode。
 - [x] 实现 spreading decision decode。
-- [ ] 实现 bit allocation integration。
+- [x] 实现 bit allocation integration。
 - [ ] 实现 PVQ band shape decode。
 - [ ] 实现 stereo intensity decode。
 - [ ] 实现 anti-collapse decode。
