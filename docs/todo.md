@@ -213,7 +213,7 @@
 
 - [x] 实现 `celt/state.uya`。
 - [x] 实现 `celt/quant_bands.uya` coarse energy decode。
-- [ ] 实现 fine energy decode。
+- [x] 实现 fine energy decode。
 - [ ] 实现 TF changes decode。
 - [ ] 实现 spreading decision decode。
 - [ ] 实现 bit allocation integration。

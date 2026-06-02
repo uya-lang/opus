@@ -9,6 +9,7 @@ use src.opus.core.saturate.sat32;
 use src.opus.entropy.laplace.ec_laplace_decode;
 use src.opus.entropy.range_dec.EcDec;
 use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_bits;
 use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_tell;
 
@@ -105,6 +106,35 @@ export fn celt_decode_coarse_energy(state: &CeltDecoderState, dec: &EcDec, intra
             const beta_term: i32 = (beta_q15 as i32) * round_shift_i64(q_q10 as i64, 8);
             prev_q17[channel as usize] = sat32((prev_q17[channel as usize] as i64) + (((q_q10 as i64) << 7)) - (beta_term as i64));
             channel = channel + 1;
+        }
+        band = band + 1;
+    }
+}
+
+export fn celt_decode_fine_energy(state: &CeltDecoderState, dec: &EcDec, fine_quant: &[i32]) !void {
+    if state.channels < 1 || state.channels > 2 || state.start_band < 0 || state.end_band <= state.start_band {
+        return error.CeltQuantBandsError;
+    }
+    if state.end_band > state.mode.nb_ebands || fine_quant.len < (state.mode.nb_ebands as usize) {
+        return error.CeltQuantBandsError;
+    }
+
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const fine_bits: i32 = fine_quant.ptr[band as usize];
+        if fine_bits < 0 || fine_bits > 8 {
+            return error.CeltQuantBandsError;
+        }
+        if fine_bits > 0 {
+            var channel: i32 = 0;
+            while channel < state.channels {
+                const q2: u32 = ec_dec_bits(dec, fine_bits as u32);
+                const shifted: i32 = round_shift_i64((((q2 as i64) << CELT_ENERGY_DB_SHIFT) + (1L << (CELT_ENERGY_DB_SHIFT - 1))), fine_bits);
+                const offset_q10: i32 = shifted - (1 << (CELT_ENERGY_DB_SHIFT - 1));
+                const index: usize = try celt_state_energy_index(state, channel, band);
+                state.old_ebands_q8[index] = sat32((state.old_ebands_q8[index] as i64) + (offset_q10 as i64)) as i16;
+                channel = channel + 1;
+            }
         }
         band = band + 1;
     }

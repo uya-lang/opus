@@ -2,6 +2,7 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.quant_bands.CELT_ENERGY_DB_SHIFT;
 use src.opus.celt.quant_bands.celt_decode_coarse_energy;
+use src.opus.celt.quant_bands.celt_decode_fine_energy;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
@@ -13,6 +14,7 @@ use src.opus.entropy.range_dec.ec_dec_init;
 use src.opus.entropy.range_enc.EcEnc;
 use src.opus.entropy.range_enc.ec_enc_check;
 use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_bits;
 use src.opus.entropy.range_enc.ec_enc_init;
 
 fn encode_laplace_qi(packet: &[byte], lm: usize, intra: bool, band: i32, q0: i32, q1: i32, channels: i32) !usize {
@@ -88,5 +90,75 @@ test "coarse energy decode validates state band range" {
     match bad_range {
         error.CeltQuantBandsError => {}
         else => { try assert(false, "empty coarse energy band range must fail"); }
+    }
+}
+
+fn encode_fine_bits(packet: &[byte], q0: u32, q1: u32, bits: u32, channels: i32) !usize {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    ec_enc_bits(&enc, q0, bits);
+    if channels == 2 {
+        ec_enc_bits(&enc, q1, bits);
+    }
+    try ec_enc_check(&enc);
+    return try ec_enc_done(&enc);
+}
+
+test "fine energy decode applies raw q10 offsets" {
+    var packet: [byte: 16] = [0: 16];
+    _ = try encode_fine_bits(&packet[0:16], 2, 0, 2, 1);
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 1);
+    state.old_ebands_q8[0] = 1000;
+
+    var fine_quant: [i32: 21] = [0: 21];
+    fine_quant[0] = 2;
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    try celt_decode_fine_energy(&state, &dec, &fine_quant[0:21]);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(state.old_ebands_q8[0] as i32, 1128);
+}
+
+test "fine energy decode follows band and channel layout" {
+    var packet: [byte: 16] = [0: 16];
+    _ = try encode_fine_bits(&packet[0:16], 1, 0, 1, 2);
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 240, 1, 2);
+    state.old_ebands_q8[1] = 100;
+    state.old_ebands_q8[22] = 100;
+
+    var fine_quant: [i32: 21] = [0: 21];
+    fine_quant[1] = 1;
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    try celt_decode_fine_energy(&state, &dec, &fine_quant[0:21]);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(state.old_ebands_q8[1] as i32, 356);
+    try assert_eq_i32(state.old_ebands_q8[22] as i32, -156);
+}
+
+test "fine energy decode validates quantizer table" {
+    var packet: [byte: 1] = [0];
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+
+    var fine_quant: [i32: 21] = [0: 21];
+    fine_quant[0] = 9;
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:1]);
+    const bad_quant: !void = celt_decode_fine_energy(&state, &dec, &fine_quant[0:21]);
+    match bad_quant {
+        error.CeltQuantBandsError => {}
+        else => { try assert(false, "fine bits above supported bound must fail"); }
     }
 }
