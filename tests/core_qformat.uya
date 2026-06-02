@@ -20,6 +20,8 @@ use src.opus.core.qformat.mul16_16_i32;
 use src.opus.core.qformat.mul16_16_i64;
 use src.opus.core.qformat.mul32_32_i64;
 use src.opus.core.qformat.mul_q15_i32;
+use src.opus.core.qformat.round_shift_i32;
+use src.opus.core.qformat.round_shift_i64_to_i32;
 
 test "common Q-format units are stable" {
     try assert_eq_i32(Q0_ONE, 1);
@@ -73,4 +75,18 @@ test "common multiply helpers use fixed-width output contracts" {
     try assert_eq_i32(mul_q15_i32(Q15_ONE, Q15_ONE), Q15_ONE);
     try assert_eq_i32(mul_q15_i32(Q15_ONE / 2, Q15_ONE / 2), 8192);
     try assert_eq_i32(mul_q15_i32(-Q15_ONE, Q15_ONE / 2), -16384);
+}
+
+test "rounded shift helpers use half-up fixed-point scaling" {
+    try assert_eq_i32(round_shift_i32(7, 1), 4);
+    try assert_eq_i32(round_shift_i32(7, 2), 2);
+    try assert_eq_i32(round_shift_i32(-7, 1), -3);
+    try assert_eq_i32(round_shift_i32(1234, 0), 1234);
+    try assert_eq_i32(round_shift_i32(1234, 31), 0);
+
+    try assert_eq_i32(round_shift_i64_to_i32(98304L, 15), 3);
+    try assert_eq_i32(round_shift_i64_to_i32(49152L, 15), 2);
+    try assert_eq_i32(round_shift_i64_to_i32(-49152L, 15), -1);
+    try assert_eq_i32(round_shift_i64_to_i32(1234L, 0), 1234);
+    try assert_eq_i32(round_shift_i64_to_i32(1234L, 31), 0);
 }

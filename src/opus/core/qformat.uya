@@ -85,3 +85,25 @@ export fn mul_q15_i32(a_q15: i32, b_q15: i32) i32 {
     const product_q30: i64 = (a_q15 as i64) * (b_q15 as i64);
     return (product_q30 >> 15) as i32;
 }
+
+export fn round_shift_i32(value: i32, shift: u32) i32 {
+    if shift == 0 {
+        return value;
+    }
+    if shift > Q_SHIFT_MAX {
+        return 0;
+    }
+    const half: i32 = 1 << ((shift - 1) as i32);
+    return (value + half) >> (shift as i32);
+}
+
+export fn round_shift_i64_to_i32(value: i64, shift: u32) i32 {
+    if shift == 0 {
+        return value as i32;
+    }
+    if shift > Q_SHIFT_MAX {
+        return 0;
+    }
+    const half: i64 = 1L << ((shift - 1) as i32);
+    return ((value + half) >> (shift as i32)) as i32;
+}
