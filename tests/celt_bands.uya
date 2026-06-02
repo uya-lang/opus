@@ -3,6 +3,8 @@ use std.testing.assert_eq_i32;
 use src.opus.celt.bands.celt_band_shape_normalize_q15;
 use src.opus.celt.bands.celt_apply_intensity_stereo_bands_q15;
 use src.opus.celt.bands.celt_apply_intensity_stereo_q15;
+use src.opus.celt.bands.celt_apply_anti_collapse_q15;
+use src.opus.celt.bands.celt_decode_anti_collapse_flag;
 use src.opus.celt.bands.celt_decode_intensity_start_band;
 use src.opus.celt.bands.celt_intensity_stereo_weights_q14;
 use src.opus.celt.bands.celt_decode_band_shape;
@@ -14,6 +16,7 @@ use src.opus.entropy.range_dec.ec_dec_init;
 use src.opus.entropy.range_enc.EcEnc;
 use src.opus.entropy.range_enc.ec_enc_check;
 use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_bits;
 use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.entropy.range_enc.ec_enc_uint;
 
@@ -178,6 +181,96 @@ test "celt intensity stereo bands only touch threshold and above" {
     try assert_eq_i32(right[3] as i32, 8192);
     try assert_eq_i32(left[4] as i32, 0);
     try assert_eq_i32(right[4] as i32, -8192);
+}
+
+test "celt anti collapse flag decodes only when frame can use it" {
+    var packet: [byte: 8] = [0: 8];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:8]);
+    ec_enc_bits(&enc, 1, 1);
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:8]);
+    try assert(try celt_decode_anti_collapse_flag(&dec, true, 2, 1), "transient LM>1 frame must decode reserved flag");
+    try ec_dec_check(&dec);
+
+    var untouched: EcDec = EcDec{};
+    ec_dec_init(&untouched, &packet[0:8]);
+    try assert(!try celt_decode_anti_collapse_flag(&untouched, false, 2, 1), "non-transient frame must not consume anti-collapse bit");
+    try assert(!try celt_decode_anti_collapse_flag(&untouched, true, 1, 1), "LM<=1 frame must not consume anti-collapse bit");
+    try assert(!try celt_decode_anti_collapse_flag(&untouched, true, 2, 0), "frame without reserved bit must not decode anti-collapse");
+}
+
+test "celt anti collapse injects deterministic minimal energy into collapsed history bands" {
+    var dims: [i32: 3] = [2, 3, 1];
+    var masks: [u32: 3] = [0, 1, 0];
+    var old_loge: [i16: 3] = [10, 10, -9000];
+    var old_band_e: [i16: 3] = [0, 0, -9000];
+    var shape: [i16: 6] = [0: 6];
+    var rng: u32 = 12345;
+
+    const fixed: i32 = try celt_apply_anti_collapse_q15(
+        true,
+        0,
+        3,
+        1,
+        &dims[0:3],
+        &masks[0:3],
+        &old_loge[0:3],
+        &old_band_e[0:3],
+        &shape[0:6],
+        &rng,
+    );
+
+    try assert_eq_i32(fixed, 1);
+    try assert((shape[0] != 0 || shape[1] != 0), "collapsed active-history band must receive one minimal pulse");
+    try assert_eq_i32(shape[2] as i32, 0);
+    try assert_eq_i32(shape[3] as i32, 0);
+    try assert_eq_i32(shape[4] as i32, 0);
+    try assert_eq_i32(shape[5] as i32, 0);
+}
+
+test "celt anti collapse preserves decoded and disabled bands" {
+    var dims: [i32: 2] = [2, 2];
+    var masks: [u32: 2] = [0, 0];
+    var old_loge: [i16: 2] = [10, 10];
+    var old_band_e: [i16: 2] = [0, 0];
+    var shape: [i16: 4] = [12, 0, 0, 0];
+    var rng: u32 = 7;
+
+    const disabled: i32 = try celt_apply_anti_collapse_q15(
+        false,
+        0,
+        2,
+        1,
+        &dims[0:2],
+        &masks[0:2],
+        &old_loge[0:2],
+        &old_band_e[0:2],
+        &shape[0:4],
+        &rng,
+    );
+    try assert_eq_i32(disabled, 0);
+    try assert_eq_i32(shape[0] as i32, 12);
+    try assert_eq_i32(shape[2] as i32, 0);
+
+    const fixed: i32 = try celt_apply_anti_collapse_q15(
+        true,
+        0,
+        2,
+        1,
+        &dims[0:2],
+        &masks[0:2],
+        &old_loge[0:2],
+        &old_band_e[0:2],
+        &shape[0:4],
+        &rng,
+    );
+    try assert_eq_i32(fixed, 1);
+    try assert_eq_i32(shape[0] as i32, 12);
+    try assert((shape[2] != 0 || shape[3] != 0), "only still-collapsed band should be repaired");
 }
 
 test "celt band shape decode validates dimensions and buffers" {

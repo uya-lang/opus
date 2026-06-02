@@ -5,6 +5,7 @@ use src.opus.celt.cwrs.celt_cwrs_count;
 use src.opus.celt.cwrs.celt_decode_pulses;
 use src.opus.core.saturate.sat16;
 use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bits;
 use src.opus.entropy.range_dec.ec_dec_uint;
 
 export error CeltBandsError;
@@ -14,6 +15,7 @@ export const CELT_BAND_SHAPE_UNIT_Q15: i32 = 32768;
 export const CELT_BAND_SHAPE_MAX_DIM: i32 = CELT_CWRS_MAX_N;
 export const CELT_BAND_SHAPE_MAX_PULSES: i32 = CELT_CWRS_MAX_K;
 export const CELT_INTENSITY_WEIGHT_Q: u32 = 14;
+export const CELT_ANTI_COLLAPSE_MIN_Q15: i16 = 1;
 
 fn celt_band_shape_clear_i32(values: &[i32]) void {
     var i: usize = 0;
@@ -74,6 +76,110 @@ fn celt_abs_i32(value: i32) i32 {
         return -value;
     }
     return value;
+}
+
+fn celt_anti_collapse_band_is_zero(shape_q15: &[i16]) bool {
+    var i: usize = 0;
+    while i < shape_q15.len {
+        if shape_q15.ptr[i] != 0 {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn celt_anti_collapse_history_active(old_loge_q8: i16, old_band_e_q8: i16) bool {
+    return old_loge_q8 > -8192 || old_band_e_q8 > -8192;
+}
+
+fn celt_anti_collapse_seed(state: u32, band: i32, channel: i32) u32 {
+    var next: u32 = state;
+    next = next ^ ((band as u32) * 2654435761);
+    next = next ^ ((channel as u32) * 2246822519);
+    return next * 1664525 + 1013904223;
+}
+
+export fn celt_decode_anti_collapse_flag(dec: &EcDec, transient: bool, lm: i32, reserved_bits: i32) !bool {
+    if lm < 0 || reserved_bits < 0 {
+        return error.CeltBandsError;
+    }
+    if !transient || lm <= 1 || reserved_bits == 0 {
+        return false;
+    }
+    return ec_dec_bits(dec, 1) != 0;
+}
+
+export fn celt_apply_anti_collapse_q15(
+    enabled: bool,
+    start_band: i32,
+    end_band: i32,
+    channels: i32,
+    band_dims: &[i32],
+    collapse_masks: &[u32],
+    old_loge_q8: &[i16],
+    old_band_e_q8: &[i16],
+    shape_q15: &[i16],
+    rng: &u32,
+) !i32 {
+    if channels < 1 || channels > 2 || start_band < 0 || end_band < start_band {
+        return error.CeltBandsError;
+    }
+    if band_dims.len < (end_band as usize) {
+        return error.CeltBandsError;
+    }
+    if collapse_masks.len < ((end_band as usize) * (channels as usize)) {
+        return error.CeltBandsError;
+    }
+    if old_loge_q8.len < ((end_band as usize) * (channels as usize)) {
+        return error.CeltBandsError;
+    }
+    if old_band_e_q8.len < ((end_band as usize) * (channels as usize)) {
+        return error.CeltBandsError;
+    }
+
+    var total_dim: usize = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
+            return error.CeltBandsError;
+        }
+        total_dim = total_dim + (dim as usize);
+        band = band + 1;
+    }
+    if shape_q15.len < total_dim * (channels as usize) {
+        return error.CeltBandsError;
+    }
+    if !enabled {
+        return 0;
+    }
+
+    var fixed: i32 = 0;
+    var channel: i32 = 0;
+    while channel < channels {
+        var offset: usize = (channel as usize) * total_dim;
+        band = start_band;
+        while band < end_band {
+            const dim_usize: usize = band_dims.ptr[band as usize] as usize;
+            const hist_index: usize = (channel as usize) * (end_band as usize) + (band as usize);
+            const slice: &[i16] = &shape_q15[offset:dim_usize];
+            if collapse_masks.ptr[hist_index] == 0 && celt_anti_collapse_band_is_zero(slice) && celt_anti_collapse_history_active(old_loge_q8.ptr[hist_index], old_band_e_q8.ptr[hist_index]) {
+                *rng = celt_anti_collapse_seed(*rng, band, channel);
+                const pos: usize = ((*rng >> 24) as usize) % dim_usize;
+                if (*rng & (1 as u32)) == 0 {
+                    shape_q15.ptr[offset + pos] = CELT_ANTI_COLLAPSE_MIN_Q15;
+                } else {
+                    shape_q15.ptr[offset + pos] = -CELT_ANTI_COLLAPSE_MIN_Q15;
+                }
+                fixed = fixed + 1;
+            }
+            offset = offset + dim_usize;
+            band = band + 1;
+        }
+        channel = channel + 1;
+    }
+    return fixed;
 }
 
 export fn celt_decode_intensity_start_band(
