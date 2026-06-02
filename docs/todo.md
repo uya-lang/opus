@@ -28,7 +28,7 @@
 - [x] 创建 `src/opus/cli/`。
 - [x] 创建 `tests/`。
 - [x] 创建 `tests/vectors/`。
-- [ ] 创建 `bench/`。
+- [x] 创建 `bench/`。
 - [ ] 创建 `tools/`。
 - [ ] 创建 `bin/` 和 `build/` 输出目录，并加入忽略规则。
 - [ ] 创建 Makefile 或 uyabuild 配置。
