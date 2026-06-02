@@ -1,0 +1,70 @@
+export const Q_SHIFT_MAX: u32 = 30;
+export const Q0_ONE: i32 = 1;
+export const Q4_ONE: i32 = 16;
+export const Q7_ONE: i32 = 128;
+export const Q8_ONE: i32 = 256;
+export const Q10_ONE: i32 = 1024;
+export const Q12_ONE: i32 = 4096;
+export const Q14_ONE: i32 = 16384;
+export const Q15_ONE: i32 = 32768;
+export const Q16_ONE: i32 = 65536;
+
+export fn q_unit_i32(q: u32) i32 {
+    if q > Q_SHIFT_MAX {
+        return 0;
+    }
+    return 1 << (q as i32);
+}
+
+export fn q_unit_i64(q: u32) i64 {
+    if q > Q_SHIFT_MAX {
+        return 0;
+    }
+    return 1L << (q as i32);
+}
+
+export fn q_from_i32(value: i32, q: u32) i64 {
+    if q > Q_SHIFT_MAX {
+        return 0;
+    }
+    return (value as i64) << (q as i32);
+}
+
+export fn q_to_i32_floor(value_q: i64, q: u32) i32 {
+    if q == 0 {
+        return value_q as i32;
+    }
+    if q > Q_SHIFT_MAX {
+        return 0;
+    }
+    return (value_q >> (q as i32)) as i32;
+}
+
+export fn q_rescale_i64(value_q: i64, from_q: u32, to_q: u32) i64 {
+    if from_q == to_q {
+        return value_q;
+    }
+    if from_q < to_q {
+        const shift: u32 = to_q - from_q;
+        if shift > Q_SHIFT_MAX {
+            return 0;
+        }
+        return value_q << (shift as i32);
+    }
+
+    const rshift: u32 = from_q - to_q;
+    if rshift > Q_SHIFT_MAX {
+        return 0;
+    }
+    return value_q >> (rshift as i32);
+}
+
+export fn q_fraction_mask_i32(q: u32) i32 {
+    if q == 0 {
+        return 0;
+    }
+    if q > Q_SHIFT_MAX {
+        return 0;
+    }
+    return (1 << (q as i32)) - 1;
+}

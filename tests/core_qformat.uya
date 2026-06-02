@@ -1,0 +1,62 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use std.testing.assert_eq_i64;
+use src.opus.core.qformat.Q0_ONE;
+use src.opus.core.qformat.Q4_ONE;
+use src.opus.core.qformat.Q7_ONE;
+use src.opus.core.qformat.Q8_ONE;
+use src.opus.core.qformat.Q10_ONE;
+use src.opus.core.qformat.Q12_ONE;
+use src.opus.core.qformat.Q14_ONE;
+use src.opus.core.qformat.Q15_ONE;
+use src.opus.core.qformat.Q16_ONE;
+use src.opus.core.qformat.q_fraction_mask_i32;
+use src.opus.core.qformat.q_from_i32;
+use src.opus.core.qformat.q_rescale_i64;
+use src.opus.core.qformat.q_to_i32_floor;
+use src.opus.core.qformat.q_unit_i32;
+use src.opus.core.qformat.q_unit_i64;
+
+test "common Q-format units are stable" {
+    try assert_eq_i32(Q0_ONE, 1);
+    try assert_eq_i32(Q4_ONE, 16);
+    try assert_eq_i32(Q7_ONE, 128);
+    try assert_eq_i32(Q8_ONE, 256);
+    try assert_eq_i32(Q10_ONE, 1024);
+    try assert_eq_i32(Q12_ONE, 4096);
+    try assert_eq_i32(Q14_ONE, 16384);
+    try assert_eq_i32(Q15_ONE, 32768);
+    try assert_eq_i32(Q16_ONE, 65536);
+}
+
+test "Q-format unit helpers reject unsupported shifts without overflow" {
+    try assert_eq_i32(q_unit_i32(15), Q15_ONE);
+    try assert_eq_i32(q_unit_i32(30), 1073741824);
+    try assert_eq_i32(q_unit_i32(31), 0);
+    try assert_eq_i64(q_unit_i64(30), 1073741824L);
+    try assert_eq_i64(q_unit_i64(31), 0L);
+}
+
+test "Q-format integer conversion uses explicit floor semantics" {
+    try assert_eq_i64(q_from_i32(3, 12), 12288L);
+    try assert_eq_i64(q_from_i32(-2, 15), -65536L);
+    try assert_eq_i64(q_from_i32(5, 31), 0L);
+    try assert_eq_i32(q_to_i32_floor(12288L, 12), 3);
+    try assert_eq_i32(q_to_i32_floor(-513L, 8), -3);
+    try assert_eq_i32(q_to_i32_floor(7L, 31), 0);
+}
+
+test "Q-format rescale preserves power-of-two fixed-point values" {
+    try assert_eq_i64(q_rescale_i64(3L, 0, 15), 98304L);
+    try assert_eq_i64(q_rescale_i64(98304L, 15, 0), 3L);
+    try assert_eq_i64(q_rescale_i64(-513L, 8, 4), -33L);
+    try assert_eq_i64(q_rescale_i64(128L, 7, 7), 128L);
+}
+
+test "Q-format fractional masks expose low bits only" {
+    try assert_eq_i32(q_fraction_mask_i32(0), 0);
+    try assert_eq_i32(q_fraction_mask_i32(4), 15);
+    try assert_eq_i32(q_fraction_mask_i32(15), 32767);
+    try assert_eq_i32(q_fraction_mask_i32(31), 0);
+    try assert((q_from_i32(1, 15) as i32) == Q15_ONE, "Q15 one is derived from helper");
+}
