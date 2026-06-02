@@ -1,0 +1,140 @@
+use std.testing.assert;
+use src.opus.core.errors.validate_channels;
+use src.opus.core.errors.validate_decoder_config;
+use src.opus.core.errors.validate_encoder_config;
+use src.opus.core.errors.validate_frame_size_48k;
+use src.opus.core.errors.validate_sample_rate;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusSignalHint;
+
+test "sample rate validator accepts only Opus API rates" {
+    try validate_sample_rate(8000);
+    try validate_sample_rate(12000);
+    try validate_sample_rate(16000);
+    try validate_sample_rate(24000);
+    try validate_sample_rate(48000);
+
+    const bad: !void = validate_sample_rate(44100);
+    match bad {
+        error.InvalidSampleRate => {}
+        else => { try assert(false, "44100 must be rejected"); }
+    }
+}
+
+test "channel validator accepts mono and stereo only" {
+    try validate_channels(1);
+    try validate_channels(2);
+
+    const zero_channels: !void = validate_channels(0);
+    match zero_channels {
+        error.InvalidChannelCount => {}
+        else => { try assert(false, "zero channels must be rejected"); }
+    }
+
+    const too_many_channels: !void = validate_channels(3);
+    match too_many_channels {
+        error.InvalidChannelCount => {}
+        else => { try assert(false, "three channels must be rejected"); }
+    }
+}
+
+test "48k frame size validator accepts Opus frame durations" {
+    try validate_frame_size_48k(120);
+    try validate_frame_size_48k(240);
+    try validate_frame_size_48k(480);
+    try validate_frame_size_48k(960);
+    try validate_frame_size_48k(1920);
+    try validate_frame_size_48k(2880);
+
+    const zero: !void = validate_frame_size_48k(0);
+    match zero {
+        error.InvalidFrameSize => {}
+        else => { try assert(false, "zero frame size must be rejected"); }
+    }
+
+    const over: !void = validate_frame_size_48k(2881);
+    match over {
+        error.InvalidFrameSize => {}
+        else => { try assert(false, "over max frame size must be rejected"); }
+    }
+
+    const non_opus_duration: !void = validate_frame_size_48k(1440);
+    match non_opus_duration {
+        error.InvalidFrameSize => {}
+        else => { try assert(false, "30ms frame size must be rejected"); }
+    }
+}
+
+test "decoder config validation composes sample rate and channel checks" {
+    const valid: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try validate_decoder_config(&valid);
+
+    const invalid_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 44100, channels: 1 };
+    const rate_result: !void = validate_decoder_config(&invalid_rate);
+    match rate_result {
+        error.InvalidSampleRate => {}
+        else => { try assert(false, "decoder invalid sample rate"); }
+    }
+
+    const invalid_channels: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 3 };
+    const channel_result: !void = validate_decoder_config(&invalid_channels);
+    match channel_result {
+        error.InvalidChannelCount => {}
+        else => { try assert(false, "decoder invalid channels"); }
+    }
+}
+
+test "encoder config validation checks bounded tuning fields" {
+    const valid: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 2,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 0,
+        complexity: 10,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 100,
+    };
+    try validate_encoder_config(&valid);
+
+    const bad_complexity: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 0,
+        complexity: 11,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 0,
+    };
+    const complexity_result: !void = validate_encoder_config(&bad_complexity);
+    match complexity_result {
+        error.InvalidComplexity => {}
+        else => { try assert(false, "encoder invalid complexity"); }
+    }
+
+    const bad_loss: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 0,
+        complexity: 5,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 101,
+    };
+    const loss_result: !void = validate_encoder_config(&bad_loss);
+    match loss_result {
+        error.InvalidPacketLossPercent => {}
+        else => { try assert(false, "encoder invalid packet loss"); }
+    }
+}

@@ -61,16 +61,16 @@
 - [x] 定义 `MAX_FRAME_SAMPLES_48K`。
 - [x] 定义 `MAX_PACKET_SAMPLES_48K`。
 - [x] 定义 `MAX_FRAME_BYTES`。
-- [ ] 实现 `core/errors.uya`。
-- [ ] 实现参数校验 helper。
-- [ ] 测试非法采样率。
-- [ ] 测试非法声道数。
-- [ ] 测试 frame size 边界。
+- [x] 实现 `core/errors.uya`。
+- [x] 实现参数校验 helper。
+- [x] 测试非法采样率。
+- [x] 测试非法声道数。
+- [x] 测试 frame size 边界。
 
 验收标准：
 
-- [ ] core 模块不依赖 packet/silk/celt/api。
-- [ ] 所有公共错误名稳定。
+- [x] core 模块不依赖 packet/silk/celt/api。
+- [x] 所有公共错误名稳定。
 
 ## 3. Packet Parser
 

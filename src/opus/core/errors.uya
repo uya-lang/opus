@@ -1,0 +1,77 @@
+use src.opus.core.constants.MAX_CHANNELS;
+use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusEncoderConfig;
+
+export error InvalidSampleRate;
+export error InvalidChannelCount;
+export error InvalidFrameSize;
+export error InvalidComplexity;
+export error InvalidPacketLossPercent;
+
+export fn validate_sample_rate(sample_rate_hz: u32) !void {
+    if sample_rate_hz == 8000 {
+        return;
+    }
+    if sample_rate_hz == 12000 {
+        return;
+    }
+    if sample_rate_hz == 16000 {
+        return;
+    }
+    if sample_rate_hz == 24000 {
+        return;
+    }
+    if sample_rate_hz == 48000 {
+        return;
+    }
+
+    return error.InvalidSampleRate;
+}
+
+export fn validate_channels(channels: u8) !void {
+    if channels >= 1 && channels <= MAX_CHANNELS {
+        return;
+    }
+
+    return error.InvalidChannelCount;
+}
+
+export fn validate_frame_size_48k(frame_size: u32) !void {
+    if frame_size == 120 {
+        return;
+    }
+    if frame_size == 240 {
+        return;
+    }
+    if frame_size == 480 {
+        return;
+    }
+    if frame_size == 960 {
+        return;
+    }
+    if frame_size == 1920 {
+        return;
+    }
+    if frame_size == MAX_FRAME_SAMPLES_48K {
+        return;
+    }
+
+    return error.InvalidFrameSize;
+}
+
+export fn validate_decoder_config(config: &const OpusDecoderConfig) !void {
+    try validate_sample_rate(config.sample_rate_hz);
+    try validate_channels(config.channels);
+}
+
+export fn validate_encoder_config(config: &const OpusEncoderConfig) !void {
+    try validate_sample_rate(config.sample_rate_hz);
+    try validate_channels(config.channels);
+    if config.complexity > 10 {
+        return error.InvalidComplexity;
+    }
+    if config.packet_loss_percent > 100 {
+        return error.InvalidPacketLossPercent;
+    }
+}
