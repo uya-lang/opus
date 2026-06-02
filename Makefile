@@ -2,13 +2,14 @@ SHELL := /bin/bash
 
 BUILD_DIR := build
 BIN_DIR := bin
+SMOKE_SRC := src/opus/main.uya
+SMOKE_BIN := $(BUILD_DIR)/opus-smoke
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 
-.PHONY: all bench check clean require-uya test
+.PHONY: all bench check clean require-uya smoke test
 
-all: require-uya
-	@printf '%s\n' "No default build target yet. Use make check once the smoke target is added."
+all: smoke
 
 check: require-uya
 	@printf '%s\n' "Checking Opus scaffold..."
@@ -24,8 +25,15 @@ check: require-uya
 	@test -d build
 	@rg -q 'RFC 6716' docs/references.md
 	@rg -q 'Decoder Conformance' docs/conformance.md
+	@$(UYA) check $(SMOKE_SRC)
 	@$(UYA) --version >/dev/null
 	@printf '%s\n' "check: scaffold OK"
+
+smoke: require-uya
+	@mkdir -p $(BUILD_DIR)
+	@$(UYA) build $(SMOKE_SRC) -o $(SMOKE_BIN)
+	@$(SMOKE_BIN) >/dev/null
+	@printf '%s\n' "smoke: build OK"
 
 test: check
 	@printf '%s\n' "test: no Uya test files registered yet"

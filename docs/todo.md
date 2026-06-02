@@ -36,7 +36,7 @@
 - [x] 提供 `make test`。
 - [x] 提供 `make bench` 占位。
 - [x] 创建 `bench/baseline.md`，记录机器、编译器、backend、优化级别和基线格式。
-- [ ] 提供最小 smoke 文件，确认 Uya 编译器可构建项目。
+- [x] 提供最小 smoke 文件，确认 Uya 编译器可构建项目。
 
 验收标准：
 

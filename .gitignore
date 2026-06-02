@@ -1,6 +1,7 @@
 .agent/logs/*
 .agent/state*.json
 __pycache__/
+.uyacache/
 
 bin/*
 !bin/.gitkeep
