@@ -1,5 +1,13 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.celt.mode.CELT_MODE_48000_EFF_EBANDS;
+use src.opus.celt.mode.CELT_MODE_48000_MAX_LM;
+use src.opus.celt.mode.CELT_MODE_48000_NB_ALLOC_VECTORS;
+use src.opus.celt.mode.CELT_MODE_48000_NB_EBANDS;
+use src.opus.celt.mode.CELT_MODE_48000_NB_SHORT_MDCTS;
+use src.opus.celt.mode.CELT_MODE_48000_OVERLAP;
+use src.opus.celt.mode.CELT_MODE_48000_SAMPLE_RATE_HZ;
+use src.opus.celt.mode.CELT_MODE_48000_SHORT_MDCT_SIZE;
 use src.opus.celt.mode.CeltMode;
 use src.opus.celt.mode.celt_mode_48000;
 use src.opus.celt.mode.celt_mode_for_sample_rate;
@@ -14,6 +22,17 @@ test "celt mode exposes upstream 48k static mode metadata" {
     try assert_eq_i32(mode.nb_short_mdcts, 8);
     try assert_eq_i32(mode.short_mdct_size, 120);
     try assert_eq_i32(mode.nb_alloc_vectors, 11);
+}
+
+test "celt mode constants match upstream static mode fields" {
+    try assert_eq_i32(CELT_MODE_48000_SAMPLE_RATE_HZ as i32, 48000);
+    try assert_eq_i32(CELT_MODE_48000_OVERLAP, 120);
+    try assert_eq_i32(CELT_MODE_48000_NB_EBANDS, 21);
+    try assert_eq_i32(CELT_MODE_48000_EFF_EBANDS, 21);
+    try assert_eq_i32(CELT_MODE_48000_MAX_LM, 3);
+    try assert_eq_i32(CELT_MODE_48000_NB_SHORT_MDCTS, 8);
+    try assert_eq_i32(CELT_MODE_48000_SHORT_MDCT_SIZE, 120);
+    try assert_eq_i32(CELT_MODE_48000_NB_ALLOC_VECTORS, 11);
 }
 
 test "celt mode lookup accepts only the static Opus 48k mode for now" {

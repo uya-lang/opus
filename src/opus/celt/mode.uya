@@ -1,5 +1,14 @@
 export error CeltModeError;
 
+export const CELT_MODE_48000_SAMPLE_RATE_HZ: u32 = 48000;
+export const CELT_MODE_48000_OVERLAP: i32 = 120;
+export const CELT_MODE_48000_NB_EBANDS: i32 = 21;
+export const CELT_MODE_48000_EFF_EBANDS: i32 = 21;
+export const CELT_MODE_48000_MAX_LM: i32 = 3;
+export const CELT_MODE_48000_NB_SHORT_MDCTS: i32 = 8;
+export const CELT_MODE_48000_SHORT_MDCT_SIZE: i32 = 120;
+export const CELT_MODE_48000_NB_ALLOC_VECTORS: i32 = 11;
+
 export struct CeltMode {
     sample_rate_hz: u32,
     overlap: i32,
@@ -13,14 +22,14 @@ export struct CeltMode {
 
 export fn celt_mode_48000() CeltMode {
     return CeltMode{
-        sample_rate_hz: 48000,
-        overlap: 120,
-        nb_ebands: 21,
-        eff_ebands: 21,
-        max_lm: 3,
-        nb_short_mdcts: 8,
-        short_mdct_size: 120,
-        nb_alloc_vectors: 11,
+        sample_rate_hz: CELT_MODE_48000_SAMPLE_RATE_HZ,
+        overlap: CELT_MODE_48000_OVERLAP,
+        nb_ebands: CELT_MODE_48000_NB_EBANDS,
+        eff_ebands: CELT_MODE_48000_EFF_EBANDS,
+        max_lm: CELT_MODE_48000_MAX_LM,
+        nb_short_mdcts: CELT_MODE_48000_NB_SHORT_MDCTS,
+        short_mdct_size: CELT_MODE_48000_SHORT_MDCT_SIZE,
+        nb_alloc_vectors: CELT_MODE_48000_NB_ALLOC_VECTORS,
     };
 }
 
