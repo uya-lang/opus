@@ -42,4 +42,5 @@ date, commit, target, backend, opt, input, samples_or_symbols, time_ns, ns_per_u
 ```text
 date, commit, target, backend, opt, input, samples_or_symbols, time_ns, ns_per_unit, allocations, notes
 2026-06-02, working-tree, entropy_decode, Uya C99 backend, default, deterministic range symbols ft=2..33, 1024000 symbols, 51839000, 50 ns/symbol, 0, static buffers; checksum printed to keep decode work live
+2026-06-03, working-tree, mdct_scalar_20ms, Uya C99 backend, default, deterministic 480-bin q15 coefficients, 61440 samples, 76875000, 1251 ns/sample, 0, 64 scalar IMDCT transforms; twiddle init outside timed loop; checksum=14796472906345177792
 ```
