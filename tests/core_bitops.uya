@@ -1,0 +1,32 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.bitops.bit_clear_u32;
+use src.opus.core.bitops.bit_is_set_u32;
+use src.opus.core.bitops.bit_mask_u32;
+use src.opus.core.bitops.bit_set_u32;
+use src.opus.core.bitops.extract_bits_u32;
+use src.opus.core.bitops.low_mask_u32;
+
+test "bit mask helpers guard unsupported bit positions" {
+    try assert_eq_i32(bit_mask_u32(0) as i32, 1);
+    try assert_eq_i32(bit_mask_u32(15) as i32, 32768);
+    try assert_eq_i32(bit_mask_u32(31) as i32, -2147483647 - 1);
+    try assert_eq_i32(bit_mask_u32(32) as i32, 0);
+}
+
+test "bit set and clear helpers preserve unrelated bits" {
+    try assert(bit_is_set_u32(0x80000000, 31), "top bit is set");
+    try assert(!bit_is_set_u32(0x80000000, 30), "adjacent bit is clear");
+    try assert(!bit_is_set_u32(0x80000000, 32), "unsupported bit is never set");
+    try assert_eq_i32(bit_set_u32(0, 3) as i32, 8);
+    try assert_eq_i32(bit_clear_u32(0xffffffff, 3) as i32, -9);
+}
+
+test "low masks and extraction handle field boundaries" {
+    try assert_eq_i32(low_mask_u32(0) as i32, 0);
+    try assert_eq_i32(low_mask_u32(4) as i32, 15);
+    try assert_eq_i32(low_mask_u32(32) as i32, -1);
+    try assert_eq_i32(extract_bits_u32(0b10110100, 2, 3) as i32, 5);
+    try assert_eq_i32(extract_bits_u32(0xffffffff, 28, 8) as i32, 15);
+    try assert_eq_i32(extract_bits_u32(0xffffffff, 32, 1) as i32, 0);
+}

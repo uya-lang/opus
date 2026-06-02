@@ -150,7 +150,7 @@
 - [x] 实现 saturating add/sub。
 - [x] 实现 common multiply helpers。
 - [x] 实现 rounded shift helpers。
-- [ ] 实现 `core/bitops.uya`。
+- [x] 实现 `core/bitops.uya`。
 - [ ] 实现 `celt_ilog`。
 - [ ] 实现 `clz` fallback。
 - [ ] 实现 `dsp/filters.uya` 基础 FIR/IIR helper。

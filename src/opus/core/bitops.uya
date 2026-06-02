@@ -1,0 +1,37 @@
+export fn bit_mask_u32(bit: u32) u32 {
+    if bit >= 32 {
+        return 0;
+    }
+    return 1 << (bit as i32);
+}
+
+export fn bit_is_set_u32(value: u32, bit: u32) bool {
+    const mask: u32 = bit_mask_u32(bit);
+    return mask != 0 && (value & mask) != 0;
+}
+
+export fn bit_set_u32(value: u32, bit: u32) u32 {
+    return value | bit_mask_u32(bit);
+}
+
+export fn bit_clear_u32(value: u32, bit: u32) u32 {
+    return value & ~bit_mask_u32(bit);
+}
+
+export fn low_mask_u32(width: u32) u32 {
+    if width == 0 {
+        return 0;
+    }
+    if width >= 32 {
+        return 0xffffffff;
+    }
+    return (1 << (width as i32)) - 1;
+}
+
+export fn extract_bits_u32(value: u32, offset: u32, width: u32) u32 {
+    if offset >= 32 {
+        return 0;
+    }
+    const shifted: u32 = value >> (offset as i32);
+    return shifted & low_mask_u32(width);
+}
