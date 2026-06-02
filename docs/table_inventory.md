@@ -47,4 +47,27 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_TRANSITION_LP_B_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][3]` | 15 | 258613290 | 2147483648 |
 | `SILK_TRANSITION_LP_A_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][2]` | 10 | 268602790 | 2147483648 |
 
-Deferred for CELT foundation work: generated FFT bit-reversal tables, FFT twiddles, MDCT twiddles, pulse cache payloads, and full NLSF codebooks. They are large generated tables tied directly to the CELT mode/MDCT and SILK NLSF implementations and should be imported with those modules' golden tests.
+## Deferred Table Families
+
+The following upstream table families are required for later decoder conformance, but are intentionally not imported in this table-only step because their correct validation depends on the module that consumes them. They are inventoried here so later tasks have a fixed source path and verification target.
+
+| Family | Upstream source | Primary consumer | Import target | Verification requirement |
+| --- | --- | --- | --- | --- |
+| CELT pulse cache | `celt/static_modes_fixed.h` `cache_index50`, `cache_bits50`, `cache_caps50`; `celt/cwrs.c` `CELT_PVQ_U_DATA`, `CELT_PVQ_U_ROW` | PVQ/CWRS | `src/opus/celt/cwrs.uya` or `src/opus/celt/tables.uya` | exhaustive small-dimension CWRS plus hash/length for imported cache rows |
+| CELT FFT bit reversal | `celt/static_modes_fixed.h` `fft_bitrev480`, `fft_bitrev240`, `fft_bitrev120`, `fft_bitrev60` | MDCT/FFT | `src/opus/dsp/mdct.uya` or `src/opus/celt/tables.uya` | FFT permutation golden tests and table hash |
+| CELT FFT twiddles | `celt/static_modes_fixed.h` `fft_twiddles48000_960`; NE10 variants are architecture-specific and out of first portable backend scope | MDCT/FFT | `src/opus/dsp/mdct.uya` | scalar FFT/MDCT golden tests and table hash |
+| CELT MDCT twiddles | `celt/static_modes_fixed.h` `mdct_twiddles960` | MDCT | `src/opus/dsp/mdct.uya` | IMDCT golden tests and overlap-add golden tests |
+| CELT coarse energy probability model | `celt/quant_bands.c` `e_prob_model`, `pred_coef`, `beta_coef`, `beta_intra` | energy band quantization | `src/opus/celt/quant_bands.uya` | coarse/fine energy decode vectors and hash/shape checks |
+| CELT band decode helper tables | `celt/bands.c` `ordery_table`, `exp2_table8`, `bit_interleave_table`, `bit_deinterleave_table`; `celt/vq.c` `SPREAD_FACTOR` | PVQ band shape decode | `src/opus/celt/quant_bands.uya` or `src/opus/celt/cwrs.uya` | PVQ/band-shape roundtrip and hash/length checks |
+| CELT pitch/deemphasis helper constants | `celt/pitch.c` `second_check`; `celt/celt.c` gain tables; `celt/celt_decoder.c` `sinc_filter` | pitch, deemphasis, PLC-adjacent decode | `src/opus/dsp/pitch.uya`, `src/opus/celt/mode.uya`, or decoder modules | targeted DSP golden tests before decoder integration |
+| SILK NLSF NB/MB codebooks | `silk/tables_NLSF_CB_NB_MB.c` | SILK NLSF decode | `src/opus/silk/tables.uya` plus NLSF module | NLSF unpack/decode golden tests, table hash/length |
+| SILK NLSF WB codebooks | `silk/tables_NLSF_CB_WB.c` | SILK NLSF decode | `src/opus/silk/tables.uya` plus NLSF module | NLSF unpack/decode golden tests, table hash/length |
+| SILK LTP codebooks | `silk/tables_LTP.c` | LTP gain decode | `src/opus/silk/tables.uya` plus LTP module | LTP gain vector decode golden tests, table hash/length |
+| SILK gain tables | `silk/tables_gain.c` | gain decode | `src/opus/silk/tables.uya` plus gain module | gain index decode golden tests, table hash/length |
+| SILK pulse shell tables | `silk/tables_pulses_per_block.c`, `silk/shell_coder.c` | pulse decode | `src/opus/silk/tables.uya` plus pulse module | pulse shell decode vectors and iCDF shape checks |
+| SILK pitch estimation tables | `silk/pitch_est_tables.c` | encoder-side or later analysis work | encoder/analysis module, not decoder-first path | defer until encoder quality tasks; hash/length if imported |
+| SILK resampler ROM | `silk/resampler_rom.c`, `silk/resampler_rom.h` | resampler | `src/opus/dsp/resampler.uya` | resampler golden tests for every supported conversion |
+| SILK LSF cosine table | `silk/table_LSF_cos.c` | NLSF conversion | `src/opus/silk/tables.uya` plus NLSF module | NLSF-to-LPC golden tests |
+| SILK sigmoid/VAD/control rate tables | `silk/sigm_Q15.c`, `silk/VAD.c`, `silk/control_SNR.c` | encoder/VAD/control | encoder/control modules | defer until encoder/control tasks; hash/length if imported |
+
+Acceptance status: table errors are now caught before full decode by `make test`, which runs `tools/check_tables.uya` for Uya-visible smoke checks and `tools/check_tables.py` for exact source-table length, hash, iCDF shape, and monotonicity checks.

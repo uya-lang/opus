@@ -168,7 +168,7 @@
 
 ## 6. 表迁移和校验
 
-- [~] 盘点 RFC/upstream 必需表。
+- [x] 盘点 RFC/upstream 必需表。
 - [x] 创建 `silk/tables.uya`。
 - [x] 创建 `celt/tables.uya`。
 - [x] 创建 `entropy/cdf.uya`。
@@ -184,7 +184,7 @@
 
 验收标准：
 
-- [ ] 表错误能在单元测试中快速定位，而不是等 full decode 才暴露。
+- [x] 表错误能在单元测试中快速定位，而不是等 full decode 才暴露。
 
 ## 7. CELT 基础
 
