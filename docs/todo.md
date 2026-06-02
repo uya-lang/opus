@@ -236,7 +236,7 @@
 验收标准：
 
 - [ ] CELT-only decoder 通过目标 vectors。
-- [ ] 丢包前后的 state 更新稳定。
+- [x] 丢包前后的 state 更新稳定。
 
 ## 9. SILK 基础
 

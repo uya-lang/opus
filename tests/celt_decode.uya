@@ -9,6 +9,7 @@ use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
+use src.opus.celt.state.celt_state_mark_lost_frame;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
 
@@ -318,6 +319,34 @@ test "celt decode handles random legal CELT packets without crashing" {
         try celt_decode_random_packet_once(&packet[0:(payload_len + 1)], &scratch);
         i = i + 1;
     }
+}
+
+test "celt decode remains state-stable across a lost frame" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+
+    var payload: [byte: 320] = [0: 320];
+    var pcm: [i16: 960] = [0: 960];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    _ = try celt_decode_stereo_i16(&state, &payload[0:320], &pcm[0:960], &scratch);
+    state.old_ebands_q8[0] = 100;
+    state.old_loge_q8[21] = -80;
+    state.overlap_mem_q15[0] = 1200;
+    state.preemph_mem_q15[1] = -6000;
+
+    try celt_state_mark_lost_frame(&state);
+    try assert_eq_i32(state.loss_count, 1);
+    try assert_eq_i32(state.old_ebands_q8[0] as i32, 50);
+    try assert_eq_i32(state.old_loge_q8[21] as i32, -40);
+    try assert_eq_i32(state.overlap_mem_q15[0] as i32, 600);
+    try assert_eq_i32(state.preemph_mem_q15[1], -3000);
+
+    _ = try celt_decode_stereo_i16(&state, &payload[0:320], &pcm[0:960], &scratch);
+    try assert_eq_i32(state.loss_count, 0);
+    try assert(state.old_loge_q8[20] == state.old_ebands_q8[20], "normal decode after loss must republish left energy history");
+    try assert(state.old_loge_q8[41] == state.old_ebands_q8[41], "normal decode after loss must republish right energy history");
 }
 
 test "celt mono decode rejects unsupported current configurations" {

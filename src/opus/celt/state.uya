@@ -107,6 +107,56 @@ export fn celt_state_reset(state: &CeltDecoderState) void {
     celt_state_clear_history(state);
 }
 
+fn decay_i16_half(value: i16) i16 {
+    return (value as i32 / 2) as i16;
+}
+
+fn decay_i32_half(value: i32) i32 {
+    return value / 2;
+}
+
+export fn celt_state_mark_lost_frame(state: &CeltDecoderState) !void {
+    if state.channels < 1 || state.channels > (CELT_STATE_MAX_CHANNELS as i32) || state.frame_size <= 0 || state.overlap <= 0 {
+        return error.CeltStateError;
+    }
+    if state.start_band < 0 || state.end_band <= state.start_band || state.end_band > state.mode.nb_ebands {
+        return error.CeltStateError;
+    }
+
+    var channel: i32 = 0;
+    while channel < state.channels {
+        state.preemph_mem_q15[channel as usize] = decay_i32_half(state.preemph_mem_q15[channel as usize]);
+
+        var sample: i32 = 0;
+        while sample < state.overlap {
+            const overlap_index: usize = try celt_state_overlap_index(state, channel, sample);
+            if overlap_index >= CELT_OVERLAP_HISTORY_LEN {
+                return error.CeltStateError;
+            }
+            state.overlap_mem_q15[overlap_index] = decay_i16_half(state.overlap_mem_q15[overlap_index]);
+            sample = sample + 1;
+        }
+
+        var band: i32 = state.start_band;
+        while band < state.end_band {
+            const energy_index: usize = try celt_state_energy_index(state, channel, band);
+            if energy_index >= CELT_ENERGY_HISTORY_LEN {
+                return error.CeltStateError;
+            }
+            state.old_ebands_q8[energy_index] = decay_i16_half(state.old_ebands_q8[energy_index]);
+            state.old_band_e_q8[energy_index] = decay_i16_half(state.old_band_e_q8[energy_index]);
+            state.old_loge_q8[energy_index] = decay_i16_half(state.old_loge_q8[energy_index]);
+            band = band + 1;
+        }
+        channel = channel + 1;
+    }
+
+    if state.loss_count < 127 {
+        state.loss_count = state.loss_count + 1;
+    }
+    state.rng = state.rng * 1664525 + 1013904223 + (state.loss_count as u32);
+}
+
 export fn celt_state_configure_frame(state: &CeltDecoderState, frame_size: i32, start_band: i32, end_band: i32) !void {
     if start_band < 0 || end_band <= start_band || end_band > state.mode.nb_ebands {
         return error.CeltStateError;

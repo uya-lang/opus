@@ -8,6 +8,7 @@ use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_energy_index;
 use src.opus.celt.state.celt_state_init;
+use src.opus.celt.state.celt_state_mark_lost_frame;
 use src.opus.celt.state.celt_state_overlap_index;
 use src.opus.celt.state.celt_state_reset;
 
@@ -120,4 +121,38 @@ test "celt state reset clears histories without changing channel layout" {
     try assert_eq_i32(state.decode_mem[1919], 0);
     try assert_eq_i32(state.rng as i32, 0);
     try assert_eq_i32(state.loss_count, 0);
+}
+
+test "celt state lost frame update decays active histories and saturates count" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 480, 2, 6);
+
+    const left_active: usize = try celt_state_energy_index(&state, 0, 2);
+    const right_active: usize = try celt_state_energy_index(&state, 1, 5);
+    const inactive: usize = try celt_state_energy_index(&state, 0, 1);
+    state.old_ebands_q8[left_active] = 80;
+    state.old_band_e_q8[right_active] = -60;
+    state.old_loge_q8[inactive] = 99;
+    state.overlap_mem_q15[0] = 1000;
+    state.overlap_mem_q15[120] = -800;
+    state.preemph_mem_q15[0] = 9000;
+    state.preemph_mem_q15[1] = -7000;
+    state.rng = 17;
+
+    try celt_state_mark_lost_frame(&state);
+
+    try assert_eq_i32(state.loss_count, 1);
+    try assert(state.rng != 17, "lost-frame update must advance the CELT rng");
+    try assert_eq_i32(state.old_ebands_q8[left_active] as i32, 40);
+    try assert_eq_i32(state.old_band_e_q8[right_active] as i32, -30);
+    try assert_eq_i32(state.old_loge_q8[inactive] as i32, 99);
+    try assert_eq_i32(state.overlap_mem_q15[0] as i32, 500);
+    try assert_eq_i32(state.overlap_mem_q15[120] as i32, -400);
+    try assert_eq_i32(state.preemph_mem_q15[0], 4500);
+    try assert_eq_i32(state.preemph_mem_q15[1], -3500);
+
+    state.loss_count = 127;
+    try celt_state_mark_lost_frame(&state);
+    try assert_eq_i32(state.loss_count, 127);
 }
