@@ -1,6 +1,6 @@
 export error CeltCwrsError;
 
-export const CELT_CWRS_MAX_N: i32 = 16;
+export const CELT_CWRS_MAX_N: i32 = 22;
 export const CELT_CWRS_MAX_K: i32 = 32;
 const U32_MAX_U64: u64 = 4294967295;
 

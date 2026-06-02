@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
 use src.opus.celt.mode.CELT_MODE_48000_EFF_EBANDS;
 use src.opus.celt.mode.CELT_MODE_48000_MAX_LM;
 use src.opus.celt.mode.CELT_MODE_48000_NB_ALLOC_VECTORS;
@@ -11,6 +12,7 @@ use src.opus.celt.mode.CELT_MODE_48000_SHORT_MDCT_SIZE;
 use src.opus.celt.mode.CeltMode;
 use src.opus.celt.mode.celt_mode_eband_boundary_5ms;
 use src.opus.celt.mode.celt_mode_eband_width_5ms;
+use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
 use src.opus.celt.mode.celt_mode_frame_size_from_lm;
 use src.opus.celt.mode.celt_mode_lm_from_frame_size;
 use src.opus.celt.mode.celt_mode_48000;
@@ -118,6 +120,20 @@ test "celt mode maps frame sizes back to LM" {
     try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 240), 1);
     try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 480), 2);
     try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 960), 3);
+}
+
+test "celt mode maps Opus bandwidths to active CELT end bands" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32(try celt_mode_end_band_for_bandwidth(&mode, OpusBandwidth.NARROWBAND), 13);
+    try assert_eq_i32(try celt_mode_end_band_for_bandwidth(&mode, OpusBandwidth.WIDEBAND), 17);
+    try assert_eq_i32(try celt_mode_end_band_for_bandwidth(&mode, OpusBandwidth.SUPERWIDEBAND), 19);
+    try assert_eq_i32(try celt_mode_end_band_for_bandwidth(&mode, OpusBandwidth.FULLBAND), 21);
+
+    const mediumband: !i32 = celt_mode_end_band_for_bandwidth(&mode, OpusBandwidth.MEDIUMBAND);
+    match mediumband {
+        error.CeltModeError => {}
+        else => { try assert(false, "CELT-only bandwidth helper does not expose MB"); }
+    }
 }
 
 test "celt mode frame size LM mapping rejects unsupported values" {

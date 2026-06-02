@@ -1,3 +1,4 @@
+use src.opus.core.types.OpusBandwidth;
 use src.opus.celt.tables.CELT_EBAND_5MS_LEN;
 use src.opus.celt.tables.celt_eband_5ms_boundary;
 
@@ -11,6 +12,10 @@ export const CELT_MODE_48000_MAX_LM: i32 = 3;
 export const CELT_MODE_48000_NB_SHORT_MDCTS: i32 = 8;
 export const CELT_MODE_48000_SHORT_MDCT_SIZE: i32 = 120;
 export const CELT_MODE_48000_NB_ALLOC_VECTORS: i32 = 11;
+export const CELT_BANDWIDTH_NB_END_BAND: i32 = 13;
+export const CELT_BANDWIDTH_WB_END_BAND: i32 = 17;
+export const CELT_BANDWIDTH_SWB_END_BAND: i32 = 19;
+export const CELT_BANDWIDTH_FB_END_BAND: i32 = 21;
 
 export struct CeltMode {
     sample_rate_hz: u32,
@@ -95,4 +100,24 @@ export fn celt_mode_lm_from_frame_size(mode: &const CeltMode, frame_size: i32) !
     }
 
     return error.CeltModeError;
+}
+
+export fn celt_mode_end_band_for_bandwidth(mode: &const CeltMode, bandwidth: OpusBandwidth) !i32 {
+    var end_band: i32 = CELT_BANDWIDTH_FB_END_BAND;
+    if bandwidth == OpusBandwidth.NARROWBAND {
+        end_band = CELT_BANDWIDTH_NB_END_BAND;
+    } else if bandwidth == OpusBandwidth.WIDEBAND {
+        end_band = CELT_BANDWIDTH_WB_END_BAND;
+    } else if bandwidth == OpusBandwidth.SUPERWIDEBAND {
+        end_band = CELT_BANDWIDTH_SWB_END_BAND;
+    } else if bandwidth == OpusBandwidth.FULLBAND {
+        end_band = CELT_BANDWIDTH_FB_END_BAND;
+    } else {
+        return error.CeltModeError;
+    }
+
+    if end_band <= 0 || end_band > mode.nb_ebands {
+        return error.CeltModeError;
+    }
+    return end_band;
 }

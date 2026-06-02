@@ -1,8 +1,10 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
 use src.opus.celt.decode.CeltMonoDecodeScratch;
 use src.opus.celt.decode.celt_decode_mono_i16;
 use src.opus.celt.decode.celt_decode_stereo_i16;
+use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
@@ -84,6 +86,63 @@ test "celt stereo decode rejects mono state and short output" {
     };
 }
 
+fn assert_decode_bandwidth(bandwidth: OpusBandwidth, expected_end_band: i32) !void {
+    if expected_end_band <= 0 || expected_end_band > 21 {
+        return error.CeltDecodeError;
+    }
+
+    var mono: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&mono, 1);
+    const mono_end_band: i32 = try celt_mode_end_band_for_bandwidth(&mono.mode, bandwidth);
+    try assert_eq_i32(mono_end_band, expected_end_band);
+    try celt_state_configure_frame(&mono, 120, 0, mono_end_band);
+
+    var mono_payload: [byte: 64] = [0: 64];
+    var mono_pcm: [i16: 120] = [77: 120];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    const mono_decoded: usize = try celt_decode_mono_i16(&mono, &mono_payload[0:64], &mono_pcm[0:120], &scratch);
+    try assert_eq_i32(mono_decoded as i32, 120);
+    try assert_eq_i32(mono.end_band, expected_end_band);
+    const mono_top_index: usize = (expected_end_band - 1) as usize;
+    if mono_top_index >= 42 {
+        return error.CeltDecodeError;
+    }
+    try assert(mono.old_loge_q8[mono_top_index] == mono.old_ebands_q8[mono_top_index], "mono decode must update the active top band");
+
+    var stereo: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&stereo, 2);
+    const stereo_end_band: i32 = try celt_mode_end_band_for_bandwidth(&stereo.mode, bandwidth);
+    try assert_eq_i32(stereo_end_band, expected_end_band);
+    try celt_state_configure_frame(&stereo, 120, 0, stereo_end_band);
+
+    var stereo_payload: [byte: 128] = [0: 128];
+    var stereo_pcm: [i16: 240] = [88: 240];
+    const stereo_decoded: usize = try celt_decode_stereo_i16(&stereo, &stereo_payload[0:128], &stereo_pcm[0:240], &scratch);
+    try assert_eq_i32(stereo_decoded as i32, 120);
+    try assert_eq_i32(stereo.end_band, expected_end_band);
+    const right_top_index: usize = (21 + expected_end_band - 1) as usize;
+    if right_top_index >= 42 {
+        return error.CeltDecodeError;
+    }
+    try assert(stereo.old_loge_q8[right_top_index] == stereo.old_ebands_q8[right_top_index], "stereo decode must update the active right top band");
+}
+
+test "celt decode supports NB active band range" {
+    try assert_decode_bandwidth(OpusBandwidth.NARROWBAND, 13);
+}
+
+test "celt decode supports WB active band range" {
+    try assert_decode_bandwidth(OpusBandwidth.WIDEBAND, 17);
+}
+
+test "celt decode supports SWB active band range" {
+    try assert_decode_bandwidth(OpusBandwidth.SUPERWIDEBAND, 19);
+}
+
+test "celt decode supports FB active band range" {
+    try assert_decode_bandwidth(OpusBandwidth.FULLBAND, 21);
+}
+
 test "celt mono decode rejects unsupported current configurations" {
     var stereo: CeltDecoderState = CeltDecoderState{};
     try celt_state_init(&stereo, 2);
@@ -105,12 +164,5 @@ test "celt mono decode rejects unsupported current configurations" {
     match bad_duration {
         error.CeltDecodeError => {}
         else => { try assert(false, "duration support is a separate CELT-only task"); }
-    };
-
-    try celt_state_configure_frame(&mono, 120, 0, 21);
-    const bad_band: !usize = celt_decode_mono_i16(&mono, &payload[0:8], &pcm[0:120], &scratch);
-    match bad_band {
-        error.CeltDecodeError => {}
-        else => { try assert(false, "wide band support must wait for full PVQ dimensions"); }
     };
 }

@@ -224,7 +224,7 @@
 - [x] 实现 IMDCT integration。
 - [x] 实现 CELT-only mono decode。
 - [x] 实现 CELT-only stereo decode。
-- [ ] 支持 NB/WB/SWB/FB。
+- [x] 支持 NB/WB/SWB/FB。
 - [ ] 支持 2.5ms。
 - [ ] 支持 5ms。
 - [ ] 支持 10ms。
