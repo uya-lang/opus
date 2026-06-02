@@ -1,0 +1,8 @@
+export const MAX_CHANNELS: u8 = 2;
+export const MAX_FRAME_MS: u32 = 60;
+export const MAX_PACKET_MS: u32 = 120;
+export const SAMPLE_RATE_48K: u32 = 48000;
+export const SAMPLES_PER_MS_48K: u32 = 48;
+export const MAX_FRAME_SAMPLES_48K: u32 = 2880;
+export const MAX_PACKET_SAMPLES_48K: u32 = 5760;
+export const MAX_FRAME_BYTES: usize = 1275;

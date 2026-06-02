@@ -1,0 +1,28 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.constants.MAX_CHANNELS;
+use src.opus.core.constants.MAX_FRAME_BYTES;
+use src.opus.core.constants.MAX_FRAME_MS;
+use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.MAX_PACKET_MS;
+use src.opus.core.constants.MAX_PACKET_SAMPLES_48K;
+use src.opus.core.constants.SAMPLE_RATE_48K;
+use src.opus.core.constants.SAMPLES_PER_MS_48K;
+
+test "opus channel and byte limits are stable" {
+    try assert_eq_i32(MAX_CHANNELS as i32, 2);
+    try assert_eq_i32(MAX_FRAME_BYTES as i32, 1275);
+}
+
+test "opus frame and packet duration limits are stable" {
+    try assert_eq_i32(MAX_FRAME_MS as i32, 60);
+    try assert_eq_i32(MAX_PACKET_MS as i32, 120);
+    try assert(MAX_PACKET_MS == (MAX_FRAME_MS * 2), "packet limit is two max frames");
+}
+
+test "48k sample limits are derived from duration limits" {
+    try assert_eq_i32(SAMPLE_RATE_48K as i32, 48000);
+    try assert_eq_i32(SAMPLES_PER_MS_48K as i32, 48);
+    try assert(MAX_FRAME_SAMPLES_48K == (MAX_FRAME_MS * SAMPLES_PER_MS_48K), "frame samples");
+    try assert(MAX_PACKET_SAMPLES_48K == (MAX_PACKET_MS * SAMPLES_PER_MS_48K), "packet samples");
+}

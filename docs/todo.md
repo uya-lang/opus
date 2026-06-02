@@ -54,13 +54,13 @@
 - [x] 定义 `PacketInfo`。
 - [x] 定义 `OpusDecoderConfig`。
 - [x] 定义 `OpusEncoderConfig`。
-- [ ] 实现 `core/constants.uya`。
-- [ ] 定义 `MAX_CHANNELS`。
-- [ ] 定义 `MAX_FRAME_MS`。
-- [ ] 定义 `MAX_PACKET_MS`。
-- [ ] 定义 `MAX_FRAME_SAMPLES_48K`。
-- [ ] 定义 `MAX_PACKET_SAMPLES_48K`。
-- [ ] 定义 `MAX_FRAME_BYTES`。
+- [x] 实现 `core/constants.uya`。
+- [x] 定义 `MAX_CHANNELS`。
+- [x] 定义 `MAX_FRAME_MS`。
+- [x] 定义 `MAX_PACKET_MS`。
+- [x] 定义 `MAX_FRAME_SAMPLES_48K`。
+- [x] 定义 `MAX_PACKET_SAMPLES_48K`。
+- [x] 定义 `MAX_FRAME_BYTES`。
 - [ ] 实现 `core/errors.uya`。
 - [ ] 实现参数校验 helper。
 - [ ] 测试非法采样率。
