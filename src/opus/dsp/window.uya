@@ -1,0 +1,61 @@
+export error DspWindowError;
+
+export enum WindowKind {
+    RECTANGULAR = 0,
+    SINE = 1,
+    HANN = 2,
+}
+
+export struct WindowTableQ15 {
+    kind: WindowKind,
+    values_q15: &[i16],
+    length: usize,
+    symmetric: bool,
+}
+
+export fn window_table_q15_init(kind: WindowKind, values_q15: &[i16], symmetric: bool) !WindowTableQ15 {
+    if values_q15.len == 0 {
+        return error.DspWindowError;
+    }
+    return WindowTableQ15{
+        kind: kind,
+        values_q15: values_q15,
+        length: values_q15.len,
+        symmetric: symmetric,
+    };
+}
+
+export fn window_table_q15_value(table: &WindowTableQ15, index: usize) !i16 {
+    if index >= table.length {
+        return error.DspWindowError;
+    }
+    return table.values_q15.ptr[index];
+}
+
+export fn window_table_q15_is_nonnegative(table: &WindowTableQ15) bool {
+    var i: usize = 0;
+    while i < table.length {
+        if table.values_q15.ptr[i] < 0 {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+export fn window_table_q15_is_symmetric(table: &WindowTableQ15) bool {
+    if !table.symmetric {
+        return false;
+    }
+
+    var left: usize = 0;
+    var right: usize = table.length - 1;
+    while left < right {
+        if table.values_q15.ptr[left] != table.values_q15.ptr[right] {
+            return false;
+        }
+        left = left + 1;
+        right = right - 1;
+    }
+    return true;
+}

@@ -1,0 +1,50 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.dsp.window.DspWindowError;
+use src.opus.dsp.window.WindowKind;
+use src.opus.dsp.window.WindowTableQ15;
+use src.opus.dsp.window.window_table_q15_init;
+use src.opus.dsp.window.window_table_q15_is_nonnegative;
+use src.opus.dsp.window.window_table_q15_is_symmetric;
+use src.opus.dsp.window.window_table_q15_value;
+
+test "window table q15 records explicit metadata and suffixes" {
+    var values_q15: [i16: 5] = [0, 16384, 32767, 16384, 0];
+    const table: WindowTableQ15 = try window_table_q15_init(WindowKind.SINE, &values_q15[0:5], true);
+
+    try assert(table.kind == WindowKind.SINE, "kind is retained");
+    try assert_eq_i32(table.length as i32, 5);
+    try assert(table.symmetric, "symmetric flag retained");
+    try assert_eq_i32((try window_table_q15_value(&table, 2)) as i32, 32767);
+}
+
+test "window table q15 validates shape helpers" {
+    var symmetric_q15: [i16: 4] = [0, 100, 100, 0];
+    var asymmetric_q15: [i16: 4] = [0, 100, 80, 0];
+    var negative_q15: [i16: 3] = [0, -1, 0];
+    const sym: WindowTableQ15 = try window_table_q15_init(WindowKind.HANN, &symmetric_q15[0:4], true);
+    const asym: WindowTableQ15 = try window_table_q15_init(WindowKind.HANN, &asymmetric_q15[0:4], true);
+    const neg: WindowTableQ15 = try window_table_q15_init(WindowKind.HANN, &negative_q15[0:3], true);
+
+    try assert(window_table_q15_is_symmetric(&sym), "symmetric table");
+    try assert(!window_table_q15_is_symmetric(&asym), "asymmetric contents");
+    try assert(window_table_q15_is_nonnegative(&sym), "nonnegative table");
+    try assert(!window_table_q15_is_nonnegative(&neg), "negative coefficient");
+}
+
+test "window table q15 rejects empty and out of range access" {
+    var empty_q15: [i16: 0] = [0: 0];
+    const empty_res: !WindowTableQ15 = window_table_q15_init(WindowKind.RECTANGULAR, &empty_q15[0:0], true);
+    match empty_res {
+        error.DspWindowError => {}
+        else => { try assert(false, "empty window table must fail"); }
+    }
+
+    var values_q15: [i16: 1] = [32767];
+    const table: WindowTableQ15 = try window_table_q15_init(WindowKind.RECTANGULAR, &values_q15[0:1], true);
+    const value_res: !i16 = window_table_q15_value(&table, 1);
+    match value_res {
+        error.DspWindowError => {}
+        else => { try assert(false, "out of range access must fail"); }
+    }
+}
