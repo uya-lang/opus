@@ -1,0 +1,9 @@
+.agent/logs/*
+.agent/state*.json
+__pycache__/
+
+bin/*
+!bin/.gitkeep
+
+build/*
+!build/.gitkeep
