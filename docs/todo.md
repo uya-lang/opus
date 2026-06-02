@@ -218,7 +218,7 @@
 - [x] 实现 spreading decision decode。
 - [x] 实现 bit allocation integration。
 - [x] 实现 PVQ band shape decode。
-- [ ] 实现 stereo intensity decode。
+- [x] 实现 stereo intensity decode。
 - [ ] 实现 anti-collapse decode。
 - [ ] 实现 denormalize bands。
 - [ ] 实现 IMDCT integration。

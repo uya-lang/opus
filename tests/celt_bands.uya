@@ -1,6 +1,10 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.bands.celt_band_shape_normalize_q15;
+use src.opus.celt.bands.celt_apply_intensity_stereo_bands_q15;
+use src.opus.celt.bands.celt_apply_intensity_stereo_q15;
+use src.opus.celt.bands.celt_decode_intensity_start_band;
+use src.opus.celt.bands.celt_intensity_stereo_weights_q14;
 use src.opus.celt.bands.celt_decode_band_shape;
 use src.opus.celt.bands.celt_decode_band_shapes;
 use src.opus.celt.cwrs.celt_encode_pulses;
@@ -97,6 +101,85 @@ test "celt band shapes decode consecutive band slices" {
     try assert_eq_i32(shape_q15[2] as i32, 0);
 }
 
+test "celt intensity start band decodes bounded threshold" {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+    ec_enc_uint(&enc, 2, 5);
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    const intensity: i32 = try celt_decode_intensity_start_band(&dec, 3, 7, true);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(intensity, 5);
+
+    var empty_dec: EcDec = EcDec{};
+    ec_dec_init(&empty_dec, &packet[0:1]);
+    try assert_eq_i32(try celt_decode_intensity_start_band(&empty_dec, 3, 7, false), 7);
+}
+
+test "celt intensity stereo weights follow channel energy ratio" {
+    var weights: [i16: 2] = [0: 2];
+    try celt_intensity_stereo_weights_q14(3, 4, &weights[0:2]);
+
+    try assert_eq_i32(weights[0] as i32, 9830);
+    try assert_eq_i32(weights[1] as i32, 13107);
+
+    try celt_intensity_stereo_weights_q14(0, 0, &weights[0:2]);
+    try assert_eq_i32(weights[0] as i32, 11585);
+    try assert_eq_i32(weights[1] as i32, 11585);
+}
+
+test "celt intensity stereo applies mono shape to channel pair" {
+    var mono: [i16: 3] = [32767, -16384, 8192];
+    var left: [i16: 3] = [0: 3];
+    var right: [i16: 3] = [0: 3];
+
+    try celt_apply_intensity_stereo_q15(&mono[0:3], &left[0:3], &right[0:3], 3, 4);
+
+    try assert_eq_i32(left[0] as i32, 19659);
+    try assert_eq_i32(right[0] as i32, 26213);
+    try assert_eq_i32(left[1] as i32, -9830);
+    try assert_eq_i32(right[1] as i32, -13107);
+    try assert_eq_i32(left[2] as i32, 4915);
+    try assert_eq_i32(right[2] as i32, 6554);
+}
+
+test "celt intensity stereo bands only touch threshold and above" {
+    var dims: [i32: 3] = [2, 1, 2];
+    var left_energy: [i32: 3] = [1, 3, 0];
+    var right_energy: [i32: 3] = [1, 4, 5];
+    var mono: [i16: 5] = [111, 222, 32767, 8192, -8192];
+    var left: [i16: 5] = [7: 5];
+    var right: [i16: 5] = [9: 5];
+
+    try celt_apply_intensity_stereo_bands_q15(
+        0,
+        3,
+        1,
+        &dims[0:3],
+        &left_energy[0:3],
+        &right_energy[0:3],
+        &mono[0:5],
+        &left[0:5],
+        &right[0:5],
+    );
+
+    try assert_eq_i32(left[0] as i32, 7);
+    try assert_eq_i32(right[0] as i32, 9);
+    try assert_eq_i32(left[1] as i32, 7);
+    try assert_eq_i32(right[1] as i32, 9);
+    try assert_eq_i32(left[2] as i32, 19659);
+    try assert_eq_i32(right[2] as i32, 26213);
+    try assert_eq_i32(left[3] as i32, 0);
+    try assert_eq_i32(right[3] as i32, 8192);
+    try assert_eq_i32(left[4] as i32, 0);
+    try assert_eq_i32(right[4] as i32, -8192);
+}
+
 test "celt band shape decode validates dimensions and buffers" {
     var packet: [byte: 1] = [0];
     var dec: EcDec = EcDec{};
@@ -114,5 +197,18 @@ test "celt band shape decode validates dimensions and buffers" {
     match short_output {
         error.CeltBandsError => {}
         else => { try assert(false, "short PVQ output buffer must fail"); }
+    }
+
+    const bad_intensity: !i32 = celt_decode_intensity_start_band(&dec, 5, 4, true);
+    match bad_intensity {
+        error.CeltBandsError => {}
+        else => { try assert(false, "invalid intensity band range must fail"); }
+    }
+
+    var weights: [i16: 1] = [0];
+    const short_weights: !void = celt_intensity_stereo_weights_q14(1, 1, &weights[0:1]);
+    match short_weights {
+        error.CeltBandsError => {}
+        else => { try assert(false, "short intensity weight output must fail"); }
     }
 }

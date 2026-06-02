@@ -13,6 +13,7 @@ export const CELT_BAND_SHAPE_Q: u32 = 15;
 export const CELT_BAND_SHAPE_UNIT_Q15: i32 = 32768;
 export const CELT_BAND_SHAPE_MAX_DIM: i32 = CELT_CWRS_MAX_N;
 export const CELT_BAND_SHAPE_MAX_PULSES: i32 = CELT_CWRS_MAX_K;
+export const CELT_INTENSITY_WEIGHT_Q: u32 = 14;
 
 fn celt_band_shape_clear_i32(values: &[i32]) void {
     var i: usize = 0;
@@ -63,6 +64,142 @@ fn celt_band_shape_pulses_from_bits(bits: i32) i32 {
         pulses = CELT_BAND_SHAPE_MAX_PULSES;
     }
     return pulses;
+}
+
+fn celt_abs_i32(value: i32) i32 {
+    if value < 0 {
+        if value == -2147483647 - 1 {
+            return 2147483647;
+        }
+        return -value;
+    }
+    return value;
+}
+
+export fn celt_decode_intensity_start_band(
+    dec: &EcDec,
+    start_band: i32,
+    coded_bands: i32,
+    has_intensity_bits: bool,
+) !i32 {
+    if start_band < 0 || coded_bands < start_band {
+        return error.CeltBandsError;
+    }
+    if !has_intensity_bits {
+        return coded_bands;
+    }
+
+    const choices: i32 = coded_bands + 1 - start_band;
+    if choices <= 0 {
+        return error.CeltBandsError;
+    }
+    return start_band + (ec_dec_uint(dec, choices as u32) as i32);
+}
+
+export fn celt_intensity_stereo_weights_q14(
+    left_energy: i32,
+    right_energy: i32,
+    weights_q14: &[i16],
+) !void {
+    if weights_q14.len < 2 {
+        return error.CeltBandsError;
+    }
+
+    const left: i64 = celt_abs_i32(left_energy) as i64;
+    const right: i64 = celt_abs_i32(right_energy) as i64;
+    const energy: u64 = ((left * left) as u64) + ((right * right) as u64);
+    if energy == 0 {
+        weights_q14.ptr[0] = 11585;
+        weights_q14.ptr[1] = 11585;
+        return;
+    }
+
+    const norm: u64 = celt_band_shape_isqrt_u64(energy);
+    if norm == 0 {
+        return error.CeltBandsError;
+    }
+
+    weights_q14.ptr[0] = sat16((((left << 14) + ((norm as i64) / 2L)) / (norm as i64)) as i32);
+    weights_q14.ptr[1] = sat16((((right << 14) + ((norm as i64) / 2L)) / (norm as i64)) as i32);
+}
+
+export fn celt_apply_intensity_stereo_q15(
+    mono_shape_q15: &[i16],
+    left_shape_q15: &[i16],
+    right_shape_q15: &[i16],
+    left_energy: i32,
+    right_energy: i32,
+) !void {
+    if mono_shape_q15.len == 0 || left_shape_q15.len < mono_shape_q15.len || right_shape_q15.len < mono_shape_q15.len {
+        return error.CeltBandsError;
+    }
+
+    var weights: [i16: 2] = [0: 2];
+    try celt_intensity_stereo_weights_q14(left_energy, right_energy, &weights[0:2]);
+
+    var i: usize = 0;
+    while i < mono_shape_q15.len {
+        const sample: i32 = mono_shape_q15.ptr[i] as i32;
+        const left: i32 = (sample * (weights[0] as i32) + (1 << 13)) >> 14;
+        const right: i32 = (sample * (weights[1] as i32) + (1 << 13)) >> 14;
+        left_shape_q15.ptr[i] = sat16(left);
+        right_shape_q15.ptr[i] = sat16(right);
+        i = i + 1;
+    }
+}
+
+export fn celt_apply_intensity_stereo_bands_q15(
+    start_band: i32,
+    end_band: i32,
+    intensity_band: i32,
+    band_dims: &[i32],
+    left_energy: &[i32],
+    right_energy: &[i32],
+    mono_shape_q15: &[i16],
+    left_shape_q15: &[i16],
+    right_shape_q15: &[i16],
+) !void {
+    if start_band < 0 || end_band < start_band || intensity_band < start_band || intensity_band > end_band {
+        return error.CeltBandsError;
+    }
+    if band_dims.len < (end_band as usize) || left_energy.len < (end_band as usize) || right_energy.len < (end_band as usize) {
+        return error.CeltBandsError;
+    }
+
+    var offset: usize = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
+            return error.CeltBandsError;
+        }
+        const dim_usize: usize = dim as usize;
+        const next_offset: usize = offset + dim_usize;
+        const mono_len: usize = mono_shape_q15.len;
+        const left_len: usize = left_shape_q15.len;
+        const right_len: usize = right_shape_q15.len;
+        if mono_len < next_offset {
+            return error.CeltBandsError;
+        }
+        if left_len < next_offset {
+            return error.CeltBandsError;
+        }
+        if right_len < next_offset {
+            return error.CeltBandsError;
+        }
+
+        if band >= intensity_band {
+            try celt_apply_intensity_stereo_q15(
+                &mono_shape_q15[offset:dim_usize],
+                &left_shape_q15[offset:dim_usize],
+                &right_shape_q15[offset:dim_usize],
+                left_energy.ptr[band as usize],
+                right_energy.ptr[band as usize],
+            );
+        }
+        offset = next_offset;
+        band = band + 1;
+    }
 }
 
 export fn celt_band_shape_normalize_q15(pulses: &[i32], shape_q15: &[i16]) !void {
