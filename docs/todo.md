@@ -18,7 +18,7 @@
 - [x] 创建 `src/opus/` 模块根。
 - [x] 创建 `src/opus/core/`。
 - [x] 创建 `src/opus/packet/`。
-- [ ] 创建 `src/opus/entropy/`。
+- [x] 创建 `src/opus/entropy/`。
 - [ ] 创建 `src/opus/dsp/`。
 - [ ] 创建 `src/opus/silk/`。
 - [ ] 创建 `src/opus/celt/`。
