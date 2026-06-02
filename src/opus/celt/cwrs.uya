@@ -132,3 +132,70 @@ export fn celt_icwrs(pulses: &[i32]) !u32 {
     }
     return rank as u32;
 }
+
+export fn celt_encode_pulses(pulses: &[i32]) !u32 {
+    return celt_icwrs(pulses);
+}
+
+export fn celt_decode_pulses(n: i32, k: i32, rank: u32, pulses: &[i32]) !void {
+    if n < 0 || k < 0 || n > CELT_CWRS_MAX_N || k > CELT_CWRS_MAX_K {
+        return error.CeltCwrsError;
+    }
+    const n_usize: usize = n as usize;
+    if pulses.len < n_usize {
+        return error.CeltCwrsError;
+    }
+    const total: u32 = try celt_cwrs_count(n, k);
+    if rank >= total {
+        return error.CeltCwrsError;
+    }
+
+    var remaining_rank: u64 = rank as u64;
+    var remaining_k: i32 = k;
+    var i: usize = 0;
+    while i < n_usize {
+        const dims_left: i32 = (n_usize - i - 1) as i32;
+        var chosen: i32 = 0;
+        var found: bool = false;
+
+        const zero_count: u64 = (try celt_cwrs_count(dims_left, remaining_k)) as u64;
+        if remaining_rank < zero_count {
+            chosen = 0;
+            found = true;
+        } else {
+            remaining_rank = remaining_rank - zero_count;
+            var amp: i32 = 1;
+            while amp <= remaining_k && !found {
+                const count: u64 = (try celt_cwrs_count(dims_left, remaining_k - amp)) as u64;
+                if remaining_rank < count {
+                    chosen = amp;
+                    found = true;
+                } else {
+                    remaining_rank = remaining_rank - count;
+                    if remaining_rank < count {
+                        chosen = -amp;
+                        found = true;
+                    } else {
+                        remaining_rank = remaining_rank - count;
+                    }
+                }
+                amp = amp + 1;
+            }
+        }
+
+        if !found {
+            return error.CeltCwrsError;
+        }
+        pulses.ptr[i] = chosen;
+        if chosen < 0 {
+            remaining_k = remaining_k + chosen;
+        } else {
+            remaining_k = remaining_k - chosen;
+        }
+        i = i + 1;
+    }
+
+    if remaining_k != 0 || remaining_rank != 0 {
+        return error.CeltCwrsError;
+    }
+}

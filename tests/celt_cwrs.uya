@@ -3,6 +3,8 @@ use std.testing.assert_eq_i32;
 use src.opus.celt.cwrs.celt_cwrs_abs_sum;
 use src.opus.celt.cwrs.celt_cwrs_count;
 use src.opus.celt.cwrs.celt_cwrs_validate_pulses;
+use src.opus.celt.cwrs.celt_decode_pulses;
+use src.opus.celt.cwrs.celt_encode_pulses;
 use src.opus.celt.cwrs.celt_icwrs;
 
 test "celt cwrs counts small pulse shell sizes" {
@@ -74,5 +76,57 @@ test "celt icwrs rejects vectors outside supported bounds" {
     match bad_k {
         error.CeltCwrsError => {}
         else => { try assert(false, "icwrs pulse count past bound must fail"); }
+    }
+}
+
+test "celt pulse decode inverts encode for representative ranks" {
+    var decoded: [i32: 3] = [0: 3];
+    try celt_decode_pulses(2, 2, 0, &decoded[0:3]);
+    try assert_eq_i32(decoded[0], 0);
+    try assert_eq_i32(decoded[1], 2);
+    try assert_eq_i32((try celt_encode_pulses(&decoded[0:2])) as i32, 0);
+
+    try celt_decode_pulses(2, 2, 5, &decoded[0:3]);
+    try assert_eq_i32(decoded[0], -1);
+    try assert_eq_i32(decoded[1], -1);
+    try assert_eq_i32((try celt_encode_pulses(&decoded[0:2])) as i32, 5);
+
+    try celt_decode_pulses(3, 2, 17, &decoded[0:3]);
+    try assert_eq_i32(try celt_cwrs_abs_sum(&decoded[0:3]), 2);
+    try assert_eq_i32((try celt_encode_pulses(&decoded[0:3])) as i32, 17);
+}
+
+test "celt pulse roundtrip covers small rank ranges" {
+    var decoded: [i32: 3] = [0: 3];
+    var n: i32 = 1;
+    while n <= 3 {
+        var k: i32 = 0;
+        while k <= 2 {
+            const total: i32 = (try celt_cwrs_count(n, k)) as i32;
+            var rank: i32 = 0;
+            while rank < total {
+                try celt_decode_pulses(n, k, rank as u32, &decoded[0:3]);
+                try assert_eq_i32(try celt_cwrs_abs_sum(&decoded[0:(n as usize)]), k);
+                try assert_eq_i32((try celt_encode_pulses(&decoded[0:(n as usize)])) as i32, rank);
+                rank = rank + 1;
+            }
+            k = k + 1;
+        }
+        n = n + 1;
+    }
+}
+
+test "celt pulse decode rejects invalid ranks and output buffers" {
+    var decoded: [i32: 1] = [0];
+    const bad_rank: !void = celt_decode_pulses(2, 1, 4, &decoded[0:1]);
+    match bad_rank {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "rank equal to count must fail"); }
+    }
+
+    const short_out: !void = celt_decode_pulses(2, 1, 0, &decoded[0:1]);
+    match short_out {
+        error.CeltCwrsError => {}
+        else => { try assert(false, "short decode output must fail"); }
     }
 }

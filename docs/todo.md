@@ -195,7 +195,7 @@
 - [x] 实现 `celt/rate.uya` bit allocation 初版。
 - [x] 实现 `celt/cwrs.uya`。
 - [x] 实现 `icwrs`。
-- [ ] 实现 pulse encode/decode roundtrip。
+- [x] 实现 pulse encode/decode roundtrip。
 - [ ] 实现 `dsp/mdct.uya` 标量 IMDCT。
 - [ ] 实现 overlap-add。
 - [ ] 实现 deemphasis。
