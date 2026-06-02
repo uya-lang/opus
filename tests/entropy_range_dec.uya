@@ -14,6 +14,13 @@ use src.opus.entropy.range_dec.ec_ilog;
 use src.opus.entropy.range_dec.ec_tell;
 use src.opus.entropy.range_dec.ec_tell_frac;
 
+fn assert_tell_frac_reference(rng: u32, expected: i32) !void {
+    var dec: EcDec = EcDec{};
+    dec.nbits_total = 77;
+    dec.rng = rng;
+    try assert_eq_i32(ec_tell_frac(&dec) as i32, expected);
+}
+
 test "range decoder initializes and reports fractional tell state" {
     const packet: [byte: 16] = [139, 165, 14, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 174, 168];
     var dec: EcDec = EcDec{};
@@ -51,6 +58,34 @@ test "range decoder decodes mixed symbols from an Opus-compatible vector" {
     try assert_eq_i32(ec_tell(&dec) as i32, 46);
     try assert_eq_i32(ec_tell_frac(&dec) as i32, 363);
     try ec_dec_check(&dec);
+}
+
+test "range decoder fractional tell matches upstream correction-boundary vectors" {
+    try assert_tell_frac_reference(0x00800001, 424);
+    try assert_tell_frac_reference(0x00ffffff, 417);
+    try assert_tell_frac_reference(0x01000000, 416);
+    try assert_tell_frac_reference(0x03500000, 403);
+    try assert_tell_frac_reference(0x08000000, 392);
+    try assert_tell_frac_reference(0x10000000, 384);
+    try assert_tell_frac_reference(0x40000000, 368);
+    try assert_tell_frac_reference(0x7fffffff, 361);
+
+    try assert_tell_frac_reference(0x45ca8000, 368);
+    try assert_tell_frac_reference(0x45cb0000, 367);
+    try assert_tell_frac_reference(0x4c1b8000, 367);
+    try assert_tell_frac_reference(0x4c1c0000, 366);
+    try assert_tell_frac_reference(0x52ff8000, 366);
+    try assert_tell_frac_reference(0x53000000, 365);
+    try assert_tell_frac_reference(0x5a820000, 365);
+    try assert_tell_frac_reference(0x5a828000, 364);
+    try assert_tell_frac_reference(0x62b38000, 364);
+    try assert_tell_frac_reference(0x62b40000, 363);
+    try assert_tell_frac_reference(0x6ba28000, 363);
+    try assert_tell_frac_reference(0x6ba30000, 362);
+    try assert_tell_frac_reference(0x75608000, 362);
+    try assert_tell_frac_reference(0x75610000, 361);
+    try assert_tell_frac_reference(0x7fff8000, 361);
+    try assert_tell_frac_reference(0x80000000, 360);
 }
 
 test "range decoder flags truncated input through ec_dec_check" {
