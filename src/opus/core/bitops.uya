@@ -35,3 +35,13 @@ export fn extract_bits_u32(value: u32, offset: u32, width: u32) u32 {
     const shifted: u32 = value >> (offset as i32);
     return shifted & low_mask_u32(width);
 }
+
+export fn celt_ilog(value_in: u32) u32 {
+    var value: u32 = value_in;
+    var bits: u32 = 0;
+    while value != 0 {
+        bits = bits + 1;
+        value = value >> 1;
+    }
+    return bits;
+}

@@ -4,6 +4,7 @@ use src.opus.core.bitops.bit_clear_u32;
 use src.opus.core.bitops.bit_is_set_u32;
 use src.opus.core.bitops.bit_mask_u32;
 use src.opus.core.bitops.bit_set_u32;
+use src.opus.core.bitops.celt_ilog;
 use src.opus.core.bitops.extract_bits_u32;
 use src.opus.core.bitops.low_mask_u32;
 
@@ -29,4 +30,14 @@ test "low masks and extraction handle field boundaries" {
     try assert_eq_i32(extract_bits_u32(0b10110100, 2, 3) as i32, 5);
     try assert_eq_i32(extract_bits_u32(0xffffffff, 28, 8) as i32, 15);
     try assert_eq_i32(extract_bits_u32(0xffffffff, 32, 1) as i32, 0);
+}
+
+test "celt_ilog reports bits needed to represent u32 values" {
+    try assert_eq_i32(celt_ilog(0) as i32, 0);
+    try assert_eq_i32(celt_ilog(1) as i32, 1);
+    try assert_eq_i32(celt_ilog(2) as i32, 2);
+    try assert_eq_i32(celt_ilog(3) as i32, 2);
+    try assert_eq_i32(celt_ilog(255) as i32, 8);
+    try assert_eq_i32(celt_ilog(256) as i32, 9);
+    try assert_eq_i32(celt_ilog(0xffffffff) as i32, 32);
 }
