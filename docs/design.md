@@ -36,6 +36,13 @@
 - 对错误包、截断包、非法 padding、非法 frame count 给出稳定错误。
 - 核心编解码路径不依赖 libopus、C/C++/Rust/Go/Python 业务实现。
 
+第一版目标边界：
+
+- v1 以 decoder conformance 为首要目标；packet parser、range decoder、SILK/CELT/hybrid decode、PLC/FEC decode 和容器输入的正确性优先于 encoder 质量。
+- v1 encoder 只要求 API 形状、合法码流路径和基础 roundtrip 验证，不要求和 libopus 做逐样本一致，也不把语音/音乐质量作为发布阻塞项。
+- 任何 encoder 便利实现不得放宽 decoder 的 bit-exact、误差容忍、非法输入处理和 conformance corpus 验收要求。
+- 质量型 encoder 工作进入后续版本，按独立 benchmark、主观/客观质量指标和互操作测试推进。
+
 第二阶段的成功标准：
 
 - 提供可用 encoder，覆盖 VoIP、music、low-delay 三类应用。
