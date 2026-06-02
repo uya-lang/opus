@@ -139,7 +139,7 @@
 
 - [x] Entropy coder 独立测试全部通过后，才进入 SILK/CELT 主体。
 - [ ] `ec_tell_frac` 与参考 vectors 一致。
-- [ ] Range coder hot loop 无 heap 分配、无 interface 动态分派、无逐 symbol `!T` 错误传播。
+- [x] Range coder hot loop 无 heap 分配、无 interface 动态分派、无逐 symbol `!T` 错误传播。
 
 ## 5. 定点算术和 DSP 基础
 
