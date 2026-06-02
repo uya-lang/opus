@@ -5,7 +5,7 @@ BIN_DIR := bin
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 
-.PHONY: all check clean require-uya test
+.PHONY: all bench check clean require-uya test
 
 all: require-uya
 	@printf '%s\n' "No default build target yet. Use make check once the smoke target is added."
@@ -29,6 +29,10 @@ check: require-uya
 
 test: check
 	@printf '%s\n' "test: no Uya test files registered yet"
+
+bench: require-uya
+	@printf '%s\n' "bench: no benchmark targets registered yet"
+	@printf '%s\n' "bench: no performance numbers are reported in the scaffold stage"
 
 require-uya:
 	@if ! command -v "$(UYA)" >/dev/null 2>&1 && ! test -x "$(UYA)"; then \
