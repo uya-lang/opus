@@ -12,7 +12,7 @@ CWRS_DEBUG_SRC := tools/debug_cwrs.uya
 CWRS_DEBUG_BIN := $(BUILD_DIR)/debug-cwrs
 MDCT_DEBUG_SRC := tools/debug_mdct.uya
 MDCT_DEBUG_BIN := $(BUILD_DIR)/debug-mdct
-TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/core_qformat.uya tests/core_saturate.uya tests/core_bitops.uya tests/dsp_filters.uya tests/dsp_resampler.uya tests/dsp_pitch.uya tests/dsp_window.uya tests/dsp_mdct.uya tests/packet_toc.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya tests/celt_mode.uya tests/celt_rate.uya tests/celt_cwrs.uya tests/celt_deemphasis.uya tests/celt_state.uya tests/celt_quant_bands.uya tools/check_tables.uya
+TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/core_qformat.uya tests/core_saturate.uya tests/core_bitops.uya tests/dsp_filters.uya tests/dsp_resampler.uya tests/dsp_pitch.uya tests/dsp_window.uya tests/dsp_mdct.uya tests/packet_toc.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya tests/celt_mode.uya tests/celt_rate.uya tests/celt_cwrs.uya tests/celt_deemphasis.uya tests/celt_state.uya tests/celt_quant_bands.uya tests/celt_tf.uya tools/check_tables.uya
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 

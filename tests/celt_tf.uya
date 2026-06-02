@@ -1,0 +1,123 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.tables.celt_tf_select_hash;
+use src.opus.celt.tables.celt_tf_select_value;
+use src.opus.celt.tf.celt_decode_tf_changes;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.entropy.range_enc.ec_tell_enc;
+
+fn encode_tf(packet: &[byte], start_band: i32, end_band: i32, is_transient: bool, lm: i32, flags: &[i32], tf_select: i32) !usize {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    const budget: u32 = (packet.len as u32) * 8;
+    var tell: u32 = ec_tell_enc(&enc);
+    var logp: u32 = 4;
+    if is_transient {
+        logp = 2;
+    }
+    var tf_select_rsv: bool = false;
+    if lm > 0 && tell + logp + 1 <= budget {
+        tf_select_rsv = true;
+    }
+    var encode_budget: u32 = budget;
+    if tf_select_rsv {
+        encode_budget = encode_budget - 1;
+    }
+
+    var curr: i32 = 0;
+    var tf_changed: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        if tell + logp <= encode_budget {
+            const next: i32 = flags.ptr[band as usize];
+            ec_enc_bit_logp(&enc, next ^ curr, logp);
+            tell = ec_tell_enc(&enc);
+            curr = next;
+            tf_changed = tf_changed | curr;
+        }
+        if is_transient {
+            logp = 4;
+        } else {
+            logp = 5;
+        }
+        band = band + 1;
+    }
+
+    if tf_select_rsv {
+        var transient_offset: usize = 0;
+        if is_transient {
+            transient_offset = 4;
+        }
+        const index0: usize = transient_offset + (tf_changed as usize);
+        const index1: usize = transient_offset + 2 + (tf_changed as usize);
+        if celt_tf_select_value(lm as usize, index0) != celt_tf_select_value(lm as usize, index1) {
+            ec_enc_bit_logp(&enc, tf_select, 1);
+        }
+    }
+
+    try ec_enc_check(&enc);
+    return try ec_enc_done(&enc);
+}
+
+test "tf select table hash matches imported upstream values" {
+    try assert_eq_i32(celt_tf_select_hash() as i32, 428578013);
+}
+
+test "tf changes decode long-block differential flags" {
+    var packet: [byte: 16] = [0: 16];
+    var flags: [i32: 21] = [0: 21];
+    flags[1] = 1;
+    flags[2] = 1;
+    flags[3] = 0;
+    _ = try encode_tf(&packet[0:16], 1, 4, false, 2, &flags[0:21], 1);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var tf_res: [i32: 21] = [99: 21];
+    try celt_decode_tf_changes(1, 4, false, &tf_res[0:21], 2, &dec);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(tf_res[0], 99);
+    try assert_eq_i32(tf_res[1], -3);
+    try assert_eq_i32(tf_res[2], -3);
+    try assert_eq_i32(tf_res[3], 0);
+}
+
+test "tf changes decode transient tf_select path" {
+    var packet: [byte: 16] = [0: 16];
+    var flags: [i32: 21] = [0: 21];
+    flags[0] = 1;
+    flags[1] = 0;
+    flags[2] = 1;
+    _ = try encode_tf(&packet[0:16], 0, 3, true, 3, &flags[0:21], 1);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var tf_res: [i32: 21] = [0: 21];
+    try celt_decode_tf_changes(0, 3, true, &tf_res[0:21], 3, &dec);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(tf_res[0], -1);
+    try assert_eq_i32(tf_res[1], 1);
+    try assert_eq_i32(tf_res[2], -1);
+}
+
+test "tf changes decode validates parameters" {
+    var packet: [byte: 1] = [0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:1]);
+    var tf_res: [i32: 2] = [0: 2];
+    const bad_lm: !void = celt_decode_tf_changes(0, 2, false, &tf_res[0:2], 4, &dec);
+    match bad_lm {
+        error.CeltTfError => {}
+        else => { try assert(false, "invalid LM must fail"); }
+    }
+}

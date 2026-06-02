@@ -1,0 +1,81 @@
+use src.opus.celt.tables.celt_tf_select_value;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_tell;
+
+export error CeltTfError;
+
+export fn celt_decode_tf_changes(
+    start_band: i32,
+    end_band: i32,
+    is_transient: bool,
+    tf_res: &[i32],
+    lm: i32,
+    dec: &EcDec,
+) !void {
+    if start_band < 0 || end_band < start_band || lm < 0 || lm > 3 {
+        return error.CeltTfError;
+    }
+    if tf_res.len < (end_band as usize) {
+        return error.CeltTfError;
+    }
+
+    const budget: u32 = (dec.storage as u32) * 8;
+    var tell: u32 = ec_tell(dec);
+    var logp: u32 = 4;
+    if is_transient {
+        logp = 2;
+    }
+
+    var tf_select_rsv: bool = false;
+    if lm > 0 && tell + logp + 1 <= budget {
+        tf_select_rsv = true;
+    }
+    var decode_budget: u32 = budget;
+    if tf_select_rsv {
+        decode_budget = decode_budget - 1;
+    }
+
+    var curr: i32 = 0;
+    var tf_changed: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        if tell + logp <= decode_budget {
+            curr = curr ^ ec_dec_bit_logp(dec, logp);
+            tell = ec_tell(dec);
+            tf_changed = tf_changed | curr;
+        }
+        tf_res.ptr[band as usize] = curr;
+        if is_transient {
+            logp = 4;
+        } else {
+            logp = 5;
+        }
+        band = band + 1;
+    }
+
+    var tf_select: i32 = 0;
+    if tf_select_rsv {
+        const base_index: usize = 0;
+        var transient_offset: usize = 0;
+        if is_transient {
+            transient_offset = 4;
+        }
+        const index0: usize = transient_offset + base_index + (tf_changed as usize);
+        const index1: usize = transient_offset + 2 + (tf_changed as usize);
+        if celt_tf_select_value(lm as usize, index0) != celt_tf_select_value(lm as usize, index1) {
+            tf_select = ec_dec_bit_logp(dec, 1);
+        }
+    }
+
+    band = start_band;
+    while band < end_band {
+        var transient_offset2: usize = 0;
+        if is_transient {
+            transient_offset2 = 4;
+        }
+        const table_index: usize = transient_offset2 + ((2 * tf_select) as usize) + (tf_res.ptr[band as usize] as usize);
+        tf_res.ptr[band as usize] = celt_tf_select_value(lm as usize, table_index) as i32;
+        band = band + 1;
+    }
+}

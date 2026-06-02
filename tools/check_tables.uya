@@ -5,6 +5,7 @@ use src.opus.celt.tables.CELT_BAND_ALLOCATION_ROWS;
 use src.opus.celt.tables.celt_eband_5ms_boundary;
 use src.opus.celt.tables.celt_energy_prob_model_q8_hash;
 use src.opus.celt.tables.celt_table_len;
+use src.opus.celt.tables.celt_tf_select_hash;
 use src.opus.dsp.window.celt_window_120_q15_boundary;
 use src.opus.dsp.window.celt_window_120_q15_hash;
 use src.opus.dsp.window.celt_window_120_q15_is_non_decreasing;
@@ -18,6 +19,7 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(celt_table_len(1) as i32, (CELT_BAND_ALLOCATION_ROWS * CELT_BAND_ALLOCATION_COLS) as i32);
     try assert_eq_i32(celt_table_len(2) as i32, 21);
     try assert_eq_i32(celt_table_len(6) as i32, 336);
+    try assert_eq_i32(celt_table_len(7) as i32, 32);
     try assert_eq_i32(celt_window_120_q15_len() as i32, 120);
     try assert_eq_i32(entropy_cdf_table_len(0) as i32, 8);
 
@@ -33,6 +35,7 @@ test "imported table lengths match upstream inventory" {
 test "imported small scalar table hashes match upstream values" {
     try assert_eq_i32((try celt_window_120_q15_hash()) as i32, 992882619);
     try assert_eq_i32(celt_energy_prob_model_q8_hash() as i32, 265233239);
+    try assert_eq_i32(celt_tf_select_hash() as i32, 428578013);
     try assert_eq_i32(entropy_cdf_tell_frac_correction_hash() as i32, 253150762);
 }
 

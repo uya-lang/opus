@@ -9,6 +9,7 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `CELT_EBAND_5MS` | `celt/modes.c` `eband5ms` | `i16` | MDCT bin band edge | 22 | 417698738 | 32768 |
 | `CELT_BAND_ALLOCATION_Q5` | `celt/modes.c` `band_allocation` | `byte` | 1/32 bit/sample | 231 | 305564943 | 0 |
 | `CELT_LOGN400` | `celt/static_modes_fixed.h` `logN400` | `i16` | logN, Q0 | 21 | 874482495 | 32768 |
+| `CELT_TF_SELECT_TABLE` | `celt/celt.c` `tf_select_table` | `i8` | TF resolution delta | 32 | 428578013 | 32768 |
 | `CELT_TRIM_ICDF` | `celt/celt.h` `trim_icdf` | `byte` | iCDF, `ftb=7` | 11 | 441834106 | 0 |
 | `CELT_SPREAD_ICDF` | `celt/celt.h` `spread_icdf` | `byte` | iCDF, `ftb=5` | 4 | checked by shape | 0 |
 | `CELT_TAPSET_ICDF` | `celt/celt.h` `tapset_icdf` | `byte` | iCDF, `ftb=2` | 3 | checked by shape | 0 |
