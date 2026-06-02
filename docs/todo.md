@@ -21,7 +21,7 @@
 - [x] 创建 `src/opus/entropy/`。
 - [x] 创建 `src/opus/dsp/`。
 - [x] 创建 `src/opus/silk/`。
-- [ ] 创建 `src/opus/celt/`。
+- [x] 创建 `src/opus/celt/`。
 - [ ] 创建 `src/opus/hybrid/`。
 - [ ] 创建 `src/opus/api/`。
 - [ ] 创建 `src/opus/container/`。
