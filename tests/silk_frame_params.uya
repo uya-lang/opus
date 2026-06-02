@@ -1,0 +1,112 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.frame_params.SilkFrameParams;
+use src.opus.silk.frame_params.silk_frame_params_apply;
+use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
+use src.opus.silk.state.SilkDecoderState;
+
+fn packet_info(mode: OpusMode, bandwidth: OpusBandwidth, channels: u8, frame_count: u8, frame_duration_us: u32) PacketInfo {
+    return PacketInfo{
+        mode: mode,
+        bandwidth: bandwidth,
+        channels: channels,
+        frame_count: frame_count,
+        frame_duration_us: frame_duration_us,
+        duration_samples_48k: (frame_duration_us / 1000) * 48,
+        payload_offset: 1,
+        payload_len: 8,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+test "silk frame params derive narrowband 10ms mono layout" {
+    const info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.NARROWBAND, 1, 1, 10000);
+    var params: SilkFrameParams = SilkFrameParams{};
+    try silk_frame_params_from_packet_info(&info, &params);
+
+    try assert_eq_i32(params.channels, 1);
+    try assert_eq_i32(params.sample_rate_hz, 8000);
+    try assert_eq_i32(params.fs_khz, 8);
+    try assert_eq_i32(params.frame_ms, 10);
+    try assert_eq_i32(params.frame_length, 80);
+    try assert_eq_i32(params.subframe_length, 40);
+    try assert_eq_i32(params.nb_subframes, 2);
+    try assert_eq_i32(params.lpc_order, 10);
+    try assert_eq_i32(params.frames_per_packet, 1);
+}
+
+test "silk frame params derive mediumband and wideband 20ms stereo layout" {
+    const mb_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.MEDIUMBAND, 2, 2, 20000);
+    var mb: SilkFrameParams = SilkFrameParams{};
+    try silk_frame_params_from_packet_info(&mb_info, &mb);
+    try assert_eq_i32(mb.channels, 2);
+    try assert_eq_i32(mb.sample_rate_hz, 12000);
+    try assert_eq_i32(mb.fs_khz, 12);
+    try assert_eq_i32(mb.frame_length, 240);
+    try assert_eq_i32(mb.subframe_length, 60);
+    try assert_eq_i32(mb.nb_subframes, 4);
+    try assert_eq_i32(mb.lpc_order, 16);
+    try assert_eq_i32(mb.frames_per_packet, 2);
+
+    const wb_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 2, 1, 20000);
+    var wb: SilkFrameParams = SilkFrameParams{};
+    try silk_frame_params_from_packet_info(&wb_info, &wb);
+    try assert_eq_i32(wb.sample_rate_hz, 16000);
+    try assert_eq_i32(wb.fs_khz, 16);
+    try assert_eq_i32(wb.frame_length, 320);
+    try assert_eq_i32(wb.subframe_length, 80);
+    try assert_eq_i32(wb.lpc_order, 16);
+}
+
+test "silk frame params configure decoder state and control together" {
+    const info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 2, 1, 20000);
+    var params: SilkFrameParams = SilkFrameParams{};
+    try silk_frame_params_from_packet_info(&info, &params);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try silk_frame_params_apply(&params, &state, &control);
+
+    try assert_eq_i32(state.channels, 2);
+    try assert_eq_i32(state.sample_rate_hz, 16000);
+    try assert_eq_i32(state.frame_length, 320);
+    try assert_eq_i32(state.subframe_length, 80);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 16);
+    try assert(state.first_frame_after_reset, "frame params apply must initialize fresh decoder state");
+    try assert_eq_i32(control.channels, 2);
+    try assert_eq_i32(control.fs_khz, 16);
+    try assert_eq_i32(control.frame_length, 320);
+    try assert_eq_i32(control.nb_subframes, 4);
+    try assert_eq_i32(control.lpc_order, 16);
+}
+
+test "silk frame params reject non-silk or unsupported first-stage layouts" {
+    var params: SilkFrameParams = SilkFrameParams{};
+
+    const celt_info: PacketInfo = packet_info(OpusMode.CELT, OpusBandwidth.WIDEBAND, 1, 1, 20000);
+    const celt_res: !void = silk_frame_params_from_packet_info(&celt_info, &params);
+    match celt_res {
+        error.SilkFrameParamsError => {}
+        else => { try assert(false, "CELT packets must not initialize SILK frame params"); }
+    }
+
+    const swb_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.SUPERWIDEBAND, 1, 1, 20000);
+    const swb_res: !void = silk_frame_params_from_packet_info(&swb_info, &params);
+    match swb_res {
+        error.SilkFrameParamsError => {}
+        else => { try assert(false, "SILK-only frame params must reject SWB bandwidth"); }
+    }
+
+    const long_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 1, 1, 40000);
+    const long_res: !void = silk_frame_params_from_packet_info(&long_info, &params);
+    match long_res {
+        error.SilkFrameParamsError => {}
+        else => { try assert(false, "40ms SILK frames are deferred to the multi-frame decode task"); }
+    }
+}

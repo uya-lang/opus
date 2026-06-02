@@ -1,0 +1,87 @@
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
+use src.opus.silk.state.SILK_SUBFR_MS;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+use src.opus.silk.state.silk_state_lpc_order_for_fs_khz;
+
+export error SilkFrameParamsError;
+
+export struct SilkFrameParams {
+    channels: i32,
+    sample_rate_hz: i32,
+    fs_khz: i32,
+    frame_ms: i32,
+    frame_length: i32,
+    subframe_length: i32,
+    nb_subframes: i32,
+    lpc_order: i32,
+    frames_per_packet: i32,
+}
+
+fn sample_rate_for_bandwidth(bandwidth: OpusBandwidth) !i32 {
+    if bandwidth == OpusBandwidth.NARROWBAND {
+        return 8000;
+    }
+    if bandwidth == OpusBandwidth.MEDIUMBAND {
+        return 12000;
+    }
+    if bandwidth == OpusBandwidth.WIDEBAND {
+        return 16000;
+    }
+    return error.SilkFrameParamsError;
+}
+
+fn frame_ms_from_duration_us(frame_duration_us: u32) !i32 {
+    if frame_duration_us == 10000 {
+        return 10;
+    }
+    if frame_duration_us == 20000 {
+        return 20;
+    }
+    return error.SilkFrameParamsError;
+}
+
+export fn silk_frame_params_from_packet_info(info: &const PacketInfo, params: &SilkFrameParams) !void {
+    if info.mode != OpusMode.SILK {
+        return error.SilkFrameParamsError;
+    }
+    if info.channels < 1 || info.channels > 2 || info.frame_count < 1 {
+        return error.SilkFrameParamsError;
+    }
+
+    const sample_rate_hz: i32 = try sample_rate_for_bandwidth(info.bandwidth);
+    const frame_ms: i32 = try frame_ms_from_duration_us(info.frame_duration_us);
+    const fs_khz: i32 = sample_rate_hz / 1000;
+    const nb_subframes: i32 = frame_ms / SILK_SUBFR_MS;
+    const frame_length: i32 = fs_khz * frame_ms;
+    const subframe_length: i32 = frame_length / nb_subframes;
+    const lpc_order: i32 = silk_state_lpc_order_for_fs_khz(fs_khz) catch {
+        return error.SilkFrameParamsError;
+    };
+
+    params.channels = info.channels as i32;
+    params.sample_rate_hz = sample_rate_hz;
+    params.fs_khz = fs_khz;
+    params.frame_ms = frame_ms;
+    params.frame_length = frame_length;
+    params.subframe_length = subframe_length;
+    params.nb_subframes = nb_subframes;
+    params.lpc_order = lpc_order;
+    params.frames_per_packet = info.frame_count as i32;
+}
+
+export fn silk_frame_params_apply(params: &const SilkFrameParams, state: &SilkDecoderState, control: &SilkDecoderControl) !void {
+    if params.channels < 1 || params.channels > 2 || params.frame_ms <= 0 || params.sample_rate_hz <= 0 {
+        return error.SilkFrameParamsError;
+    }
+    silk_state_init(state, params.channels, params.sample_rate_hz, params.frame_ms) catch {
+        return error.SilkFrameParamsError;
+    };
+    silk_decoder_control_init_from_state(control, state) catch {
+        return error.SilkFrameParamsError;
+    };
+}
