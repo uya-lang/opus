@@ -6,7 +6,7 @@
 
 - [x] 创建详细设计文档：`docs/design.md`。
 - [x] 创建分阶段 TODO 文档：`docs/todo.md`。
-- [ ] 冻结项目名称、库名称和 CLI 名称。
+- [x] 冻结项目名称、库名称和 CLI 名称。
 - [ ] 明确第一版目标：decoder conformance 优先，encoder 质量后置。
 - [ ] 确认 Uya 编译器路径和最低版本。
 - [ ] 建立 `docs/references.md`，记录 RFC 6716/RFC 8251/RFC 7845/RFC 7587 和 upstream 表来源。

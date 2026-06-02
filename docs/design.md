@@ -5,6 +5,13 @@
 目标项目：`opus`
 核心目标：用 Uya 从零实现可互操作、可验证、可优化的 Opus 编解码器核心。
 
+命名冻结：
+
+- 项目名称：`opus`。
+- Uya 库/模块根名称：`opus`，源码根固定为 `src/opus/`。
+- CLI 工具名称：`uopusdec`、`uopusenc`、`uopusinfo`，输出路径固定为 `bin/`。
+- `opusdec`、`opusenc`、`opusinfo` 只作为外部参考工具名称或源码文件名使用，避免和系统 libopus CLI 混淆。
+
 参考规范：
 
 - RFC 6716: Definition of the Opus Audio Codec, https://www.rfc-editor.org/rfc/rfc6716
