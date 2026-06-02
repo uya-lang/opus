@@ -241,7 +241,7 @@
 ## 9. SILK 基础
 
 - [x] 实现 `silk/state.uya`。
-- [ ] 实现 `silk/decoder_control.uya`。
+- [x] 实现 `silk/decoder_control.uya`。
 - [ ] 实现 SILK frame 参数初始化。
 - [ ] 实现 `silk/shell_coder.uya`。
 - [ ] 实现 shell decode。
