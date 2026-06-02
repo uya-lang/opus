@@ -6,7 +6,7 @@ SMOKE_SRC := src/opus/main.uya
 SMOKE_BIN := $(BUILD_DIR)/opus-smoke
 ENTROPY_DECODE_BENCH_SRC := bench/entropy_decode.uya
 ENTROPY_DECODE_BENCH_BIN := $(BUILD_DIR)/entropy-decode-bench
-TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/core_qformat.uya tests/core_saturate.uya tests/core_bitops.uya tests/dsp_filters.uya tests/dsp_resampler.uya tests/dsp_pitch.uya tests/dsp_window.uya tests/packet_toc.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya tests/celt_mode.uya tests/celt_rate.uya tests/celt_cwrs.uya tools/check_tables.uya
+TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/core_qformat.uya tests/core_saturate.uya tests/core_bitops.uya tests/dsp_filters.uya tests/dsp_resampler.uya tests/dsp_pitch.uya tests/dsp_window.uya tests/dsp_mdct.uya tests/packet_toc.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya tests/celt_mode.uya tests/celt_rate.uya tests/celt_cwrs.uya tools/check_tables.uya
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 

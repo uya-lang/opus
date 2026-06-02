@@ -1,0 +1,92 @@
+use libc.PI;
+use libc.cos;
+use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
+
+export error DspMdctError;
+
+export const MDCT_TWIDDLE_Q15_SCALE: i32 = 32768;
+
+fn round_div_i64(value: i64, divisor: i64) !i64 {
+    if divisor <= 0L {
+        return error.DspMdctError;
+    }
+    const half: i64 = divisor / 2L;
+    if value >= 0L {
+        return ((value + half) / divisor) as i64;
+    }
+    const rounded_abs: i64 = ((0L - value + half) / divisor) as i64;
+    return rounded_abs * -1L;
+}
+
+fn round_shift_q30_to_q15(value_q30: i64) i32 {
+    const half: i64 = 1L << 14;
+    if value_q30 >= 0L {
+        return sat32((value_q30 + half) >> 15);
+    }
+    return sat32(0L - (((0L - value_q30) + half) >> 15));
+}
+
+fn round_f64_to_i32(value: f64) i32 {
+    if value >= 0.0 {
+        return (value + 0.5) as i32;
+    }
+    return (value - 0.5) as i32;
+}
+
+export fn mdct_imdct_twiddle_q15_len(n: usize) !usize {
+    if n < 4 || (n & (1 as usize)) != 0 {
+        return error.DspMdctError;
+    }
+    return n * (n / 2);
+}
+
+export fn mdct_imdct_init_twiddle_q15(n: usize, twiddle_q15: &[i16]) !void {
+    const needed: usize = try mdct_imdct_twiddle_q15_len(n);
+    if twiddle_q15.len < needed {
+        return error.DspMdctError;
+    }
+
+    const nf: f64 = n as f64;
+    const half_n: f64 = (n / 2) as f64;
+    var out_index: usize = 0;
+    var sample: usize = 0;
+    while sample < n {
+        const sample_phase: f64 = (sample as f64) + 0.5 + half_n;
+        var bin: usize = 0;
+        while bin < n / 2 {
+            const bin_phase: f64 = (bin as f64) + 0.5;
+            const c: f64 = cos(PI / nf * sample_phase * bin_phase);
+            twiddle_q15.ptr[out_index] = sat16(round_f64_to_i32(c * (MDCT_TWIDDLE_Q15_SCALE as f64)));
+            out_index = out_index + 1;
+            bin = bin + 1;
+        }
+        sample = sample + 1;
+    }
+}
+
+export fn mdct_imdct_scalar_q15(input_q15: &[i16], twiddle_q15: &[i16], output_q15: &[i16]) !void {
+    if input_q15.len == 0 || output_q15.len != input_q15.len * 2 {
+        return error.DspMdctError;
+    }
+    const n: usize = output_q15.len;
+    const needed: usize = try mdct_imdct_twiddle_q15_len(n);
+    if twiddle_q15.len < needed {
+        return error.DspMdctError;
+    }
+
+    var sample: usize = 0;
+    while sample < n {
+        var acc_q30: i64 = 0L;
+        var bin: usize = 0;
+        const row: usize = sample * input_q15.len;
+        while bin < input_q15.len {
+            acc_q30 = acc_q30 + (input_q15.ptr[bin] as i64) * (twiddle_q15.ptr[row + bin] as i64);
+            bin = bin + 1;
+        }
+
+        const scaled_q30: i64 = try round_div_i64(acc_q30 * 2L, n as i64);
+        output_q15.ptr[sample] = sat16(round_shift_q30_to_q15(scaled_q30));
+        sample = sample + 1;
+    }
+}

@@ -196,7 +196,7 @@
 - [x] 实现 `celt/cwrs.uya`。
 - [x] 实现 `icwrs`。
 - [x] 实现 pulse encode/decode roundtrip。
-- [ ] 实现 `dsp/mdct.uya` 标量 IMDCT。
+- [x] 实现 `dsp/mdct.uya` 标量 IMDCT。
 - [ ] 实现 overlap-add。
 - [ ] 实现 deemphasis。
 - [ ] 测试 mode table。

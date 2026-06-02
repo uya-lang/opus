@@ -1,0 +1,109 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.dsp.mdct.DspMdctError;
+use src.opus.dsp.mdct.MDCT_TWIDDLE_Q15_SCALE;
+use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
+use src.opus.dsp.mdct.mdct_imdct_scalar_q15;
+use src.opus.dsp.mdct.mdct_imdct_twiddle_q15_len;
+
+test "imdct twiddle q15 exposes deterministic small table" {
+    try assert_eq_i32(MDCT_TWIDDLE_Q15_SCALE, 32768);
+    try assert_eq_i32((try mdct_imdct_twiddle_q15_len(8)) as i32, 32);
+
+    var twiddle: [i16: 32] = [0: 32];
+    try mdct_imdct_init_twiddle_q15(8, &twiddle[0:32]);
+
+    try assert_eq_i32(twiddle[0] as i32, 20788);
+    try assert_eq_i32(twiddle[1] as i32, -28899);
+    try assert_eq_i32(twiddle[2] as i32, -9512);
+    try assert_eq_i32(twiddle[3] as i32, 32610);
+    try assert_eq_i32(twiddle[28] as i32, -20788);
+    try assert_eq_i32(twiddle[29] as i32, 28899);
+    try assert_eq_i32(twiddle[30] as i32, 9512);
+    try assert_eq_i32(twiddle[31] as i32, -32610);
+}
+
+test "scalar imdct q15 matches single basis golden vectors" {
+    var twiddle: [i16: 32] = [0: 32];
+    try mdct_imdct_init_twiddle_q15(8, &twiddle[0:32]);
+
+    var coeff0: [i16: 4] = [32767, 0, 0, 0];
+    var output: [i16: 8] = [0: 8];
+    try mdct_imdct_scalar_q15(&coeff0[0:4], &twiddle[0:32], &output[0:8]);
+    try assert_eq_i32(output[0] as i32, 5197);
+    try assert_eq_i32(output[1] as i32, 3862);
+    try assert_eq_i32(output[2] as i32, 2378);
+    try assert_eq_i32(output[3] as i32, 803);
+    try assert_eq_i32(output[4] as i32, -803);
+    try assert_eq_i32(output[5] as i32, -2378);
+    try assert_eq_i32(output[6] as i32, -3862);
+    try assert_eq_i32(output[7] as i32, -5197);
+
+    var coeff1: [i16: 4] = [0, 32767, 0, 0];
+    try mdct_imdct_scalar_q15(&coeff1[0:4], &twiddle[0:32], &output[0:8]);
+    try assert_eq_i32(output[0] as i32, -7225);
+    try assert_eq_i32(output[1] as i32, -8152);
+    try assert_eq_i32(output[2] as i32, -6332);
+    try assert_eq_i32(output[3] as i32, -2378);
+    try assert_eq_i32(output[4] as i32, 2378);
+    try assert_eq_i32(output[5] as i32, 6332);
+    try assert_eq_i32(output[6] as i32, 8152);
+    try assert_eq_i32(output[7] as i32, 7225);
+}
+
+test "scalar imdct q15 accumulates all bins and saturates output" {
+    var twiddle: [i16: 32] = [0: 32];
+    try mdct_imdct_init_twiddle_q15(8, &twiddle[0:32]);
+
+    var mixed: [i16: 4] = [32767, -16384, 8192, -4096];
+    var output: [i16: 8] = [0: 8];
+    try mdct_imdct_scalar_q15(&mixed[0:4], &twiddle[0:32], &output[0:8]);
+    try assert_eq_i32(output[0] as i32, 7196);
+    try assert_eq_i32(output[1] as i32, 8940);
+    try assert_eq_i32(output[2] as i32, 8485);
+    try assert_eq_i32(output[3] as i32, 3607);
+    try assert_eq_i32(output[4] as i32, -3607);
+    try assert_eq_i32(output[5] as i32, -8485);
+    try assert_eq_i32(output[6] as i32, -8940);
+    try assert_eq_i32(output[7] as i32, -7196);
+
+    var loud: [i16: 4] = [32767, 32767, -32768, 32767];
+    try mdct_imdct_scalar_q15(&loud[0:4], &twiddle[0:32], &output[0:8]);
+    var i: usize = 0;
+    while i < 8 {
+        try assert(output[i] <= 32767 && output[i] >= -32768, "output remains i16 saturated");
+        i = i + 1;
+    }
+}
+
+test "scalar imdct rejects invalid sizes and buffers" {
+    var twiddle: [i16: 32] = [0: 32];
+    var input: [i16: 4] = [0: 4];
+    var short_input: [i16: 0] = [0: 0];
+    var output: [i16: 8] = [0: 8];
+    var short_output: [i16: 7] = [0: 7];
+
+    const odd_len: !usize = mdct_imdct_twiddle_q15_len(7);
+    match odd_len {
+        error.DspMdctError => {}
+        else => { try assert(false, "odd IMDCT output size must fail"); }
+    }
+
+    const short_twiddle: !void = mdct_imdct_init_twiddle_q15(8, &twiddle[0:31]);
+    match short_twiddle {
+        error.DspMdctError => {}
+        else => { try assert(false, "short twiddle table must fail"); }
+    }
+
+    const empty_input: !void = mdct_imdct_scalar_q15(&short_input[0:0], &twiddle[0:32], &output[0:8]);
+    match empty_input {
+        error.DspMdctError => {}
+        else => { try assert(false, "empty coefficient vector must fail"); }
+    }
+
+    const wrong_output: !void = mdct_imdct_scalar_q15(&input[0:4], &twiddle[0:32], &short_output[0:7]);
+    match wrong_output {
+        error.DspMdctError => {}
+        else => { try assert(false, "output must be twice coefficient length"); }
+    }
+}
