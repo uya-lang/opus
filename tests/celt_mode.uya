@@ -11,6 +11,8 @@ use src.opus.celt.mode.CELT_MODE_48000_SHORT_MDCT_SIZE;
 use src.opus.celt.mode.CeltMode;
 use src.opus.celt.mode.celt_mode_eband_boundary_5ms;
 use src.opus.celt.mode.celt_mode_eband_width_5ms;
+use src.opus.celt.mode.celt_mode_frame_size_from_lm;
+use src.opus.celt.mode.celt_mode_lm_from_frame_size;
 use src.opus.celt.mode.celt_mode_48000;
 use src.opus.celt.mode.celt_mode_for_sample_rate;
 
@@ -76,5 +78,42 @@ test "celt mode eband query rejects invalid indexes" {
     match over_width {
         error.CeltModeError => {}
         else => { try assert(false, "band past nb_ebands must fail"); }
+    }
+}
+
+test "celt mode maps LM to valid frame sizes" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32(try celt_mode_frame_size_from_lm(&mode, 0), 120);
+    try assert_eq_i32(try celt_mode_frame_size_from_lm(&mode, 1), 240);
+    try assert_eq_i32(try celt_mode_frame_size_from_lm(&mode, 2), 480);
+    try assert_eq_i32(try celt_mode_frame_size_from_lm(&mode, 3), 960);
+}
+
+test "celt mode maps frame sizes back to LM" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 120), 0);
+    try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 240), 1);
+    try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 480), 2);
+    try assert_eq_i32(try celt_mode_lm_from_frame_size(&mode, 960), 3);
+}
+
+test "celt mode frame size LM mapping rejects unsupported values" {
+    const mode: CeltMode = celt_mode_48000();
+    const negative_lm: !i32 = celt_mode_frame_size_from_lm(&mode, -1);
+    match negative_lm {
+        error.CeltModeError => {}
+        else => { try assert(false, "negative LM must fail"); }
+    }
+
+    const over_lm: !i32 = celt_mode_frame_size_from_lm(&mode, 4);
+    match over_lm {
+        error.CeltModeError => {}
+        else => { try assert(false, "LM past max_lm must fail"); }
+    }
+
+    const invalid_frame_size: !i32 = celt_mode_lm_from_frame_size(&mode, 360);
+    match invalid_frame_size {
+        error.CeltModeError => {}
+        else => { try assert(false, "non-CELT frame size must fail"); }
     }
 }

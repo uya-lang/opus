@@ -68,3 +68,31 @@ export fn celt_mode_eband_width_5ms(mode: &const CeltMode, band_index: i32) !i16
     const end: i16 = try celt_mode_eband_boundary_5ms(mode, band_index + 1);
     return end - start;
 }
+
+export fn celt_mode_frame_size_from_lm(mode: &const CeltMode, lm: i32) !i32 {
+    if lm < 0 {
+        return error.CeltModeError;
+    }
+    if lm > mode.max_lm {
+        return error.CeltModeError;
+    }
+    return mode.short_mdct_size << lm;
+}
+
+export fn celt_mode_lm_from_frame_size(mode: &const CeltMode, frame_size: i32) !i32 {
+    if frame_size <= 0 {
+        return error.CeltModeError;
+    }
+
+    var lm: i32 = 0;
+    var current: i32 = mode.short_mdct_size;
+    while lm <= mode.max_lm {
+        if current == frame_size {
+            return lm;
+        }
+        current = current << 1;
+        lm = lm + 1;
+    }
+
+    return error.CeltModeError;
+}
