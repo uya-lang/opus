@@ -1,0 +1,44 @@
+export error EntropyCdfError;
+
+export fn icdf_is_valid(icdf: &[byte], ftb: u32) bool {
+    if icdf.len == 0 || ftb == 0 || ftb > 8 {
+        return false;
+    }
+    var prev: u32 = 1 << (ftb as i32);
+    var i: usize = 0;
+    while i < icdf.len {
+        const cur: u32 = icdf.ptr[i] as u32;
+        if cur >= prev {
+            return false;
+        }
+        prev = cur;
+        i = i + 1;
+    }
+    return prev == 0;
+}
+
+export fn icdf_symbol_low(icdf: &[byte], symbol: usize, ftb: u32) !u32 {
+    if !icdf_is_valid(icdf, ftb) || symbol >= icdf.len {
+        return error.EntropyCdfError;
+    }
+    if symbol == 0 {
+        return 0 as u32;
+    }
+    const ft: u32 = 1 << (ftb as i32);
+    return ft - (icdf.ptr[symbol - 1] as u32);
+}
+
+export fn icdf_symbol_high(icdf: &[byte], symbol: usize, ftb: u32) !u32 {
+    if !icdf_is_valid(icdf, ftb) || symbol >= icdf.len {
+        return error.EntropyCdfError;
+    }
+    const one: u32 = 1;
+    const ft: u32 = one << (ftb as i32);
+    return ft - (icdf.ptr[symbol] as u32);
+}
+
+export fn icdf_symbol_freq(icdf: &[byte], symbol: usize, ftb: u32) !u32 {
+    const low: u32 = try icdf_symbol_low(icdf, symbol, ftb);
+    const high: u32 = try icdf_symbol_high(icdf, symbol, ftb);
+    return high - low;
+}

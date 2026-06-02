@@ -116,22 +116,22 @@
 - [x] 实现 `ec_tell_frac`。
 - [x] 实现 `ec_dec_check`，把热路径 `error` 标志转换成 public error。
 - [x] 确认 entropy symbol hot API 不返回 `!T`，错误先写入 state。
-- [ ] 实现 `entropy/range_enc.uya` 状态。
-- [ ] 实现 `ec_enc_init`。
-- [ ] 实现 `ec_encode`。
-- [ ] 实现 `ec_enc_icdf`。
-- [ ] 实现 `ec_enc_bit_logp`。
-- [ ] 实现 `ec_enc_uint`。
-- [ ] 实现 `ec_enc_bits`。
-- [ ] 实现 `ec_enc_done`。
-- [ ] 实现 CDF helper。
-- [ ] 实现 Laplace helper。
-- [ ] 测试 uint roundtrip。
-- [ ] 测试 icdf roundtrip。
-- [ ] 测试 bit_logp roundtrip。
-- [ ] 测试 raw end bits。
-- [ ] 测试 1 byte buffer 边界。
-- [ ] 测试随机符号序列 roundtrip。
+- [x] 实现 `entropy/range_enc.uya` 状态。
+- [x] 实现 `ec_enc_init`。
+- [x] 实现 `ec_encode`。
+- [x] 实现 `ec_enc_icdf`。
+- [x] 实现 `ec_enc_bit_logp`。
+- [x] 实现 `ec_enc_uint`。
+- [x] 实现 `ec_enc_bits`。
+- [x] 实现 `ec_enc_done`。
+- [x] 实现 CDF helper。
+- [x] 实现 Laplace helper。
+- [x] 测试 uint roundtrip。
+- [x] 测试 icdf roundtrip。
+- [x] 测试 bit_logp roundtrip。
+- [x] 测试 raw end bits。
+- [x] 测试 1 byte buffer 边界。
+- [x] 测试随机符号序列 roundtrip。
 - [ ] 测试截断 bitstream 错误。
 - [ ] benchmark entropy decode，记录 ns/symbol 和 alloc count。
 

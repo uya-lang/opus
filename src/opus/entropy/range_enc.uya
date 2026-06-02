@@ -1,0 +1,326 @@
+use src.opus.entropy.range_dec.EC_BITRES;
+use src.opus.entropy.range_dec.EC_CODE_BITS;
+use src.opus.entropy.range_dec.EC_CODE_BOT;
+use src.opus.entropy.range_dec.EC_CODE_MASK;
+use src.opus.entropy.range_dec.EC_CODE_TOP;
+use src.opus.entropy.range_dec.EC_SYM_BITS;
+use src.opus.entropy.range_dec.EC_SYM_MAX;
+use src.opus.entropy.range_dec.EC_UINT_BITS;
+use src.opus.entropy.range_dec.EC_WINDOW_SIZE;
+use src.opus.entropy.range_dec.ec_ilog;
+
+const EC_ENC_SYM_BITS_SHIFT: i32 = 8;
+const EC_ENC_CODE_SHIFT: i32 = 23;
+const EC_ENC_BITRES_SHIFT: i32 = 3;
+
+export error EntropyEncoderError;
+
+export struct EcEnc {
+    buf: &byte,
+    storage: usize,
+    end_offs: usize,
+    end_window: u32,
+    nend_bits: u32,
+    nbits_total: u32,
+    offs: usize,
+    rng: u32,
+    val: u32,
+    ext: u32,
+    rem: i32,
+    err: bool,
+}
+
+fn min_u32(a: u32, b: u32) u32 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn write_byte(st: &EcEnc, value: u32) void {
+    if st.offs + st.end_offs >= st.storage {
+        st.err = true;
+        return;
+    }
+    st.buf[st.offs] = (value & EC_SYM_MAX) as byte;
+    st.offs = st.offs + 1;
+}
+
+fn write_byte_at_end(st: &EcEnc, value: u32) void {
+    if st.offs + st.end_offs >= st.storage {
+        st.err = true;
+        return;
+    }
+    st.end_offs = st.end_offs + 1;
+    st.buf[st.storage - st.end_offs] = (value & EC_SYM_MAX) as byte;
+}
+
+fn ec_enc_carry_out(st: &EcEnc, c_in: u32) void {
+    if c_in != EC_SYM_MAX {
+        const carry: u32 = c_in >> EC_ENC_SYM_BITS_SHIFT;
+        if st.rem >= 0 {
+            write_byte(st, (st.rem as u32) + carry);
+        }
+        if st.ext > 0 {
+            const sym: u32 = (EC_SYM_MAX + carry) & EC_SYM_MAX;
+            while st.ext > 0 {
+                write_byte(st, sym);
+                st.ext = st.ext - 1;
+            }
+        }
+        st.rem = (c_in & EC_SYM_MAX) as i32;
+    } else {
+        st.ext = st.ext + 1;
+    }
+}
+
+fn ec_enc_normalize(st: &EcEnc) void {
+    while st.rng <= EC_CODE_BOT {
+        ec_enc_carry_out(st, st.val >> EC_ENC_CODE_SHIFT);
+        st.val = (st.val << EC_ENC_SYM_BITS_SHIFT) & EC_CODE_MASK;
+        st.rng = st.rng << EC_ENC_SYM_BITS_SHIFT;
+        st.nbits_total = st.nbits_total + EC_SYM_BITS;
+    }
+}
+
+export fn ec_enc_init(st: &EcEnc, buf: &[byte]) void {
+    st.buf = buf.ptr;
+    st.storage = buf.len;
+    st.end_offs = 0;
+    st.end_window = 0;
+    st.nend_bits = 0;
+    st.nbits_total = EC_CODE_BITS + 1;
+    st.offs = 0;
+    st.rng = EC_CODE_TOP;
+    st.val = 0;
+    st.ext = 0;
+    st.rem = -1;
+    st.err = false;
+}
+
+export fn ec_encode(st: &EcEnc, fl: u32, fh: u32, ft: u32) void {
+    if fl >= fh || fh > ft || ft == 0 {
+        st.err = true;
+        return;
+    }
+    const r: u32 = st.rng / ft;
+    if r == 0 {
+        st.err = true;
+        return;
+    }
+    if fl > 0 {
+        st.val = st.val + st.rng - (r * (ft - fl));
+        st.rng = r * (fh - fl);
+    } else {
+        st.rng = st.rng - (r * (ft - fh));
+    }
+    ec_enc_normalize(st);
+}
+
+export fn ec_encode_bin(st: &EcEnc, fl: u32, fh: u32, bits: u32) void {
+    if bits >= 31 {
+        st.err = true;
+        return;
+    }
+    const ft: u32 = 1 << (bits as i32);
+    if fl >= fh || fh > ft {
+        st.err = true;
+        return;
+    }
+    const r: u32 = st.rng >> (bits as i32);
+    if r == 0 {
+        st.err = true;
+        return;
+    }
+    if fl > 0 {
+        st.val = st.val + st.rng - (r * (ft - fl));
+        st.rng = r * (fh - fl);
+    } else {
+        st.rng = st.rng - (r * (ft - fh));
+    }
+    ec_enc_normalize(st);
+}
+
+export fn ec_encode_symbol(st: &EcEnc, s: u32, ft: u32) void {
+    if s >= ft {
+        st.err = true;
+        return;
+    }
+    ec_encode(st, s, s + 1, ft);
+}
+
+export fn ec_enc_icdf(st: &EcEnc, s: i32, icdf: &[byte], ftb: u32) void {
+    if s < 0 || (s as usize) >= icdf.len || ftb >= 31 || icdf.len == 0 {
+        st.err = true;
+        return;
+    }
+    const idx: usize = s as usize;
+    const r: u32 = st.rng >> (ftb as i32);
+    if r == 0 {
+        st.err = true;
+        return;
+    }
+    if idx > 0 {
+        const prev: u32 = icdf.ptr[idx - 1] as u32;
+        const cur: u32 = icdf.ptr[idx] as u32;
+        if prev <= cur {
+            st.err = true;
+            return;
+        }
+        st.val = st.val + st.rng - (r * prev);
+        st.rng = r * (prev - cur);
+    } else {
+        const cur0: u32 = icdf.ptr[0] as u32;
+        st.rng = st.rng - (r * cur0);
+    }
+    ec_enc_normalize(st);
+}
+
+export fn ec_enc_bit_logp(st: &EcEnc, val: i32, logp: u32) void {
+    if logp >= 31 {
+        st.err = true;
+        return;
+    }
+    const r: u32 = st.rng;
+    const s: u32 = r >> (logp as i32);
+    if s == 0 {
+        st.err = true;
+        return;
+    }
+    const nr: u32 = r - s;
+    if val != 0 {
+        st.val = st.val + nr;
+        st.rng = s;
+    } else {
+        st.rng = nr;
+    }
+    ec_enc_normalize(st);
+}
+
+export fn ec_enc_bits(st: &EcEnc, fl: u32, bits: u32) void {
+    if bits == 0 {
+        return;
+    }
+    if bits > 25 {
+        st.err = true;
+        return;
+    }
+    if bits < 32 && fl >= (1 << (bits as i32)) {
+        st.err = true;
+        return;
+    }
+    var window: u32 = st.end_window;
+    var used: u32 = st.nend_bits;
+    if used + bits > EC_WINDOW_SIZE {
+        while used >= EC_SYM_BITS {
+            write_byte_at_end(st, window & EC_SYM_MAX);
+            window = window >> EC_ENC_SYM_BITS_SHIFT;
+            used = used - EC_SYM_BITS;
+        }
+    }
+    window = window | (fl << (used as i32));
+    used = used + bits;
+    st.end_window = window;
+    st.nend_bits = used;
+    st.nbits_total = st.nbits_total + bits;
+}
+
+export fn ec_enc_uint(st: &EcEnc, fl: u32, ft_in: u32) void {
+    if ft_in <= 1 || fl >= ft_in {
+        st.err = true;
+        return;
+    }
+    var ft_minus: u32 = ft_in - 1;
+    var ftb: u32 = ec_ilog(ft_minus);
+    if ftb > EC_UINT_BITS {
+        ftb = ftb - EC_UINT_BITS;
+        const ft: u32 = (ft_minus >> (ftb as i32)) + 1;
+        const top: u32 = fl >> (ftb as i32);
+        ec_encode(st, top, top + 1, ft);
+        const one: u32 = 1;
+        ec_enc_bits(st, fl & ((one << (ftb as i32)) - 1), ftb);
+        return;
+    }
+    ec_encode(st, fl, fl + 1, ft_in);
+}
+
+export fn ec_tell_enc(st: &const EcEnc) u32 {
+    return st.nbits_total - ec_ilog(st.rng);
+}
+
+export fn ec_tell_frac_enc(st: &const EcEnc) u32 {
+    const correction: [u32: 8] = [35733, 38967, 42495, 46340, 50535, 55109, 60097, 65535];
+    var nbits: u32 = st.nbits_total << EC_ENC_BITRES_SHIFT;
+    var l: u32 = ec_ilog(st.rng);
+    var r: u32 = st.rng >> ((l - 16) as i32);
+    var b: u32 = (r >> 12) - 8;
+    if b < 8 {
+        if r > correction[b as usize] {
+            b = b + 1;
+        }
+    } else {
+        b = 8;
+    }
+    l = (l << EC_ENC_BITRES_SHIFT) + b;
+    return nbits - l;
+}
+
+export fn ec_enc_done(st: &EcEnc) !usize {
+    var l: i32 = (EC_CODE_BITS - ec_ilog(st.rng)) as i32;
+    const uint_max: u32 = EC_CODE_TOP | EC_CODE_MASK;
+    var msk: u32 = EC_CODE_MASK >> l;
+    var end: u32 = (st.val + msk) & (uint_max ^ msk);
+    if (end | msk) >= st.val + st.rng {
+        l = l + 1;
+        msk = msk >> 1;
+        end = (st.val + msk) & (uint_max ^ msk);
+    }
+    while l > 0 {
+        ec_enc_carry_out(st, end >> EC_ENC_CODE_SHIFT);
+        end = (end << EC_ENC_SYM_BITS_SHIFT) & EC_CODE_MASK;
+        l = l - (EC_SYM_BITS as i32);
+    }
+    if st.rem >= 0 || st.ext > 0 {
+        ec_enc_carry_out(st, 0);
+    }
+    var window: u32 = st.end_window;
+    var used: u32 = st.nend_bits;
+    while used >= EC_SYM_BITS {
+        write_byte_at_end(st, window & EC_SYM_MAX);
+        window = window >> EC_ENC_SYM_BITS_SHIFT;
+        used = used - EC_SYM_BITS;
+    }
+
+    if !st.err {
+        var i: usize = st.offs;
+        const stop: usize = st.storage - st.end_offs;
+        while i < stop {
+            st.buf[i] = 0;
+            i = i + 1;
+        }
+        if used > 0 {
+            if st.end_offs >= st.storage {
+                st.err = true;
+            } else {
+                const remaining_l: i32 = -l;
+                if st.offs + st.end_offs >= st.storage && remaining_l < (used as i32) {
+                    const one2: u32 = 1;
+                    window = window & ((one2 << remaining_l) - 1);
+                    st.err = true;
+                }
+                const pos: usize = st.storage - st.end_offs - 1;
+                st.buf[pos] = st.buf[pos] | (window as byte);
+            }
+        }
+    }
+    if st.err {
+        return error.EntropyEncoderError;
+    }
+    return st.offs + st.end_offs;
+}
+
+export fn ec_enc_check(st: &const EcEnc) !void {
+    if st.err {
+        return error.EntropyEncoderError;
+    }
+}

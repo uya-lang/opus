@@ -1,0 +1,105 @@
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_update;
+use src.opus.entropy.range_dec.ec_decode_bin;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_encode_bin;
+
+export const LAPLACE_LOG_MINP: u32 = 0;
+export const LAPLACE_MINP: u32 = 1;
+export const LAPLACE_NMIN: u32 = 16;
+const LAPLACE_FTB: u32 = 15;
+const LAPLACE_FT: u32 = 32768;
+
+fn min_i32(a: i32, b: i32) i32 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn min_u32(a: u32, b: u32) u32 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+export fn ec_laplace_get_freq1(fs0: u32, decay: i32) u32 {
+    const ft: u32 = LAPLACE_FT - (LAPLACE_MINP * (2 * LAPLACE_NMIN)) - fs0;
+    return (ft * ((16384 - decay) as u32)) >> 15;
+}
+
+export fn ec_laplace_encode(enc: &EcEnc, value: &i32, fs_in: u32, decay: i32) void {
+    if fs_in == 0 || fs_in >= LAPLACE_FT || decay <= 0 || decay > 11456 {
+        enc.err = true;
+        return;
+    }
+    var fs: u32 = fs_in;
+    var fl: u32 = 0;
+    var val: i32 = *value;
+    if val != 0 {
+        var s: i32 = 0;
+        if val < 0 {
+            s = -1;
+        }
+        val = (val + s) ^ s;
+        fl = fs;
+        fs = ec_laplace_get_freq1(fs, decay);
+        var i: i32 = 1;
+        while fs > 0 && i < val {
+            fs = fs * 2;
+            fl = fl + fs + (2 * LAPLACE_MINP);
+            fs = (fs * (decay as u32)) >> 15;
+            i = i + 1;
+        }
+        if fs == 0 {
+            var ndi_max: i32 = ((LAPLACE_FT - fl + LAPLACE_MINP - 1) >> (LAPLACE_LOG_MINP as i32)) as i32;
+            ndi_max = (ndi_max - s) >> 1;
+            const di: i32 = min_i32(val - i, ndi_max - 1);
+            fl = fl + (((2 * di + 1 + s) as u32) * LAPLACE_MINP);
+            fs = min_u32(LAPLACE_MINP, LAPLACE_FT - fl);
+            *value = (i + di + s) ^ s;
+        } else {
+            fs = fs + LAPLACE_MINP;
+            if s == 0 {
+                fl = fl + fs;
+            }
+        }
+    }
+    ec_encode_bin(enc, fl, min_u32(fl + fs, LAPLACE_FT), LAPLACE_FTB);
+}
+
+export fn ec_laplace_decode(dec: &EcDec, fs_in: u32, decay: i32) i32 {
+    if fs_in == 0 || fs_in >= LAPLACE_FT || decay <= 0 || decay > 11456 {
+        dec.err = true;
+        return 0;
+    }
+    var fs: u32 = fs_in;
+    var val: i32 = 0;
+    var fl: u32 = 0;
+    const fm: u32 = ec_decode_bin(dec, LAPLACE_FTB);
+    if fm >= fs {
+        val = val + 1;
+        fl = fs;
+        fs = ec_laplace_get_freq1(fs, decay) + LAPLACE_MINP;
+        while fs > LAPLACE_MINP && fm >= fl + (2 * fs) {
+            fs = fs * 2;
+            fl = fl + fs;
+            fs = ((fs - (2 * LAPLACE_MINP)) * (decay as u32)) >> 15;
+            fs = fs + LAPLACE_MINP;
+            val = val + 1;
+        }
+        if fs <= LAPLACE_MINP {
+            const di: i32 = ((fm - fl) >> ((LAPLACE_LOG_MINP + 1) as i32)) as i32;
+            val = val + di;
+            fl = fl + ((2 * di) as u32) * LAPLACE_MINP;
+        }
+        if fm < fl + fs {
+            val = -val;
+        } else {
+            fl = fl + fs;
+        }
+    }
+    ec_dec_update(dec, fl, min_u32(fl + fs, LAPLACE_FT), LAPLACE_FT);
+    return val;
+}

@@ -1,0 +1,180 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.cdf.icdf_is_valid;
+use src.opus.entropy.cdf.icdf_symbol_freq;
+use src.opus.entropy.cdf.icdf_symbol_high;
+use src.opus.entropy.cdf.icdf_symbol_low;
+use src.opus.entropy.laplace.ec_laplace_decode;
+use src.opus.entropy.laplace.ec_laplace_encode;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_bits;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_dec_uint;
+use src.opus.entropy.range_dec.ec_dec_update;
+use src.opus.entropy.range_dec.ec_decode;
+use src.opus.entropy.range_dec.ec_decode_bin;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_bits;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.entropy.range_enc.ec_enc_uint;
+use src.opus.entropy.range_enc.ec_encode;
+use src.opus.entropy.range_enc.ec_encode_bin;
+
+test "range encoder initializes caller supplied state and buffer" {
+    var packet: [byte: 8] = [99: 8];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:8]);
+
+    try assert_eq_i32(enc.storage as i32, 8);
+    try assert_eq_i32(enc.offs as i32, 0);
+    try assert_eq_i32(enc.end_offs as i32, 0);
+    try assert_eq_i32(enc.nbits_total as i32, 33);
+    try ec_enc_check(&enc);
+}
+
+test "range encoder produces the existing mixed Opus-compatible vector" {
+    var packet: [byte: 16] = [0: 16];
+    const expected: [byte: 16] = [139, 165, 14, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 174, 168];
+    const icdf: [byte: 4] = [200, 100, 40, 0];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+
+    ec_encode(&enc, 2, 3, 5);
+    ec_encode_bin(&enc, 5, 6, 3);
+    ec_enc_icdf(&enc, 2, &icdf[0:4], 8);
+    ec_enc_bit_logp(&enc, 1, 3);
+    ec_enc_uint(&enc, 17, 100);
+    ec_enc_uint(&enc, 1000, 5000);
+    ec_enc_bits(&enc, 21, 5);
+    ec_enc_bits(&enc, 683, 10);
+    const used: usize = try ec_enc_done(&enc);
+
+    try assert_eq_i32(used as i32, 6);
+    var i: usize = 0;
+    while i < 16 {
+        try assert_eq_i32(packet[i] as i32, expected[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "range encoder roundtrips uint icdf bit_logp and raw end bits" {
+    var packet: [byte: 64] = [0: 64];
+    const icdf: [byte: 4] = [200, 100, 40, 0];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:64]);
+
+    ec_enc_uint(&enc, 0, 2);
+    ec_enc_uint(&enc, 99, 100);
+    ec_enc_uint(&enc, 4097, 9000);
+    ec_enc_icdf(&enc, 0, &icdf[0:4], 8);
+    ec_enc_icdf(&enc, 3, &icdf[0:4], 8);
+    ec_enc_bit_logp(&enc, 0, 5);
+    ec_enc_bit_logp(&enc, 1, 2);
+    ec_enc_bits(&enc, 3, 2);
+    ec_enc_bits(&enc, 0x1ffff, 17);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:64]);
+    try assert_eq_i32(ec_dec_uint(&dec, 2) as i32, 0);
+    try assert_eq_i32(ec_dec_uint(&dec, 100) as i32, 99);
+    try assert_eq_i32(ec_dec_uint(&dec, 9000) as i32, 4097);
+    try assert_eq_i32(ec_dec_icdf(&dec, &icdf[0:4], 8), 0);
+    try assert_eq_i32(ec_dec_icdf(&dec, &icdf[0:4], 8), 3);
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 5), 0);
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 2), 1);
+    try assert_eq_i32(ec_dec_bits(&dec, 2) as i32, 3);
+    try assert_eq_i32(ec_dec_bits(&dec, 17) as i32, 0x1ffff);
+    try ec_dec_check(&dec);
+}
+
+test "range encoder reports 1 byte buffer overflow at finish" {
+    var packet: [byte: 1] = [0: 1];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:1]);
+    ec_enc_uint(&enc, 17, 100);
+    ec_enc_bits(&enc, 7, 3);
+
+    const result: !usize = ec_enc_done(&enc);
+    match result {
+        error.EntropyEncoderError => {}
+        else => { try assert(false, "encoder must report exhausted output storage"); }
+    }
+}
+
+test "range encoder roundtrips a deterministic random-like symbol sequence" {
+    var packet: [byte: 128] = [0: 128];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:128]);
+
+    var seed: u32 = 1;
+    var i: usize = 0;
+    while i < 48 {
+        seed = seed * 1103515245 + 12345;
+        const mask: u32 = 31;
+        const ft: u32 = 2 + (seed & mask);
+        const sym: u32 = (seed >> 8) % ft;
+        ec_encode(&enc, sym, sym + 1, ft);
+        i = i + 1;
+    }
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:128]);
+    seed = 1;
+    i = 0;
+    while i < 48 {
+        seed = seed * 1103515245 + 12345;
+        const mask: u32 = 31;
+        const ft: u32 = 2 + (seed & mask);
+        const expected: u32 = (seed >> 8) % ft;
+        const decoded: u32 = ec_decode(&dec, ft);
+        ec_dec_update(&dec, expected, expected + 1, ft);
+        try assert(decoded >= expected, "decoded value is inside encoded interval low");
+        try assert(decoded < expected + 1, "decoded value is inside encoded interval high");
+        i = i + 1;
+    }
+    try ec_dec_check(&dec);
+}
+
+test "cdf helper validates inverse CDF ranges" {
+    const good: [byte: 4] = [200, 100, 40, 0];
+    const bad: [byte: 4] = [200, 210, 40, 0];
+
+    try assert(icdf_is_valid(&good[0:4], 8), "good icdf");
+    try assert(!icdf_is_valid(&bad[0:4], 8), "bad icdf");
+    try assert_eq_i32((try icdf_symbol_high(&good[0:4], 0, 8)) as i32, 56);
+    try assert_eq_i32((try icdf_symbol_low(&good[0:4], 0, 8)) as i32, 0);
+    try assert_eq_i32((try icdf_symbol_freq(&good[0:4], 2, 8)) as i32, 60);
+}
+
+test "laplace helper roundtrips signed values" {
+    var packet: [byte: 64] = [0: 64];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:64]);
+
+    var v0: i32 = 0;
+    var v1: i32 = -1;
+    var v2: i32 = 3;
+    var v3: i32 = -7;
+    ec_laplace_encode(&enc, &v0, 6000, 8000);
+    ec_laplace_encode(&enc, &v1, 6000, 8000);
+    ec_laplace_encode(&enc, &v2, 6000, 8000);
+    ec_laplace_encode(&enc, &v3, 6000, 8000);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:64]);
+    try assert_eq_i32(ec_laplace_decode(&dec, 6000, 8000), v0);
+    try assert_eq_i32(ec_laplace_decode(&dec, 6000, 8000), v1);
+    try assert_eq_i32(ec_laplace_decode(&dec, 6000, 8000), v2);
+    try assert_eq_i32(ec_laplace_decode(&dec, 6000, 8000), v3);
+    try ec_dec_check(&dec);
+}

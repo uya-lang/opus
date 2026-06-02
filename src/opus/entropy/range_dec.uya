@@ -72,7 +72,7 @@ export fn ec_dec_normalize(st: &EcDec) void {
         var sym: u32 = st.rem;
         st.rem = read_byte(st);
         sym = ((sym << EC_SYM_BITS_SHIFT) | st.rem) >> (EC_SYM_BITS_SHIFT - EC_CODE_EXTRA_SHIFT);
-        st.val = ((st.val << EC_SYM_BITS_SHIFT) + (EC_SYM_MAX - (sym & EC_SYM_MAX))) & EC_CODE_MASK;
+        st.val = ((st.val << EC_SYM_BITS_SHIFT) + (EC_SYM_MAX & (EC_SYM_MAX ^ sym))) & EC_CODE_MASK;
     }
 }
 
