@@ -1,0 +1,60 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.dsp.resampler.DspResamplerError;
+use src.opus.dsp.resampler.ResamplerConfig;
+use src.opus.dsp.resampler.opus_resampler_rate_is_supported;
+use src.opus.dsp.resampler.resampler_config_init;
+use src.opus.dsp.resampler.resampler_is_identity;
+use src.opus.dsp.resampler.resampler_output_samples_per_channel;
+use src.opus.dsp.resampler.resampler_process_identity_i16;
+
+test "resampler placeholder validates Opus API rates and channels" {
+    try assert(opus_resampler_rate_is_supported(8000), "8 kHz supported");
+    try assert(opus_resampler_rate_is_supported(48000), "48 kHz supported");
+    try assert(!opus_resampler_rate_is_supported(44100), "44.1 kHz rejected");
+
+    const cfg: ResamplerConfig = try resampler_config_init(48000, 16000, 2, 960);
+    try assert_eq_i32(cfg.input_rate_hz as i32, 48000);
+    try assert_eq_i32(cfg.output_rate_hz as i32, 16000);
+    try assert_eq_i32(cfg.channels as i32, 2);
+
+    const bad: !ResamplerConfig = resampler_config_init(44100, 48000, 2, 960);
+    match bad {
+        error.DspResamplerError => {}
+        else => { try assert(false, "unsupported rate must fail"); }
+    }
+}
+
+test "resampler placeholder computes bounded output capacity" {
+    const down: ResamplerConfig = try resampler_config_init(48000, 16000, 1, 960);
+    const up: ResamplerConfig = try resampler_config_init(16000, 48000, 1, 320);
+    try assert_eq_i32((try resampler_output_samples_per_channel(960, &down)) as i32, 320);
+    try assert_eq_i32((try resampler_output_samples_per_channel(321, &down)) as i32, 107);
+    try assert_eq_i32((try resampler_output_samples_per_channel(320, &up)) as i32, 960);
+
+    const too_many: !usize = resampler_output_samples_per_channel(961, &down);
+    match too_many {
+        error.DspResamplerError => {}
+        else => { try assert(false, "oversized input must fail"); }
+    }
+}
+
+test "resampler placeholder exposes only identity processing path" {
+    const identity: ResamplerConfig = try resampler_config_init(48000, 48000, 2, 4);
+    const down: ResamplerConfig = try resampler_config_init(48000, 16000, 2, 4);
+    try assert(resampler_is_identity(&identity), "identity config");
+    try assert(!resampler_is_identity(&down), "non-identity config");
+
+    var input: [i16: 4] = [100, -100, 200, -200];
+    var output: [i16: 4] = [0: 4];
+    const written: usize = try resampler_process_identity_i16(&input[0:4], &identity, &output[0:4]);
+    try assert_eq_i32(written as i32, 4);
+    try assert_eq_i32(output[0] as i32, 100);
+    try assert_eq_i32(output[3] as i32, -200);
+
+    const not_supported: !usize = resampler_process_identity_i16(&input[0:4], &down, &output[0:4]);
+    match not_supported {
+        error.DspResamplerError => {}
+        else => { try assert(false, "non-identity process is not implemented by placeholder"); }
+    }
+}

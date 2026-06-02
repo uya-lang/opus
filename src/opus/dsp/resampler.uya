@@ -1,0 +1,59 @@
+export error DspResamplerError;
+
+export struct ResamplerConfig {
+    input_rate_hz: u32,
+    output_rate_hz: u32,
+    channels: u32,
+    max_frame_samples_per_channel: usize,
+}
+
+export fn opus_resampler_rate_is_supported(rate_hz: u32) bool {
+    return rate_hz == 8000 || rate_hz == 12000 || rate_hz == 16000 || rate_hz == 24000 || rate_hz == 48000;
+}
+
+export fn resampler_config_init(input_rate_hz: u32, output_rate_hz: u32, channels: u32, max_frame_samples_per_channel: usize) !ResamplerConfig {
+    if !opus_resampler_rate_is_supported(input_rate_hz) || !opus_resampler_rate_is_supported(output_rate_hz) {
+        return error.DspResamplerError;
+    }
+    if channels == 0 || channels > 2 || max_frame_samples_per_channel == 0 {
+        return error.DspResamplerError;
+    }
+    return ResamplerConfig{
+        input_rate_hz: input_rate_hz,
+        output_rate_hz: output_rate_hz,
+        channels: channels,
+        max_frame_samples_per_channel: max_frame_samples_per_channel,
+    };
+}
+
+export fn resampler_is_identity(config: &ResamplerConfig) bool {
+    return config.input_rate_hz == config.output_rate_hz;
+}
+
+export fn resampler_output_samples_per_channel(input_samples_per_channel: usize, config: &ResamplerConfig) !usize {
+    if input_samples_per_channel > config.max_frame_samples_per_channel || config.input_rate_hz == 0 {
+        return error.DspResamplerError;
+    }
+    const numerator: u64 = (input_samples_per_channel as u64) * (config.output_rate_hz as u64);
+    return ((numerator + (config.input_rate_hz as u64) - 1) / (config.input_rate_hz as u64)) as usize;
+}
+
+export fn resampler_process_identity_i16(input: &[i16], config: &ResamplerConfig, output: &[i16]) !usize {
+    if !resampler_is_identity(config) {
+        return error.DspResamplerError;
+    }
+    if (input.len % (config.channels as usize)) != 0 {
+        return error.DspResamplerError;
+    }
+    const samples_per_channel: usize = input.len / (config.channels as usize);
+    if samples_per_channel > config.max_frame_samples_per_channel || output.len < input.len {
+        return error.DspResamplerError;
+    }
+
+    var i: usize = 0;
+    while i < input.len {
+        output.ptr[i] = input.ptr[i];
+        i = i + 1;
+    }
+    return input.len;
+}
