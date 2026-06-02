@@ -172,6 +172,15 @@ const SILK_SHELL_CODE_TABLE_OFFSETS: [usize: 17] = [
     135,
 ];
 
+const SILK_SIGN_ICDF: [byte: 42] = [
+    254, 49, 67, 77, 82, 93, 99,
+    198, 11, 18, 24, 31, 36, 45,
+    255, 46, 66, 78, 87, 94, 104,
+    208, 14, 21, 32, 42, 51, 66,
+    255, 94, 104, 109, 112, 115, 118,
+    248, 53, 69, 80, 88, 95, 102,
+];
+
 fn silk_shell_hash_value(table: i32, index: usize) u64 {
     if table == 0 { return SILK_SHELL_CODE_TABLE0[index] as u64; }
     if table == 1 { return SILK_SHELL_CODE_TABLE1[index] as u64; }
@@ -199,6 +208,24 @@ export fn silk_shell_table_hash(table: i32) u32 {
     if table == 3 { return hash_shell_table(3, 152); }
     if table == 4 { return hash_shell_table(4, 17); }
     return 0;
+}
+
+export fn silk_sign_icdf_hash() u32 {
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < 42 {
+        h = (h * (131 as u64) + (SILK_SIGN_ICDF[i] as u64) + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
+export fn silk_sign_icdf_value(index: usize) byte {
+    if index >= 42 {
+        return 0;
+    }
+    return SILK_SIGN_ICDF[index];
 }
 
 export fn silk_shell_code_table_value(table: i32, index: usize) byte {
@@ -236,5 +263,6 @@ export fn silk_table_len(table: i32) usize {
     if table == 9 { return 152; }
     if table == 10 { return 152; }
     if table == 11 { return 17; }
+    if table == 12 { return 42; }
     return 0 as usize;
 }

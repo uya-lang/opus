@@ -60,6 +60,7 @@ TABLES = [
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE2", 152, 611988706, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE3", 152, 524016143, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE_OFFSETS", 17, 711768652, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_SIGN_ICDF", 42, 281612844, 0, None),
 ]
 
 EXTRA_ICDFS = [

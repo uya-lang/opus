@@ -14,6 +14,7 @@ use src.opus.entropy.cdf.entropy_cdf_table_len;
 use src.opus.entropy.cdf.entropy_cdf_tell_frac_correction_hash;
 use src.opus.silk.tables.silk_table_len;
 use src.opus.silk.tables.silk_shell_table_hash;
+use src.opus.silk.tables.silk_sign_icdf_hash;
 
 test "imported table lengths match upstream inventory" {
     try assert_eq_i32(celt_table_len(0) as i32, 22);
@@ -36,6 +37,7 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(silk_table_len(9) as i32, 152);
     try assert_eq_i32(silk_table_len(10) as i32, 152);
     try assert_eq_i32(silk_table_len(11) as i32, 17);
+    try assert_eq_i32(silk_table_len(12) as i32, 42);
 }
 
 test "imported small scalar table hashes match upstream values" {
@@ -48,6 +50,7 @@ test "imported small scalar table hashes match upstream values" {
     try assert_eq_i32(silk_shell_table_hash(2) as i32, 611988706);
     try assert_eq_i32(silk_shell_table_hash(3) as i32, 524016143);
     try assert_eq_i32(silk_shell_table_hash(4) as i32, 711768652);
+    try assert_eq_i32(silk_sign_icdf_hash() as i32, 281612844);
 }
 
 test "imported critical-band and window tables keep expected boundaries" {

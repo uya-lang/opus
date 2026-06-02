@@ -245,7 +245,7 @@
 - [x] 实现 SILK frame 参数初始化。
 - [x] 实现 `silk/shell_coder.uya`。
 - [x] 实现 shell decode。
-- [ ] 实现 pulse sign decode。
+- [x] 实现 pulse sign decode。
 - [ ] 实现 `silk/nlsf.uya`。
 - [ ] 实现 NLSF decode。
 - [ ] 实现 NLSF stabilization。

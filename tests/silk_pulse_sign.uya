@@ -1,0 +1,137 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.pulse_sign.SILK_SIGN_ICDF_LEN;
+use src.opus.silk.pulse_sign.silk_pulse_sign_decode;
+use src.opus.silk.tables.silk_sign_icdf_hash;
+use src.opus.silk.tables.silk_sign_icdf_value;
+use src.opus.silk.tables.silk_table_len;
+
+fn sign_icdf_value(signal_type: i32, quant_offset_type: i32, pulse_count: i32) byte {
+    var capped: i32 = pulse_count & 31;
+    if capped > 6 {
+        capped = 6;
+    }
+    const offset: usize = (7 * (quant_offset_type + 2 * signal_type) + capped) as usize;
+    return silk_sign_icdf_value(offset);
+}
+
+fn encode_test_signs(enc: &EcEnc, pulses: &[i16], shell_totals: &[i32], signal_type: i32, quant_offset_type: i32) void {
+    var block: usize = 0;
+    while block < shell_totals.len {
+        const total: i32 = shell_totals.ptr[block];
+        if total > 0 {
+            var icdf: [byte: 2] = [sign_icdf_value(signal_type, quant_offset_type, total), 0];
+            var j: usize = 0;
+            while j < 16 {
+                const v: i16 = pulses.ptr[block * 16 + j];
+                if v != 0 {
+                    var symbol: i32 = 1;
+                    if v < 0 {
+                        symbol = 0;
+                    }
+                    ec_enc_icdf(enc, symbol, &icdf[0:2], 8);
+                }
+                j = j + 1;
+            }
+        }
+        block = block + 1;
+    }
+}
+
+test "silk pulse sign table matches upstream shape and hash" {
+    try assert_eq_i32(SILK_SIGN_ICDF_LEN as i32, 42);
+    try assert_eq_i32(silk_table_len(12) as i32, 42);
+    try assert_eq_i32(silk_sign_icdf_hash() as i32, 281612844);
+    try assert_eq_i32(silk_sign_icdf_value(0) as i32, 254);
+    try assert_eq_i32(silk_sign_icdf_value(6) as i32, 99);
+    try assert_eq_i32(silk_sign_icdf_value(35) as i32, 248);
+    try assert_eq_i32(silk_sign_icdf_value(41) as i32, 102);
+}
+
+test "silk pulse sign decode restores signed excitation pulses" {
+    var signed: [i16: 32] = [
+        -3, 0, 1, 0, 0, -2, 0, 0, 4, 0, 0, -1, 0, 0, 0, 5,
+        8, -4, 2, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    var magnitudes: [i16: 32] = [
+        3, 0, 1, 0, 0, 2, 0, 0, 4, 0, 0, 1, 0, 0, 0, 5,
+        8, 4, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    var totals: [i32: 2] = [16, 16];
+    var packet: [byte: 96] = [0: 96];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:96]);
+    encode_test_signs(&enc, &signed[0:32], &totals[0:2], SILK_SIGNAL_TYPE_VOICED, 1);
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:96]);
+    try silk_pulse_sign_decode(&dec, &magnitudes[0:32], &totals[0:2], SILK_SIGNAL_TYPE_VOICED, 1);
+    try ec_dec_check(&dec);
+
+    var i: usize = 0;
+    while i < 32 {
+        try assert_eq_i32(magnitudes[i] as i32, signed[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "silk pulse sign decode skips zero blocks and validates inputs" {
+    var pulses: [i16: 32] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 1, 0, 0, 0, 0, 0,
+    ];
+    var expected: [i16: 32] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        -1, 0, -2, 0, -3, 0, -4, 0, -5, 0, -1, 0, 0, 0, 0, 0,
+    ];
+    var totals: [i32: 2] = [0, 16];
+    var packet: [byte: 48] = [0: 48];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:48]);
+    encode_test_signs(&enc, &expected[0:32], &totals[0:2], SILK_SIGNAL_TYPE_UNVOICED, 0);
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:48]);
+    try silk_pulse_sign_decode(&dec, &pulses[0:32], &totals[0:2], SILK_SIGNAL_TYPE_UNVOICED, 0);
+    try ec_dec_check(&dec);
+
+    var i: usize = 0;
+    while i < 32 {
+        try assert_eq_i32(pulses[i] as i32, expected[i] as i32);
+        i = i + 1;
+    }
+
+    const short_output: !void = silk_pulse_sign_decode(&dec, &pulses[0:31], &totals[0:2], SILK_SIGNAL_TYPE_UNVOICED, 0);
+    match short_output {
+        error.SilkPulseSignError => {}
+        else => { try assert(false, "pulse sign decode must require 16 samples per block"); }
+    }
+
+    totals[1] = -1;
+    const bad_total: !void = silk_pulse_sign_decode(&dec, &pulses[0:32], &totals[0:2], SILK_SIGNAL_TYPE_UNVOICED, 0);
+    match bad_total {
+        error.SilkPulseSignError => {}
+        else => { try assert(false, "pulse sign decode must reject negative block totals"); }
+    }
+
+    totals[1] = 17;
+    const bad_signal: !void = silk_pulse_sign_decode(&dec, &pulses[0:32], &totals[0:2], 2, 0);
+    match bad_signal {
+        error.SilkPulseSignError => {}
+        else => { try assert(false, "pulse sign decode must reject unknown signal types"); }
+    }
+}

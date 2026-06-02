@@ -1,0 +1,63 @@
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
+use src.opus.silk.tables.silk_sign_icdf_value;
+
+export error SilkPulseSignError;
+
+export const SILK_SIGN_ICDF_LEN: usize = 42;
+
+fn validate_signal(signal_type: i32, quant_offset_type: i32) !void {
+    if signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkPulseSignError;
+    }
+    if quant_offset_type < 0 || quant_offset_type > 1 {
+        return error.SilkPulseSignError;
+    }
+}
+
+fn sign_icdf_offset(signal_type: i32, quant_offset_type: i32, pulse_count: i32) usize {
+    var capped: i32 = pulse_count & 31;
+    if capped > 6 {
+        capped = 6;
+    }
+    return (7 * (quant_offset_type + 2 * signal_type) + capped) as usize;
+}
+
+export fn silk_pulse_sign_decode(dec: &EcDec, pulses: &[i16], shell_totals: &[i32], signal_type: i32, quant_offset_type: i32) !void {
+    try validate_signal(signal_type, quant_offset_type);
+    if shell_totals.len == 0 || pulses.len < shell_totals.len * SILK_SHELL_CODEC_FRAME_LENGTH {
+        return error.SilkPulseSignError;
+    }
+
+    var block: usize = 0;
+    while block < shell_totals.len {
+        const total: i32 = shell_totals.ptr[block];
+        if total < 0 {
+            return error.SilkPulseSignError;
+        }
+        const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+        const icdf0: byte = silk_sign_icdf_value(sign_icdf_offset(signal_type, quant_offset_type, total));
+        var icdf: [byte: 2] = [icdf0, 0];
+
+        var j: usize = 0;
+        while j < SILK_SHELL_CODEC_FRAME_LENGTH {
+            const index: usize = offset + j;
+            if pulses.ptr[index] < 0 {
+                return error.SilkPulseSignError;
+            }
+            if total > 0 && pulses.ptr[index] > 0 {
+                const sign_symbol: i32 = ec_dec_icdf(dec, &icdf[0:2], 8);
+                if sign_symbol == 0 {
+                    pulses.ptr[index] = -pulses.ptr[index];
+                } else if sign_symbol != 1 {
+                    return error.SilkPulseSignError;
+                }
+            }
+            j = j + 1;
+        }
+        block = block + 1;
+    }
+}

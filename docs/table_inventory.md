@@ -52,6 +52,7 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_SHELL_CODE_TABLE2` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 611988706 | 0 |
 | `SILK_SHELL_CODE_TABLE3` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 524016143 | 0 |
 | `SILK_SHELL_CODE_TABLE_OFFSETS` | `silk/tables_pulses_per_block.c` | `usize` | offsets by total pulse count | 17 | 711768652 | 0 |
+| `SILK_SIGN_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | sign iCDF, `ftb=8`, flattened `[6][7]` | 42 | 281612844 | 0 |
 
 ## Deferred Table Families
 
