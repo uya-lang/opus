@@ -229,13 +229,13 @@
 - [x] 支持 5ms。
 - [x] 支持 10ms。
 - [x] 支持 20ms。
-- [ ] 测试 CELT-only conformance vectors。
+- [x] 测试 CELT-only conformance vectors。
 - [x] 测试随机合法 CELT packets 不崩溃。
 - [x] benchmark CELT-only FB/20ms stereo decode。
 
 验收标准：
 
-- [ ] CELT-only decoder 通过目标 vectors。
+- [x] CELT-only decoder 通过目标 vectors。
 - [x] 丢包前后的 state 更新稳定。
 
 ## 9. SILK 基础

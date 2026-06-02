@@ -13,6 +13,30 @@ use src.opus.celt.state.celt_state_mark_lost_frame;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
 
+fn celt_conformance_checksum_i16(pcm: &[i16]) !u64 {
+    var checksum: u64 = 1469598103934665603;
+    var i: usize = 0;
+    while i < pcm.len {
+        const sample_value: u64 = try (((pcm.ptr[i] as i64) + 32768L) as! u64);
+        checksum = checksum * 1099511628211 + sample_value + (i as u64);
+        i = i + 1;
+    }
+    return checksum;
+}
+
+fn celt_conformance_state_checksum(state: &const CeltDecoderState) !u64 {
+    var checksum: u64 = 1469598103934665603;
+    var i: usize = 0;
+    while i < 42 {
+        const loge_value: u64 = try (((state.old_loge_q8[i] as i64) + 32768L) as! u64);
+        const band_value: u64 = try (((state.old_band_e_q8[i] as i64) + 32768L) as! u64);
+        checksum = checksum * 1099511628211 + loge_value + (i as u64);
+        checksum = checksum * 1099511628211 + band_value + ((i + 42) as u64);
+        i = i + 1;
+    }
+    return checksum;
+}
+
 test "celt mono decode integrates entropy bands imdct and deemphasis" {
     var state: CeltDecoderState = CeltDecoderState{};
     try celt_state_init(&state, 1);
@@ -28,6 +52,65 @@ test "celt mono decode integrates entropy bands imdct and deemphasis" {
     try assert(scratch.twiddle_ready, "mono decode must cache scalar IMDCT twiddles in scratch");
     try assert(scratch.spread_decision >= 0, "mono decode must run spread decision stage");
     try assert(state.loss_count == 0, "successful decode clears CELT loss count");
+}
+
+test "celt-only mono conformance vector locks packet pcm and state fingerprint" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+
+    var payload: [byte: 160] = [0: 160];
+    var i: usize = 0;
+    var rng: u32 = 0x6d2b79f5;
+    while i < 160 {
+        rng = rng * 1664525 + 1013904223;
+        payload[i] = ((rng >> 24) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 480] = [0: 480];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    const decoded: usize = try celt_decode_mono_i16(&state, &payload[0:160], &pcm[0:480], &scratch);
+
+    const pcm_checksum: u64 = try celt_conformance_checksum_i16(&pcm[0:480]);
+    const state_checksum: u64 = try celt_conformance_state_checksum(&state);
+    try assert_eq_i32(decoded as i32, 480);
+    try assert(pcm_checksum == 11429234243141061900, "mono conformance PCM checksum must match target vector");
+    try assert(state_checksum == 3447217543419040215, "mono conformance state checksum must match target vector");
+    try assert_eq_i32(pcm[0] as i32, 0);
+    try assert_eq_i32(pcm[239] as i32, -865);
+    try assert_eq_i32(pcm[479] as i32, -694);
+}
+
+test "celt-only stereo conformance vector locks interleaved pcm and state fingerprint" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 960, 0, 21);
+
+    var payload: [byte: 640] = [0: 640];
+    var i: usize = 0;
+    var rng: u32 = 0x9e3779b9;
+    while i < 640 {
+        rng = rng * 22695477 + 1;
+        payload[i] = ((rng >> 23) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 1920] = [0: 1920];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    const decoded: usize = try celt_decode_stereo_i16(&state, &payload[0:640], &pcm[0:1920], &scratch);
+
+    const pcm_checksum: u64 = try celt_conformance_checksum_i16(&pcm[0:1920]);
+    const state_checksum: u64 = try celt_conformance_state_checksum(&state);
+    try assert_eq_i32(decoded as i32, 960);
+    try assert(pcm_checksum == 12620550581016417892, "stereo conformance PCM checksum must match target vector");
+    try assert(state_checksum == 2100884957029098279, "stereo conformance state checksum must match target vector");
+    try assert_eq_i32(pcm[0] as i32, 0);
+    try assert_eq_i32(pcm[1] as i32, 0);
+    try assert_eq_i32(pcm[958] as i32, -386);
+    try assert_eq_i32(pcm[959] as i32, -666);
+    try assert_eq_i32(pcm[1918] as i32, -226);
+    try assert_eq_i32(pcm[1919] as i32, 233);
 }
 
 test "celt mono decode preserves overlap and energy state across calls" {
