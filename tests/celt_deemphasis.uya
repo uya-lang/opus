@@ -1,0 +1,58 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.qformat.q_from_i32;
+use src.opus.celt.deemphasis.CELT_DEEMPHASIS_DEFAULT_COEF_Q15;
+use src.opus.celt.deemphasis.celt_deemphasis_i16;
+
+test "celt deemphasis exposes upstream default coefficient" {
+    try assert_eq_i32(CELT_DEEMPHASIS_DEFAULT_COEF_Q15 as i32, 27853);
+}
+
+test "celt deemphasis applies caller supplied q15 state" {
+    var input: [i16: 4] = [1000, 1000, 1000, 0];
+    var output: [i16: 4] = [0: 4];
+    var mem_q15: i32 = 0;
+
+    try celt_deemphasis_i16(&input[0:4], 16384, &mem_q15, &output[0:4]);
+
+    try assert_eq_i32(output[0] as i32, 1000);
+    try assert_eq_i32(output[1] as i32, 1500);
+    try assert_eq_i32(output[2] as i32, 1750);
+    try assert_eq_i32(output[3] as i32, 875);
+    try assert_eq_i32(mem_q15, q_from_i32(875, 15) as i32);
+}
+
+test "celt deemphasis preserves fractional state across calls" {
+    var first: [i16: 1] = [1];
+    var second: [i16: 1] = [0];
+    var output: [i16: 1] = [0];
+    var mem_q15: i32 = 0;
+
+    try celt_deemphasis_i16(&first[0:1], 16384, &mem_q15, &output[0:1]);
+    try assert_eq_i32(output[0] as i32, 1);
+    try celt_deemphasis_i16(&second[0:1], 16384, &mem_q15, &output[0:1]);
+    try assert_eq_i32(output[0] as i32, 1);
+    try assert_eq_i32(mem_q15, 16384);
+}
+
+test "celt deemphasis saturates pcm and validates cold path parameters" {
+    var input: [i16: 1] = [32767];
+    var output: [i16: 1] = [0];
+    var mem_q15: i32 = q_from_i32(32767, 15) as i32;
+
+    try celt_deemphasis_i16(&input[0:1], 32767, &mem_q15, &output[0:1]);
+    try assert_eq_i32(output[0] as i32, 32767);
+
+    var short_output: [i16: 0] = [0: 0];
+    const short_res: !void = celt_deemphasis_i16(&input[0:1], 16384, &mem_q15, &short_output[0:0]);
+    match short_res {
+        error.CeltDeemphasisError => {}
+        else => { try assert(false, "short output must fail"); }
+    }
+
+    const bad_coef: !void = celt_deemphasis_i16(&input[0:1], -1, &mem_q15, &output[0:1]);
+    match bad_coef {
+        error.CeltDeemphasisError => {}
+        else => { try assert(false, "negative deemphasis coefficient must fail"); }
+    }
+}

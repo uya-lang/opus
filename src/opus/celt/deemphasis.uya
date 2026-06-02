@@ -1,0 +1,26 @@
+use src.opus.core.qformat.q_from_i32;
+use src.opus.core.qformat.round_shift_i64_to_i32;
+use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
+
+export error CeltDeemphasisError;
+
+export const CELT_DEEMPHASIS_DEFAULT_COEF_Q15: i16 = 27853;
+
+export fn celt_deemphasis_i16(input: &[i16], coef_q15: i16, mem_q15: &i32, output: &[i16]) !void {
+    if coef_q15 < 0 || output.len < input.len {
+        return error.CeltDeemphasisError;
+    }
+
+    var prev_q15: i32 = *mem_q15;
+    var i: usize = 0;
+    while i < input.len {
+        const prediction_q15: i32 = round_shift_i64_to_i32((prev_q15 as i64) * (coef_q15 as i64), 15);
+        const sample_q15: i32 = sat32(q_from_i32(input.ptr[i] as i32, 15));
+        const y_q15: i32 = sat32((sample_q15 as i64) + (prediction_q15 as i64));
+        output.ptr[i] = sat16(round_shift_i64_to_i32(y_q15 as i64, 15));
+        prev_q15 = y_q15;
+        i = i + 1;
+    }
+    *mem_q15 = prev_q15;
+}
