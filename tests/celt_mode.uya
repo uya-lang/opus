@@ -60,6 +60,29 @@ test "celt mode eband query exposes 5ms static boundaries" {
     try assert_eq_i32((try celt_mode_eband_width_5ms(&mode, 20)) as i32, 22);
 }
 
+test "celt mode eband table matches all upstream 5ms boundaries" {
+    const mode: CeltMode = celt_mode_48000();
+    var expected: [i16: 22] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 34, 40, 48, 60, 78, 100,
+    ];
+
+    var i: i32 = 0;
+    while i <= mode.nb_ebands {
+        try assert_eq_i32((try celt_mode_eband_boundary_5ms(&mode, i)) as i32, expected[i as usize] as i32);
+        i = i + 1;
+    }
+
+    var band: i32 = 0;
+    var total_width: i32 = 0;
+    while band < mode.nb_ebands {
+        const width: i16 = try celt_mode_eband_width_5ms(&mode, band);
+        try assert(width > 0, "eBand widths must be positive");
+        total_width = total_width + (width as i32);
+        band = band + 1;
+    }
+    try assert_eq_i32(total_width, 100);
+}
+
 test "celt mode eband query rejects invalid indexes" {
     const mode: CeltMode = celt_mode_48000();
     const negative_boundary: !i16 = celt_mode_eband_boundary_5ms(&mode, -1);
