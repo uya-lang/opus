@@ -68,3 +68,20 @@ export fn q_fraction_mask_i32(q: u32) i32 {
     }
     return (1 << (q as i32)) - 1;
 }
+
+export fn mul16_16_i32(a: i16, b: i16) i32 {
+    return (a as i32) * (b as i32);
+}
+
+export fn mul16_16_i64(a: i16, b: i16) i64 {
+    return (a as i64) * (b as i64);
+}
+
+export fn mul32_32_i64(a: i32, b: i32) i64 {
+    return (a as i64) * (b as i64);
+}
+
+export fn mul_q15_i32(a_q15: i32, b_q15: i32) i32 {
+    const product_q30: i64 = (a_q15 as i64) * (b_q15 as i64);
+    return (product_q30 >> 15) as i32;
+}

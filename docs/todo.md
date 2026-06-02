@@ -148,7 +148,7 @@
 - [x] 实现 `sat16`。
 - [x] 实现 `sat32`。
 - [x] 实现 saturating add/sub。
-- [ ] 实现 common multiply helpers。
+- [x] 实现 common multiply helpers。
 - [ ] 实现 rounded shift helpers。
 - [ ] 实现 `core/bitops.uya`。
 - [ ] 实现 `celt_ilog`。

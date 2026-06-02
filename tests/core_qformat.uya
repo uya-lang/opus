@@ -16,6 +16,10 @@ use src.opus.core.qformat.q_rescale_i64;
 use src.opus.core.qformat.q_to_i32_floor;
 use src.opus.core.qformat.q_unit_i32;
 use src.opus.core.qformat.q_unit_i64;
+use src.opus.core.qformat.mul16_16_i32;
+use src.opus.core.qformat.mul16_16_i64;
+use src.opus.core.qformat.mul32_32_i64;
+use src.opus.core.qformat.mul_q15_i32;
 
 test "common Q-format units are stable" {
     try assert_eq_i32(Q0_ONE, 1);
@@ -59,4 +63,14 @@ test "Q-format fractional masks expose low bits only" {
     try assert_eq_i32(q_fraction_mask_i32(15), 32767);
     try assert_eq_i32(q_fraction_mask_i32(31), 0);
     try assert((q_from_i32(1, 15) as i32) == Q15_ONE, "Q15 one is derived from helper");
+}
+
+test "common multiply helpers use fixed-width output contracts" {
+    try assert_eq_i32(mul16_16_i32(300 as i16, -200 as i16), -60000);
+    try assert_eq_i64(mul16_16_i64(-32768 as i16, -32768 as i16), 1073741824L);
+    try assert_eq_i64(mul32_32_i64(65536, -65536), -4294967296L);
+
+    try assert_eq_i32(mul_q15_i32(Q15_ONE, Q15_ONE), Q15_ONE);
+    try assert_eq_i32(mul_q15_i32(Q15_ONE / 2, Q15_ONE / 2), 8192);
+    try assert_eq_i32(mul_q15_i32(-Q15_ONE, Q15_ONE / 2), -16384);
 }
