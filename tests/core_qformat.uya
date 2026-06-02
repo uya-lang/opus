@@ -90,3 +90,26 @@ test "rounded shift helpers use half-up fixed-point scaling" {
     try assert_eq_i32(round_shift_i64_to_i32(1234L, 0), 1234);
     try assert_eq_i32(round_shift_i64_to_i32(1234L, 31), 0);
 }
+
+test "each Q-format primitive has explicit golden cases" {
+    try assert_eq_i32(q_unit_i32(0), 1);
+    try assert_eq_i32(q_unit_i32(15), 32768);
+    try assert_eq_i64(q_unit_i64(16), 65536L);
+
+    try assert_eq_i64(q_from_i32(7, 4), 112L);
+    try assert_eq_i32(q_to_i32_floor(127L, 4), 7);
+    try assert_eq_i32(q_to_i32_floor(-127L, 4), -8);
+    try assert_eq_i64(q_rescale_i64(112L, 4, 8), 1792L);
+    try assert_eq_i64(q_rescale_i64(1792L, 8, 4), 112L);
+    try assert_eq_i32(q_fraction_mask_i32(8), 255);
+
+    try assert_eq_i32(mul16_16_i32(123 as i16, -45 as i16), -5535);
+    try assert_eq_i64(mul16_16_i64(-123 as i16, -45 as i16), 5535L);
+    try assert_eq_i64(mul32_32_i64(123456, -789), -97406784L);
+    try assert_eq_i32(mul_q15_i32(24576, 16384), 12288);
+
+    try assert_eq_i32(round_shift_i32(15, 1), 8);
+    try assert_eq_i32(round_shift_i32(-15, 1), -7);
+    try assert_eq_i32(round_shift_i64_to_i32(24576L, 15), 1);
+    try assert_eq_i32(round_shift_i64_to_i32(-24576L, 15), -1);
+}
