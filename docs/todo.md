@@ -25,7 +25,7 @@
 - [x] 创建 `src/opus/hybrid/`。
 - [x] 创建 `src/opus/api/`。
 - [x] 创建 `src/opus/container/`。
-- [ ] 创建 `src/opus/cli/`。
+- [x] 创建 `src/opus/cli/`。
 - [ ] 创建 `tests/`。
 - [ ] 创建 `tests/vectors/`。
 - [ ] 创建 `bench/`。
