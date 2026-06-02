@@ -5,6 +5,7 @@ use src.opus.core.bitops.bit_is_set_u32;
 use src.opus.core.bitops.bit_mask_u32;
 use src.opus.core.bitops.bit_set_u32;
 use src.opus.core.bitops.celt_ilog;
+use src.opus.core.bitops.clz_u32;
 use src.opus.core.bitops.extract_bits_u32;
 use src.opus.core.bitops.low_mask_u32;
 
@@ -40,4 +41,16 @@ test "celt_ilog reports bits needed to represent u32 values" {
     try assert_eq_i32(celt_ilog(255) as i32, 8);
     try assert_eq_i32(celt_ilog(256) as i32, 9);
     try assert_eq_i32(celt_ilog(0xffffffff) as i32, 32);
+}
+
+test "clz_u32 counts leading zero bits for u32 values" {
+    try assert_eq_i32(clz_u32(0) as i32, 32);
+    try assert_eq_i32(clz_u32(1) as i32, 31);
+    try assert_eq_i32(clz_u32(2) as i32, 30);
+    try assert_eq_i32(clz_u32(3) as i32, 30);
+    try assert_eq_i32(clz_u32(0x00008000) as i32, 16);
+    try assert_eq_i32(clz_u32(0x00010000) as i32, 15);
+    try assert_eq_i32(clz_u32(0x7fffffff) as i32, 1);
+    try assert_eq_i32(clz_u32(0x80000000) as i32, 0);
+    try assert_eq_i32(clz_u32(0xffffffff) as i32, 0);
 }

@@ -45,3 +45,32 @@ export fn celt_ilog(value_in: u32) u32 {
     }
     return bits;
 }
+
+export fn clz_u32(value: u32) u32 {
+    if value == 0 {
+        return 32;
+    }
+
+    var x: u32 = value;
+    var count: u32 = 0;
+    if (x & (0xffff0000 as u32)) == 0 {
+        count = count + 16;
+        x = x << 16;
+    }
+    if (x & (0xff000000 as u32)) == 0 {
+        count = count + 8;
+        x = x << 8;
+    }
+    if (x & (0xf0000000 as u32)) == 0 {
+        count = count + 4;
+        x = x << 4;
+    }
+    if (x & (0xc0000000 as u32)) == 0 {
+        count = count + 2;
+        x = x << 2;
+    }
+    if (x & (0x80000000 as u32)) == 0 {
+        count = count + 1;
+    }
+    return count;
+}

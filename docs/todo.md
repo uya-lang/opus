@@ -152,7 +152,7 @@
 - [x] 实现 rounded shift helpers。
 - [x] 实现 `core/bitops.uya`。
 - [x] 实现 `celt_ilog`。
-- [ ] 实现 `clz` fallback。
+- [x] 实现 `clz` fallback。
 - [ ] 实现 `dsp/filters.uya` 基础 FIR/IIR helper。
 - [ ] 实现 `dsp/resampler.uya` 占位接口。
 - [ ] 实现 `dsp/pitch.uya` 基础 correlation helper。
