@@ -1,0 +1,41 @@
+use std.testing.assert;
+
+test "core module test entry is registered" {
+    try assert(true, "core module test entry");
+}
+
+test "packet module test entry is registered" {
+    try assert(true, "packet module test entry");
+}
+
+test "entropy module test entry is registered" {
+    try assert(true, "entropy module test entry");
+}
+
+test "dsp module test entry is registered" {
+    try assert(true, "dsp module test entry");
+}
+
+test "silk module test entry is registered" {
+    try assert(true, "silk module test entry");
+}
+
+test "celt module test entry is registered" {
+    try assert(true, "celt module test entry");
+}
+
+test "hybrid module test entry is registered" {
+    try assert(true, "hybrid module test entry");
+}
+
+test "api module test entry is registered" {
+    try assert(true, "api module test entry");
+}
+
+test "container module test entry is registered" {
+    try assert(true, "container module test entry");
+}
+
+test "cli module test entry is registered" {
+    try assert(true, "cli module test entry");
+}
