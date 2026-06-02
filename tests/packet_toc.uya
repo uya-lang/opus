@@ -1,0 +1,176 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.packet.toc.PacketParseResult;
+use src.opus.packet.toc.TocConfig;
+use src.opus.packet.toc.TocByte;
+use src.opus.packet.toc.decoder_get_packet_info;
+use src.opus.packet.toc.parse_packet;
+use src.opus.packet.toc.parse_toc_byte;
+use src.opus.packet.toc.toc_config_at;
+use src.opus.packet.toc.toc_config_count;
+
+test "toc config table covers all 32 RFC 6716 modes" {
+    try assert_eq_i32(toc_config_count() as i32, 32);
+    const c0: TocConfig = toc_config_at(0);
+    const c3: TocConfig = toc_config_at(3);
+    const c8: TocConfig = toc_config_at(8);
+    const c12: TocConfig = toc_config_at(12);
+    const c14: TocConfig = toc_config_at(14);
+    const c16: TocConfig = toc_config_at(16);
+    const c31: TocConfig = toc_config_at(31);
+    try assert_eq_i32(c0.frame_duration_us as i32, 10000);
+    try assert(c0.mode == OpusMode.SILK, "config 0 silk");
+    try assert(c0.bandwidth == OpusBandwidth.NARROWBAND, "config 0 nb");
+    try assert_eq_i32(c3.frame_duration_us as i32, 60000);
+    try assert(c8.bandwidth == OpusBandwidth.WIDEBAND, "config 8 wb");
+    try assert(c12.mode == OpusMode.HYBRID, "config 12 hybrid");
+    try assert(c12.bandwidth == OpusBandwidth.SUPERWIDEBAND, "config 12 swb");
+    try assert(c14.bandwidth == OpusBandwidth.FULLBAND, "config 14 fb");
+    try assert(c16.mode == OpusMode.CELT, "config 16 celt");
+    try assert_eq_i32(c16.frame_duration_us as i32, 2500);
+    try assert_eq_i32(c31.frame_duration_us as i32, 20000);
+    try assert(c31.bandwidth == OpusBandwidth.FULLBAND, "config 31 fb");
+}
+
+test "toc byte parser extracts config stereo and code bits" {
+    const toc_byte: TocByte = parse_toc_byte(253);
+    try assert_eq_i32(toc_byte.config_index as i32, 31);
+    try assert(toc_byte.stereo, "stereo bit");
+    try assert_eq_i32(toc_byte.code as i32, 1);
+    try assert(toc_byte.config.mode == OpusMode.CELT, "config maps mode");
+}
+
+test "code 0 packet has one frame without copying payload" {
+    const packet: [byte: 4] = [248, 17, 18, 19];
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&packet[0:4], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 1);
+    try assert_eq_i32(parsed.info.channels as i32, 1);
+    try assert_eq_i32(parsed.frames[0].offset as i32, 1);
+    try assert_eq_i32(parsed.frames[0].len as i32, 3);
+    try assert_eq_i32(parsed.info.payload_offset as i32, 1);
+    try assert_eq_i32(parsed.info.payload_len as i32, 3);
+}
+
+test "code 1 packet splits two equal CBR frames" {
+    const packet: [byte: 5] = [249, 1, 2, 3, 4];
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&packet[0:5], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 2);
+    try assert_eq_i32(parsed.frames[0].offset as i32, 1);
+    try assert_eq_i32(parsed.frames[0].len as i32, 2);
+    try assert_eq_i32(parsed.frames[1].offset as i32, 3);
+    try assert_eq_i32(parsed.frames[1].len as i32, 2);
+
+    const odd: [byte: 4] = [249, 1, 2, 3];
+    const res: !void = parse_packet(&odd[0:4], &parsed);
+    match res {
+        error.InvalidPacket => {}
+        else => { try assert(false, "odd CBR packet must be rejected"); }
+    }
+}
+
+test "code 2 packet reads VBR two-frame length" {
+    const packet: [byte: 6] = [250, 2, 10, 11, 12, 13];
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&packet[0:6], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 2);
+    try assert_eq_i32(parsed.frames[0].offset as i32, 2);
+    try assert_eq_i32(parsed.frames[0].len as i32, 2);
+    try assert_eq_i32(parsed.frames[1].offset as i32, 4);
+    try assert_eq_i32(parsed.frames[1].len as i32, 2);
+
+    const extended: [byte: 259] = [0: 259];
+    var ext: [byte: 259] = extended;
+    ext[0] = 250;
+    ext[1] = 252;
+    ext[2] = 1;
+    var ext_parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&ext[0:259], &ext_parsed);
+    try assert_eq_i32(ext_parsed.frames[0].len as i32, 256);
+    try assert_eq_i32(ext_parsed.frames[1].len as i32, 0);
+}
+
+test "code 3 CBR arbitrary frame packet handles padding" {
+    const packet: [byte: 10] = [251, 67, 1, 10, 11, 12, 13, 14, 15, 0];
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&packet[0:10], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 3);
+    try assert(parsed.info.has_padding, "has padding");
+    try assert_eq_i32(parsed.frames[0].offset as i32, 3);
+    try assert_eq_i32(parsed.frames[0].len as i32, 2);
+    try assert_eq_i32(parsed.frames[2].offset as i32, 7);
+    try assert_eq_i32(parsed.frames[2].len as i32, 2);
+}
+
+test "code 3 VBR arbitrary frame packet reads per-frame lengths" {
+    const packet: [byte: 9] = [251, 131, 1, 7, 2, 8, 9, 10, 11];
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&packet[0:9], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 3);
+    try assert_eq_i32(parsed.frames[0].offset as i32, 3);
+    try assert_eq_i32(parsed.frames[0].len as i32, 1);
+    try assert_eq_i32(parsed.frames[1].offset as i32, 5);
+    try assert_eq_i32(parsed.frames[1].len as i32, 2);
+    try assert_eq_i32(parsed.frames[2].offset as i32, 7);
+    try assert_eq_i32(parsed.frames[2].len as i32, 2);
+}
+
+test "packet parser rejects malformed packets" {
+    const empty: [byte: 1] = [0];
+    var parsed: PacketParseResult = PacketParseResult{};
+    const empty_res: !void = parse_packet(&empty[0:0], &parsed);
+    match empty_res {
+        error.InvalidPacket => {}
+        else => { try assert(false, "empty packet must be rejected"); }
+    }
+
+    const bad_padding: [byte: 3] = [251, 65, 2];
+    const padding_res: !void = parse_packet(&bad_padding[0:3], &parsed);
+    match padding_res {
+        error.InvalidPadding => {}
+        else => { try assert(false, "invalid padding must be rejected"); }
+    }
+
+    const truncated_vbr: [byte: 2] = [250, 252];
+    const truncated_res: !void = parse_packet(&truncated_vbr[0:2], &parsed);
+    match truncated_res {
+        error.TruncatedPacket => {}
+        else => { try assert(false, "truncated VBR length must be rejected"); }
+    }
+
+    const too_long: [byte: 4] = [27, 3, 1, 2];
+    const long_res: !void = parse_packet(&too_long[0:4], &parsed);
+    match long_res {
+        error.PacketDurationTooLong => {}
+        else => { try assert(false, "packet duration over 120ms must be rejected"); }
+    }
+}
+
+test "decoder_get_packet_info exposes packet-only metadata" {
+    const packet: [byte: 3] = [252, 1, 2];
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:3], &info);
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+}
+
+test "packet parser handles arbitrary short byte slices without crashing" {
+    var packet: [byte: 3] = [0: 3];
+    var parsed: PacketParseResult = PacketParseResult{};
+    var b0: usize = 0;
+    while b0 < 256 {
+        packet[0] = (b0 as! byte).value;
+        _ = parse_packet(&packet[0:1], &parsed);
+        packet[1] = 0;
+        _ = parse_packet(&packet[0:2], &parsed);
+        packet[2] = 0;
+        _ = parse_packet(&packet[0:3], &parsed);
+        b0 = b0 + 1;
+    }
+}

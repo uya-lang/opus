@@ -74,31 +74,31 @@
 
 ## 3. Packet Parser
 
-- [ ] 实现 `packet/toc.uya`。
-- [ ] 建立 32 项 TOC config 表。
-- [ ] 实现 TOC byte 解析。
-- [ ] 实现 `config -> mode/bandwidth/frame_duration` 映射。
-- [ ] 实现 mono/stereo bit 解析。
-- [ ] 实现 code 0 frame split。
-- [ ] 实现 code 1 CBR two-frame split。
-- [ ] 实现 code 2 VBR two-frame split。
-- [ ] 实现 code 3 arbitrary-frame split。
-- [ ] 实现 padding 解析和校验。
-- [ ] 实现 VBR frame length 编码解析。
-- [ ] 实现 packet duration <= 120ms 校验。
-- [ ] 实现 `decoder_get_packet_info` 的 packet-only 版本。
-- [ ] 测试 32 个 TOC config。
-- [ ] 测试 code 0/1/2/3 合法包。
-- [ ] 测试非法空包。
-- [ ] 测试非法 padding。
-- [ ] 测试截断 VBR length。
-- [ ] 测试 packet duration 超限。
-- [ ] Fuzz packet parser，确认不越界。
+- [x] 实现 `packet/toc.uya`。
+- [x] 建立 32 项 TOC config 表。
+- [x] 实现 TOC byte 解析。
+- [x] 实现 `config -> mode/bandwidth/frame_duration` 映射。
+- [x] 实现 mono/stereo bit 解析。
+- [x] 实现 code 0 frame split。
+- [x] 实现 code 1 CBR two-frame split。
+- [x] 实现 code 2 VBR two-frame split。
+- [x] 实现 code 3 arbitrary-frame split。
+- [x] 实现 padding 解析和校验。
+- [x] 实现 VBR frame length 编码解析。
+- [x] 实现 packet duration <= 120ms 校验。
+- [x] 实现 `decoder_get_packet_info` 的 packet-only 版本。
+- [x] 测试 32 个 TOC config。
+- [x] 测试 code 0/1/2/3 合法包。
+- [x] 测试非法空包。
+- [x] 测试非法 padding。
+- [x] 测试截断 VBR length。
+- [x] 测试 packet duration 超限。
+- [x] Fuzz packet parser，确认不越界。
 
 验收标准：
 
-- [ ] Parser 不复制 frame payload。
-- [ ] 任意 byte slice 输入都只返回成功或 Uya 错误，不崩溃。
+- [x] Parser 不复制 frame payload。
+- [x] 任意 byte slice 输入都只返回成功或 Uya 错误，不崩溃。
 
 ## 4. Entropy Range Coder
 

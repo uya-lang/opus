@@ -1,0 +1,318 @@
+use src.opus.core.constants.MAX_FRAME_BYTES;
+use src.opus.core.constants.MAX_PACKET_MS;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+
+export const OPUS_MAX_FRAMES_PER_PACKET: usize = 48;
+
+export error InvalidPacket;
+export error InvalidPadding;
+export error TruncatedPacket;
+export error PacketDurationTooLong;
+export error FrameTooLarge;
+
+export struct TocConfig {
+    mode: OpusMode,
+    bandwidth: OpusBandwidth,
+    frame_duration_us: u32,
+    frame_samples_48k: u32,
+}
+
+export struct TocByte {
+    config_index: u8,
+    stereo: bool,
+    code: u8,
+    config: TocConfig,
+}
+
+export struct FrameSpan {
+    offset: usize,
+    len: usize,
+}
+
+export struct PacketParseResult {
+    info: PacketInfo,
+    toc: TocByte,
+    frames: [FrameSpan: 48],
+}
+
+const TOC_MODE_TABLE: [u8: 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+const TOC_BANDWIDTH_TABLE: [u8: 32] = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 0, 0, 0, 0, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4];
+const TOC_FRAME_DURATION_US_TABLE: [u32: 32] = [10000, 20000, 40000, 60000, 10000, 20000, 40000, 60000, 10000, 20000, 40000, 60000, 10000, 20000, 10000, 20000, 2500, 5000, 10000, 20000, 2500, 5000, 10000, 20000, 2500, 5000, 10000, 20000, 2500, 5000, 10000, 20000];
+const TOC_FRAME_SAMPLES_48K_TABLE: [u32: 32] = [480, 960, 1920, 2880, 480, 960, 1920, 2880, 480, 960, 1920, 2880, 480, 960, 480, 960, 120, 240, 480, 960, 120, 240, 480, 960, 120, 240, 480, 960, 120, 240, 480, 960];
+
+fn mode_from_table(v: u8) OpusMode {
+    if v == 0 {
+        return OpusMode.SILK;
+    }
+    if v == 1 {
+        return OpusMode.CELT;
+    }
+    return OpusMode.HYBRID;
+}
+
+fn bandwidth_from_table(v: u8) OpusBandwidth {
+    if v == 0 {
+        return OpusBandwidth.NARROWBAND;
+    }
+    if v == 1 {
+        return OpusBandwidth.MEDIUMBAND;
+    }
+    if v == 2 {
+        return OpusBandwidth.WIDEBAND;
+    }
+    if v == 3 {
+        return OpusBandwidth.SUPERWIDEBAND;
+    }
+    return OpusBandwidth.FULLBAND;
+}
+
+export fn toc_config_count() usize {
+    return 32;
+}
+
+export fn toc_config_at(index: usize) TocConfig {
+    return TocConfig{
+        mode: mode_from_table(TOC_MODE_TABLE[index]),
+        bandwidth: bandwidth_from_table(TOC_BANDWIDTH_TABLE[index]),
+        frame_duration_us: TOC_FRAME_DURATION_US_TABLE[index],
+        frame_samples_48k: TOC_FRAME_SAMPLES_48K_TABLE[index],
+    };
+}
+
+fn clear_frames(result: &PacketParseResult) void {
+    var i: usize = 0;
+    while i < OPUS_MAX_FRAMES_PER_PACKET {
+        result.frames[i] = FrameSpan{ offset: 0, len: 0 };
+        i = i + 1;
+    }
+}
+
+fn init_result(result: &PacketParseResult, toc: TocByte) void {
+    result.info = PacketInfo{
+        mode: toc.config.mode,
+        bandwidth: toc.config.bandwidth,
+        channels: 1,
+        frame_count: 0,
+        frame_duration_us: toc.config.frame_duration_us,
+        duration_samples_48k: 0,
+        payload_offset: 1,
+        payload_len: 0,
+        self_delimited: false,
+        has_padding: false,
+    };
+    result.toc = toc;
+    clear_frames(result);
+}
+
+export fn packet_info_default() PacketInfo {
+    return PacketInfo{
+        mode: OpusMode.SILK,
+        bandwidth: OpusBandwidth.NARROWBAND,
+        channels: 1,
+        frame_count: 0,
+        frame_duration_us: 10000,
+        duration_samples_48k: 0,
+        payload_offset: 1,
+        payload_len: 0,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+fn check_frame_len(len: usize) !void {
+    if len > MAX_FRAME_BYTES {
+        return error.FrameTooLarge;
+    }
+}
+
+fn read_vbr_length(packet: &[byte], cursor: &usize, end: usize) !usize {
+    if *cursor >= end {
+        return error.TruncatedPacket;
+    }
+
+    const first: usize = packet.ptr[*cursor] as usize;
+    *cursor = *cursor + 1;
+    if first < 252 {
+        return first;
+    }
+
+    if *cursor >= end {
+        return error.TruncatedPacket;
+    }
+    const second: usize = packet.ptr[*cursor] as usize;
+    *cursor = *cursor + 1;
+    return first + (second * 4);
+}
+
+fn parse_padding(packet: &[byte], cursor: &usize, end: usize) !usize {
+    var padding: usize = 0;
+    while true {
+        if *cursor >= end {
+            return error.InvalidPadding;
+        }
+        const b: usize = packet.ptr[*cursor] as usize;
+        *cursor = *cursor + 1;
+        padding = padding + b;
+        if b != 255 {
+            break;
+        }
+    }
+
+    if padding > end - *cursor {
+        return error.InvalidPadding;
+    }
+    return padding;
+}
+
+fn set_common_info(result: &PacketParseResult, toc: &const TocByte, frame_count: u8, payload_offset: usize, payload_len: usize, has_padding: bool) void {
+    var channels: u8 = 1;
+    if toc.stereo {
+        channels = 2;
+    }
+    result.info = PacketInfo{
+        mode: toc.config.mode,
+        bandwidth: toc.config.bandwidth,
+        channels: channels,
+        frame_count: frame_count,
+        frame_duration_us: toc.config.frame_duration_us,
+        duration_samples_48k: toc.config.frame_samples_48k * (frame_count as u32),
+        payload_offset: payload_offset,
+        payload_len: payload_len,
+        self_delimited: false,
+        has_padding: has_padding,
+    };
+}
+
+fn validate_duration(toc: &const TocByte, frame_count: u8) !void {
+    const duration_us: u32 = toc.config.frame_duration_us * (frame_count as u32);
+    if duration_us > (MAX_PACKET_MS * 1000) as u32 {
+        return error.PacketDurationTooLong;
+    }
+}
+
+export fn parse_toc_byte(toc: byte) TocByte {
+    const config_index: u8 = ((toc >> 3) as! u8).value;
+    return TocByte{
+        config_index: config_index,
+        stereo: ((toc & (4 as byte)) != 0),
+        code: ((toc & (3 as byte)) as! u8).value,
+        config: toc_config_at(config_index as usize),
+    };
+}
+
+export fn decoder_get_packet_info(packet: &[byte], info: &PacketInfo) !void {
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(packet, &parsed);
+    *info = parsed.info;
+}
+
+export fn parse_packet(packet: &[byte], result: &PacketParseResult) !void {
+    if packet.len == 0 {
+        return error.InvalidPacket;
+    }
+
+    const toc: TocByte = parse_toc_byte(packet.ptr[0]);
+    init_result(result, parse_toc_byte(packet.ptr[0]));
+
+    const payload_start: usize = 1;
+    const payload_len: usize = packet.len - payload_start;
+
+    if toc.code == 0 {
+        try check_frame_len(payload_len);
+        result.frames[0] = FrameSpan{ offset: payload_start, len: payload_len };
+        set_common_info(result, &toc, 1, payload_start, payload_len, false);
+        try validate_duration(&toc, 1);
+        return;
+    }
+
+    if toc.code == 1 {
+        if (payload_len & (1 as usize)) != 0 {
+            return error.InvalidPacket;
+        }
+        const frame_len: usize = payload_len / 2;
+        try check_frame_len(frame_len);
+        result.frames[0] = FrameSpan{ offset: payload_start, len: frame_len };
+        result.frames[1] = FrameSpan{ offset: payload_start + frame_len, len: frame_len };
+        set_common_info(result, &toc, 2, payload_start, payload_len, false);
+        try validate_duration(&toc, 2);
+        return;
+    }
+
+    if toc.code == 2 {
+        var cursor: usize = payload_start;
+        const first_len: usize = try read_vbr_length(packet, &cursor, packet.len);
+        const remaining: usize = packet.len - cursor;
+        if first_len > remaining {
+            return error.TruncatedPacket;
+        }
+        const second_len: usize = remaining - first_len;
+        try check_frame_len(first_len);
+        try check_frame_len(second_len);
+        result.frames[0] = FrameSpan{ offset: cursor, len: first_len };
+        result.frames[1] = FrameSpan{ offset: cursor + first_len, len: second_len };
+        set_common_info(result, &toc, 2, cursor, first_len + second_len, false);
+        try validate_duration(&toc, 2);
+        return;
+    }
+
+    var cursor3: usize = payload_start;
+    if cursor3 >= packet.len {
+        return error.TruncatedPacket;
+    }
+    const count_byte: byte = packet.ptr[cursor3];
+    cursor3 = cursor3 + 1;
+    const frame_count: u8 = ((count_byte & (63 as byte)) as! u8).value;
+    const is_vbr: bool = (count_byte & (128 as byte)) != 0;
+    const has_padding: bool = (count_byte & (64 as byte)) != 0;
+    if frame_count == 0 || frame_count > 48 {
+        return error.InvalidPacket;
+    }
+    try validate_duration(&toc, frame_count);
+
+    var payload_end: usize = packet.len;
+    if has_padding {
+        const padding_len: usize = try parse_padding(packet, &cursor3, packet.len);
+        payload_end = packet.len - padding_len;
+    }
+
+    if cursor3 > payload_end {
+        return error.InvalidPacket;
+    }
+    const data_len: usize = payload_end - cursor3;
+
+    if is_vbr {
+        var i: usize = 0;
+        var data_cursor: usize = cursor3;
+        var bytes_remaining: usize = data_len;
+        while i + 1 < frame_count as usize {
+            const frame_len: usize = try read_vbr_length(packet, &data_cursor, payload_end);
+            if frame_len > payload_end - data_cursor {
+                return error.TruncatedPacket;
+            }
+            try check_frame_len(frame_len);
+            result.frames[i] = FrameSpan{ offset: data_cursor, len: frame_len };
+            data_cursor = data_cursor + frame_len;
+            bytes_remaining = payload_end - data_cursor;
+            i = i + 1;
+        }
+        try check_frame_len(bytes_remaining);
+        result.frames[i] = FrameSpan{ offset: data_cursor, len: bytes_remaining };
+        set_common_info(result, &toc, frame_count, cursor3, data_len, has_padding);
+        return;
+    }
+
+    if data_len % (frame_count as usize) != 0 {
+        return error.InvalidPacket;
+    }
+    const cbr_len: usize = data_len / (frame_count as usize);
+    try check_frame_len(cbr_len);
+    var j: usize = 0;
+    while j < frame_count as usize {
+        result.frames[j] = FrameSpan{ offset: cursor3 + (j * cbr_len), len: cbr_len };
+        j = j + 1;
+    }
+    set_common_info(result, &toc, frame_count, cursor3, data_len, has_padding);
+    return;
+}
