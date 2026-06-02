@@ -60,3 +60,25 @@ test "saturating i32 add and sub use wide intermediates" {
     try assert_eq_i32(sat_sub32(I32_MAX_I64 as i32, -1), I32_MAX_I64 as i32);
     try assert_eq_i32(sat_sub32(I32_MIN_I64 as i32, -8), -2147483640);
 }
+
+test "each saturating primitive has explicit boundary golden cases" {
+    try assert_eq_i32(sat16(-32769) as i32, -32768);
+    try assert_eq_i32(sat16(-32768) as i32, -32768);
+    try assert_eq_i32(sat16(32767) as i32, 32767);
+    try assert_eq_i32(sat16(32768) as i32, 32767);
+
+    try assert_eq_i32(sat32(-2147483649L), -2147483647 - 1);
+    try assert_eq_i32(sat32(-2147483648L), -2147483647 - 1);
+    try assert_eq_i32(sat32(2147483647L), 2147483647);
+    try assert_eq_i32(sat32(2147483648L), 2147483647);
+
+    try assert_eq_i32(sat_add32(2147483647, 0), 2147483647);
+    try assert_eq_i32(sat_add32(2147483647, 1), 2147483647);
+    try assert_eq_i32(sat_add32(-2147483647 - 1, 0), -2147483647 - 1);
+    try assert_eq_i32(sat_add32(-2147483647 - 1, -1), -2147483647 - 1);
+
+    try assert_eq_i32(sat_sub32(2147483647, 0), 2147483647);
+    try assert_eq_i32(sat_sub32(2147483647, -1), 2147483647);
+    try assert_eq_i32(sat_sub32(-2147483647 - 1, 0), -2147483647 - 1);
+    try assert_eq_i32(sat_sub32(-2147483647 - 1, 1), -2147483647 - 1);
+}
