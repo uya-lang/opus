@@ -10,3 +10,13 @@ export fn fits_i16_i32(value: i32) bool {
 export fn fits_i32_i64(value: i64) bool {
     return value >= I32_MIN_I64 && value <= I32_MAX_I64;
 }
+
+export fn sat16(value: i32) i16 {
+    if value > I16_MAX_I32 {
+        return I16_MAX_I32 as i16;
+    }
+    if value < I16_MIN_I32 {
+        return I16_MIN_I32 as i16;
+    }
+    return value as i16;
+}
