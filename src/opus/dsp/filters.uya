@@ -1,0 +1,59 @@
+use src.opus.core.qformat.mul16_16_i64;
+use src.opus.core.qformat.round_shift_i64_to_i32;
+use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
+
+export error DspFilterError;
+
+export fn fir_dot_q15_i16(input: &[i16], coeff_q15: &[i16]) !i16 {
+    if input.len != coeff_q15.len || input.len == 0 {
+        return error.DspFilterError;
+    }
+
+    var acc_q15: i64 = 0L;
+    var i: usize = 0;
+    while i < input.len {
+        acc_q15 = acc_q15 + mul16_16_i64(input.ptr[i], coeff_q15.ptr[i]);
+        i = i + 1;
+    }
+    return sat16(round_shift_i64_to_i32(acc_q15, 15));
+}
+
+export fn fir_causal_q15_i16(input: &[i16], coeff_q15: &[i16], output: &[i16]) !void {
+    if coeff_q15.len == 0 || output.len < input.len {
+        return error.DspFilterError;
+    }
+
+    var n: usize = 0;
+    while n < input.len {
+        var acc_q15: i64 = 0L;
+        var k: usize = 0;
+        while k < coeff_q15.len {
+            if k <= n {
+                acc_q15 = acc_q15 + mul16_16_i64(input.ptr[n - k], coeff_q15.ptr[k]);
+            }
+            k = k + 1;
+        }
+        output.ptr[n] = sat16(round_shift_i64_to_i32(acc_q15, 15));
+        n = n + 1;
+    }
+}
+
+export fn iir_one_pole_q15_i16(input: &[i16], b0_q15: i16, a1_q15: i16, state_q15: &i32, output: &[i16]) !void {
+    if output.len < input.len {
+        return error.DspFilterError;
+    }
+
+    var prev_q15: i32 = *state_q15;
+    var i: usize = 0;
+    while i < input.len {
+        const feed_q15: i64 = mul16_16_i64(input.ptr[i], b0_q15);
+        const feedback_q30: i64 = (prev_q15 as i64) * (a1_q15 as i64);
+        const y_q15: i32 = sat32(feed_q15 + (round_shift_i64_to_i32(feedback_q30, 15) as i64));
+        const y_i16: i16 = sat16(round_shift_i64_to_i32(y_q15 as i64, 15));
+        output.ptr[i] = y_i16;
+        prev_q15 = (y_i16 as i32) << 15;
+        i = i + 1;
+    }
+    *state_q15 = prev_q15;
+}

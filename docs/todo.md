@@ -153,7 +153,7 @@
 - [x] 实现 `core/bitops.uya`。
 - [x] 实现 `celt_ilog`。
 - [x] 实现 `clz` fallback。
-- [ ] 实现 `dsp/filters.uya` 基础 FIR/IIR helper。
+- [x] 实现 `dsp/filters.uya` 基础 FIR/IIR helper。
 - [ ] 实现 `dsp/resampler.uya` 占位接口。
 - [ ] 实现 `dsp/pitch.uya` 基础 correlation helper。
 - [ ] 实现 `dsp/window.uya` 表结构。

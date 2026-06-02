@@ -1,0 +1,60 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.dsp.filters.DspFilterError;
+use src.opus.dsp.filters.fir_causal_q15_i16;
+use src.opus.dsp.filters.fir_dot_q15_i16;
+use src.opus.dsp.filters.iir_one_pole_q15_i16;
+
+test "fir dot q15 accumulates with rounding and saturation" {
+    var input: [i16: 3] = [1000, -1000, 2000];
+    var coeff_q15: [i16: 3] = [16384, 16384, 32767];
+    const y: i16 = try fir_dot_q15_i16(&input[0:3], &coeff_q15[0:3]);
+    try assert_eq_i32(y as i32, 2000);
+
+    var loud: [i16: 2] = [32767, 32767];
+    var unity_q15: [i16: 2] = [32767, 32767];
+    const clipped: i16 = try fir_dot_q15_i16(&loud[0:2], &unity_q15[0:2]);
+    try assert_eq_i32(clipped as i32, 32767);
+}
+
+test "fir causal q15 writes zero-padded convolution without heap state" {
+    var input: [i16: 4] = [1000, 2000, -1000, 0];
+    var coeff_q15: [i16: 2] = [16384, 16384];
+    var output: [i16: 4] = [0: 4];
+    try fir_causal_q15_i16(&input[0:4], &coeff_q15[0:2], &output[0:4]);
+
+    try assert_eq_i32(output[0] as i32, 500);
+    try assert_eq_i32(output[1] as i32, 1500);
+    try assert_eq_i32(output[2] as i32, 500);
+    try assert_eq_i32(output[3] as i32, -500);
+}
+
+test "iir one pole q15 keeps caller supplied state" {
+    var input: [i16: 4] = [1000, 1000, 1000, 1000];
+    var output: [i16: 4] = [0: 4];
+    var state_q15: i32 = 0;
+    try iir_one_pole_q15_i16(&input[0:4], 16384 as i16, 16384 as i16, &state_q15, &output[0:4]);
+
+    try assert_eq_i32(output[0] as i32, 500);
+    try assert_eq_i32(output[1] as i32, 750);
+    try assert_eq_i32(output[2] as i32, 875);
+    try assert_eq_i32(output[3] as i32, 938);
+    try assert_eq_i32(state_q15, (938 as i32) << 15);
+}
+
+test "filter helpers reject invalid lengths on cold path" {
+    var input: [i16: 1] = [1];
+    var empty: [i16: 0] = [0: 0];
+    var output: [i16: 0] = [0: 0];
+    const dot_res: !i16 = fir_dot_q15_i16(&input[0:1], &empty[0:0]);
+    match dot_res {
+        error.DspFilterError => {}
+        else => { try assert(false, "mismatched FIR dot must fail"); }
+    }
+
+    const fir_res: !void = fir_causal_q15_i16(&input[0:1], &empty[0:0], &output[0:0]);
+    match fir_res {
+        error.DspFilterError => {}
+        else => { try assert(false, "empty FIR coeffs must fail"); }
+    }
+}
