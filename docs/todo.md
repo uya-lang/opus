@@ -188,7 +188,7 @@
 
 ## 7. CELT 基础
 
-- [ ] 实现 `celt/mode.uya`。
+- [x] 实现 `celt/mode.uya`。
 - [ ] 实现 CELT mode 常量。
 - [ ] 实现 eBands 查询。
 - [ ] 实现 frame size/LM 映射。

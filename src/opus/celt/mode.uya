@@ -1,0 +1,32 @@
+export error CeltModeError;
+
+export struct CeltMode {
+    sample_rate_hz: u32,
+    overlap: i32,
+    nb_ebands: i32,
+    eff_ebands: i32,
+    max_lm: i32,
+    nb_short_mdcts: i32,
+    short_mdct_size: i32,
+    nb_alloc_vectors: i32,
+}
+
+export fn celt_mode_48000() CeltMode {
+    return CeltMode{
+        sample_rate_hz: 48000,
+        overlap: 120,
+        nb_ebands: 21,
+        eff_ebands: 21,
+        max_lm: 3,
+        nb_short_mdcts: 8,
+        short_mdct_size: 120,
+        nb_alloc_vectors: 11,
+    };
+}
+
+export fn celt_mode_for_sample_rate(sample_rate_hz: u32) !CeltMode {
+    if sample_rate_hz == 48000 {
+        return celt_mode_48000();
+    }
+    return error.CeltModeError;
+}

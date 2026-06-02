@@ -1,0 +1,28 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.mode.CeltMode;
+use src.opus.celt.mode.celt_mode_48000;
+use src.opus.celt.mode.celt_mode_for_sample_rate;
+
+test "celt mode exposes upstream 48k static mode metadata" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32(mode.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(mode.overlap, 120);
+    try assert_eq_i32(mode.nb_ebands, 21);
+    try assert_eq_i32(mode.eff_ebands, 21);
+    try assert_eq_i32(mode.max_lm, 3);
+    try assert_eq_i32(mode.nb_short_mdcts, 8);
+    try assert_eq_i32(mode.short_mdct_size, 120);
+    try assert_eq_i32(mode.nb_alloc_vectors, 11);
+}
+
+test "celt mode lookup accepts only the static Opus 48k mode for now" {
+    const mode: CeltMode = try celt_mode_for_sample_rate(48000);
+    try assert_eq_i32(mode.sample_rate_hz as i32, 48000);
+
+    const bad: !CeltMode = celt_mode_for_sample_rate(44100);
+    match bad {
+        error.CeltModeError => {}
+        else => { try assert(false, "unsupported CELT mode must fail"); }
+    }
+}
