@@ -197,7 +197,7 @@
 - [x] 实现 `icwrs`。
 - [x] 实现 pulse encode/decode roundtrip。
 - [x] 实现 `dsp/mdct.uya` 标量 IMDCT。
-- [ ] 实现 overlap-add。
+- [x] 实现 overlap-add。
 - [ ] 实现 deemphasis。
 - [ ] 测试 mode table。
 - [ ] 测试 cwrs 小维度 exhaustive。

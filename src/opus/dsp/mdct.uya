@@ -34,6 +34,11 @@ fn round_f64_to_i32(value: f64) i32 {
     return (value - 0.5) as i32;
 }
 
+fn mul_q15_i16(sample: i16, gain_q15: i16) i16 {
+    const product_q30: i64 = (sample as i64) * (gain_q15 as i64);
+    return sat16(round_shift_q30_to_q15(product_q30));
+}
+
 export fn mdct_imdct_twiddle_q15_len(n: usize) !usize {
     if n < 4 || (n & (1 as usize)) != 0 {
         return error.DspMdctError;
@@ -88,5 +93,35 @@ export fn mdct_imdct_scalar_q15(input_q15: &[i16], twiddle_q15: &[i16], output_q
         const scaled_q30: i64 = try round_div_i64(acc_q30 * 2L, n as i64);
         output_q15.ptr[sample] = sat16(round_shift_q30_to_q15(scaled_q30));
         sample = sample + 1;
+    }
+}
+
+export fn mdct_overlap_add_q15(imdct_q15: &[i16], window_q15: &[i16], overlap_q15: &[i16], output_q15: &[i16]) !void {
+    if overlap_q15.len == 0 || output_q15.len < overlap_q15.len {
+        return error.DspMdctError;
+    }
+    if window_q15.len < overlap_q15.len || imdct_q15.len != output_q15.len + overlap_q15.len {
+        return error.DspMdctError;
+    }
+
+    const overlap_len: usize = overlap_q15.len;
+    var i: usize = 0;
+    while i < overlap_len {
+        const faded_in: i16 = mul_q15_i16(imdct_q15.ptr[i], window_q15.ptr[i]);
+        output_q15.ptr[i] = sat16((overlap_q15.ptr[i] as i32) + (faded_in as i32));
+        i = i + 1;
+    }
+
+    while i < output_q15.len {
+        output_q15.ptr[i] = imdct_q15.ptr[i];
+        i = i + 1;
+    }
+
+    var j: usize = 0;
+    while j < overlap_len {
+        const tail_index: usize = output_q15.len + j;
+        const window_index: usize = overlap_len - 1 - j;
+        overlap_q15.ptr[j] = mul_q15_i16(imdct_q15.ptr[tail_index], window_q15.ptr[window_index]);
+        j = j + 1;
     }
 }

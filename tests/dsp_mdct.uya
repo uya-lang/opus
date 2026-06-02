@@ -5,6 +5,7 @@ use src.opus.dsp.mdct.MDCT_TWIDDLE_Q15_SCALE;
 use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
 use src.opus.dsp.mdct.mdct_imdct_scalar_q15;
 use src.opus.dsp.mdct.mdct_imdct_twiddle_q15_len;
+use src.opus.dsp.mdct.mdct_overlap_add_q15;
 
 test "imdct twiddle q15 exposes deterministic small table" {
     try assert_eq_i32(MDCT_TWIDDLE_Q15_SCALE, 32768);
@@ -105,5 +106,51 @@ test "scalar imdct rejects invalid sizes and buffers" {
     match wrong_output {
         error.DspMdctError => {}
         else => { try assert(false, "output must be twice coefficient length"); }
+    }
+}
+
+test "overlap add q15 mixes previous tail and saves next tail" {
+    var imdct: [i16: 6] = [1000, 2000, 3000, 4000, 5000, 6000];
+    var window_q15: [i16: 2] = [16384, 32767];
+    var overlap: [i16: 2] = [100, -100];
+    var output: [i16: 4] = [0: 4];
+
+    try mdct_overlap_add_q15(&imdct[0:6], &window_q15[0:2], &overlap[0:2], &output[0:4]);
+
+    try assert_eq_i32(output[0] as i32, 600);
+    try assert_eq_i32(output[1] as i32, 1900);
+    try assert_eq_i32(output[2] as i32, 3000);
+    try assert_eq_i32(output[3] as i32, 4000);
+    try assert_eq_i32(overlap[0] as i32, 5000);
+    try assert_eq_i32(overlap[1] as i32, 3000);
+}
+
+test "overlap add q15 saturates mixed output and validates buffers" {
+    var imdct: [i16: 4] = [32767, -32768, 0, 0];
+    var window_q15: [i16: 2] = [32767, 32767];
+    var overlap: [i16: 2] = [30000, -30000];
+    var output: [i16: 2] = [0: 2];
+
+    try mdct_overlap_add_q15(&imdct[0:4], &window_q15[0:2], &overlap[0:2], &output[0:2]);
+    try assert_eq_i32(output[0] as i32, 32767);
+    try assert_eq_i32(output[1] as i32, -32768);
+
+    var empty_overlap: [i16: 0] = [0: 0];
+    const empty_res: !void = mdct_overlap_add_q15(&imdct[0:4], &window_q15[0:2], &empty_overlap[0:0], &output[0:2]);
+    match empty_res {
+        error.DspMdctError => {}
+        else => { try assert(false, "empty overlap state must fail"); }
+    }
+
+    const short_window: !void = mdct_overlap_add_q15(&imdct[0:4], &window_q15[0:1], &overlap[0:2], &output[0:2]);
+    match short_window {
+        error.DspMdctError => {}
+        else => { try assert(false, "short window must fail"); }
+    }
+
+    const wrong_imdct: !void = mdct_overlap_add_q15(&imdct[0:3], &window_q15[0:2], &overlap[0:2], &output[0:2]);
+    match wrong_imdct {
+        error.DspMdctError => {}
+        else => { try assert(false, "imdct block must include output and overlap regions"); }
     }
 }
