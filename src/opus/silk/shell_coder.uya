@@ -1,0 +1,152 @@
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.silk.tables.silk_shell_code_table_offset;
+use src.opus.silk.tables.silk_shell_code_table_value;
+
+export error SilkShellCoderError;
+
+export const SILK_SHELL_CODEC_FRAME_LENGTH: usize = 16;
+export const SILK_SHELL_MAX_PULSES: i32 = 16;
+
+fn clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn combine_pulses(out: &[i16], input: &[i16], len: usize) !void {
+    if out.len < len || input.len < len * 2 {
+        return error.SilkShellCoderError;
+    }
+    var i: usize = 0;
+    while i < len {
+        out.ptr[i] = (input.ptr[2 * i] as i32 + input.ptr[2 * i + 1] as i32) as i16;
+        i = i + 1;
+    }
+}
+
+fn fill_split_icdf(level: i32, pulses: i32, icdf: &[byte]) !void {
+    if level < 0 || level > 3 || pulses < 0 || pulses > SILK_SHELL_MAX_PULSES || icdf.len < ((pulses as usize) + 1) {
+        return error.SilkShellCoderError;
+    }
+    const offset: usize = silk_shell_code_table_offset(pulses);
+    var i: usize = 0;
+    while i < (pulses as usize) + 1 {
+        icdf.ptr[i] = silk_shell_code_table_value(level, offset + i);
+        i = i + 1;
+    }
+}
+
+fn encode_split(enc: &EcEnc, child0: i16, total: i16, level: i32) !void {
+    if child0 < 0 || total < 0 || child0 > total || total > (SILK_SHELL_MAX_PULSES as i16) {
+        return error.SilkShellCoderError;
+    }
+    if total > 0 {
+        var icdf: [byte: 17] = [0: 17];
+        try fill_split_icdf(level, total as i32, &icdf[0:17]);
+        ec_enc_icdf(enc, child0 as i32, &icdf[0:((total as usize) + 1)], 8);
+    }
+}
+
+fn decode_split(dec: &EcDec, child0: &i16, child1: &i16, total: i16, level: i32) !void {
+    if total < 0 || total > (SILK_SHELL_MAX_PULSES as i16) {
+        return error.SilkShellCoderError;
+    }
+    if total > 0 {
+        var icdf: [byte: 17] = [0: 17];
+        try fill_split_icdf(level, total as i32, &icdf[0:17]);
+        const decoded: i32 = ec_dec_icdf(dec, &icdf[0:((total as usize) + 1)], 8);
+        if decoded < 0 || decoded > (total as i32) {
+            return error.SilkShellCoderError;
+        }
+        *child0 = decoded as i16;
+        *child1 = (total as i32 - decoded) as i16;
+    } else {
+        *child0 = 0;
+        *child1 = 0;
+    }
+}
+
+export fn silk_shell_abs_sum(pulses: &[i16]) !i32 {
+    if pulses.len != SILK_SHELL_CODEC_FRAME_LENGTH {
+        return error.SilkShellCoderError;
+    }
+    var total: i32 = 0;
+    var i: usize = 0;
+    while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+        if pulses.ptr[i] < 0 {
+            return error.SilkShellCoderError;
+        }
+        total = total + (pulses.ptr[i] as i32);
+        if total > SILK_SHELL_MAX_PULSES {
+            return error.SilkShellCoderError;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+export fn silk_shell_encoder(enc: &EcEnc, pulses0: &[i16]) !i32 {
+    var pulses1: [i16: 8] = [0: 8];
+    var pulses2: [i16: 4] = [0: 4];
+    var pulses3: [i16: 2] = [0: 2];
+    var pulses4: [i16: 1] = [0];
+
+    const total: i32 = try silk_shell_abs_sum(pulses0);
+    try combine_pulses(&pulses1[0:8], pulses0, 8);
+    try combine_pulses(&pulses2[0:4], &pulses1[0:8], 4);
+    try combine_pulses(&pulses3[0:2], &pulses2[0:4], 2);
+    try combine_pulses(&pulses4[0:1], &pulses3[0:2], 1);
+
+    if pulses4[0] as i32 != total {
+        return error.SilkShellCoderError;
+    }
+
+    try encode_split(enc, pulses3[0], pulses4[0], 3);
+    try encode_split(enc, pulses2[0], pulses3[0], 2);
+    try encode_split(enc, pulses1[0], pulses2[0], 1);
+    try encode_split(enc, pulses0.ptr[0], pulses1[0], 0);
+    try encode_split(enc, pulses0.ptr[2], pulses1[1], 0);
+    try encode_split(enc, pulses1[2], pulses2[1], 1);
+    try encode_split(enc, pulses0.ptr[4], pulses1[2], 0);
+    try encode_split(enc, pulses0.ptr[6], pulses1[3], 0);
+    try encode_split(enc, pulses2[2], pulses3[1], 2);
+    try encode_split(enc, pulses1[4], pulses2[2], 1);
+    try encode_split(enc, pulses0.ptr[8], pulses1[4], 0);
+    try encode_split(enc, pulses0.ptr[10], pulses1[5], 0);
+    try encode_split(enc, pulses1[6], pulses2[3], 1);
+    try encode_split(enc, pulses0.ptr[12], pulses1[6], 0);
+    try encode_split(enc, pulses0.ptr[14], pulses1[7], 0);
+    return total;
+}
+
+export fn silk_shell_decoder(dec: &EcDec, pulses0: &[i16], pulses4: i32) !void {
+    if pulses0.len < SILK_SHELL_CODEC_FRAME_LENGTH || pulses4 < 0 || pulses4 > SILK_SHELL_MAX_PULSES {
+        return error.SilkShellCoderError;
+    }
+
+    var pulses3: [i16: 2] = [0: 2];
+    var pulses2: [i16: 4] = [0: 4];
+    var pulses1: [i16: 8] = [0: 8];
+    clear_i16(&pulses0[0:SILK_SHELL_CODEC_FRAME_LENGTH]);
+
+    try decode_split(dec, &pulses3[0], &pulses3[1], pulses4 as i16, 3);
+    try decode_split(dec, &pulses2[0], &pulses2[1], pulses3[0], 2);
+    try decode_split(dec, &pulses1[0], &pulses1[1], pulses2[0], 1);
+    try decode_split(dec, &pulses0.ptr[0], &pulses0.ptr[1], pulses1[0], 0);
+    try decode_split(dec, &pulses0.ptr[2], &pulses0.ptr[3], pulses1[1], 0);
+    try decode_split(dec, &pulses1[2], &pulses1[3], pulses2[1], 1);
+    try decode_split(dec, &pulses0.ptr[4], &pulses0.ptr[5], pulses1[2], 0);
+    try decode_split(dec, &pulses0.ptr[6], &pulses0.ptr[7], pulses1[3], 0);
+    try decode_split(dec, &pulses2[2], &pulses2[3], pulses3[1], 2);
+    try decode_split(dec, &pulses1[4], &pulses1[5], pulses2[2], 1);
+    try decode_split(dec, &pulses0.ptr[8], &pulses0.ptr[9], pulses1[4], 0);
+    try decode_split(dec, &pulses0.ptr[10], &pulses0.ptr[11], pulses1[5], 0);
+    try decode_split(dec, &pulses1[6], &pulses1[7], pulses2[3], 1);
+    try decode_split(dec, &pulses0.ptr[12], &pulses0.ptr[13], pulses1[6], 0);
+    try decode_split(dec, &pulses0.ptr[14], &pulses0.ptr[15], pulses1[7], 0);
+}

@@ -1,0 +1,97 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
+use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
+use src.opus.silk.shell_coder.silk_shell_abs_sum;
+use src.opus.silk.shell_coder.silk_shell_decoder;
+use src.opus.silk.shell_coder.silk_shell_encoder;
+use src.opus.silk.tables.silk_shell_table_hash;
+use src.opus.silk.tables.silk_table_len;
+
+fn assert_shell_roundtrip(input: &[i16]) !void {
+    var packet: [byte: 64] = [0: 64];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:64]);
+    const total: i32 = try silk_shell_encoder(&enc, input);
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:64]);
+    var decoded: [i16: 16] = [99: 16];
+    try silk_shell_decoder(&dec, &decoded[0:16], total);
+    try ec_dec_check(&dec);
+
+    var i: usize = 0;
+    while i < 16 {
+        try assert_eq_i32(decoded[i] as i32, input.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "silk shell coder tables match upstream shapes and hashes" {
+    try assert_eq_i32(SILK_SHELL_CODEC_FRAME_LENGTH as i32, 16);
+    try assert_eq_i32(SILK_SHELL_MAX_PULSES, 16);
+    try assert_eq_i32(silk_table_len(7) as i32, 152);
+    try assert_eq_i32(silk_table_len(8) as i32, 152);
+    try assert_eq_i32(silk_table_len(9) as i32, 152);
+    try assert_eq_i32(silk_table_len(10) as i32, 152);
+    try assert_eq_i32(silk_table_len(11) as i32, 17);
+    try assert_eq_i32(silk_shell_table_hash(0) as i32, 635112220);
+    try assert_eq_i32(silk_shell_table_hash(1) as i32, 794520531);
+    try assert_eq_i32(silk_shell_table_hash(2) as i32, 611988706);
+    try assert_eq_i32(silk_shell_table_hash(3) as i32, 524016143);
+    try assert_eq_i32(silk_shell_table_hash(4) as i32, 711768652);
+}
+
+test "silk shell coder roundtrips representative 16-pulse blocks" {
+    var sparse: [i16: 16] = [3, 0, 1, 0, 0, 2, 0, 0, 4, 0, 0, 1, 0, 0, 0, 5];
+    var balanced: [i16: 16] = [1: 16];
+    var left_heavy: [i16: 16] = [8, 4, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    try assert_shell_roundtrip(&sparse[0:16]);
+    try assert_shell_roundtrip(&balanced[0:16]);
+    try assert_shell_roundtrip(&left_heavy[0:16]);
+}
+
+test "silk shell coder validates pulse counts and output buffers" {
+    var bad_negative: [i16: 16] = [0: 16];
+    bad_negative[3] = -1;
+    const negative: !i32 = silk_shell_abs_sum(&bad_negative[0:16]);
+    match negative {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "negative shell pulse amplitudes must fail"); }
+    }
+
+    var too_many: [i16: 16] = [1: 16];
+    too_many[0] = 2;
+    const over_limit: !i32 = silk_shell_abs_sum(&too_many[0:16]);
+    match over_limit {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "shell pulse sum above 16 must fail"); }
+    }
+
+    var packet: [byte: 8] = [0: 8];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:8]);
+    var decoded: [i16: 16] = [0: 16];
+
+    const bad_total: !void = silk_shell_decoder(&dec, &decoded[0:16], 17);
+    match bad_total {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "decoder must reject total pulse count above SILK max"); }
+    }
+
+    const short_output: !void = silk_shell_decoder(&dec, &decoded[0:15], 0);
+    match short_output {
+        error.SilkShellCoderError => {}
+        else => { try assert(false, "decoder must require a full 16-pulse output block"); }
+    }
+}

@@ -47,6 +47,11 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_PITCH_CONTOUR_10_MS_NB_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
 | `SILK_TRANSITION_LP_B_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][3]` | 15 | 258613290 | 2147483648 |
 | `SILK_TRANSITION_LP_A_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][2]` | 10 | 268602790 | 2147483648 |
+| `SILK_SHELL_CODE_TABLE0` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 635112220 | 0 |
+| `SILK_SHELL_CODE_TABLE1` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 794520531 | 0 |
+| `SILK_SHELL_CODE_TABLE2` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 611988706 | 0 |
+| `SILK_SHELL_CODE_TABLE3` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 524016143 | 0 |
+| `SILK_SHELL_CODE_TABLE_OFFSETS` | `silk/tables_pulses_per_block.c` | `usize` | offsets by total pulse count | 17 | 711768652 | 0 |
 
 ## Deferred Table Families
 

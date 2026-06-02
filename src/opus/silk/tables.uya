@@ -1,5 +1,5 @@
 // Imported from Xiph.Org Opus v1.5.2, commit ddbe48383984d56acd9e1ab6a090c54ca6b735a6.
-// Sources: silk/tables_other.c and silk/tables_pitch_lag.c.
+// Sources: silk/tables_other.c, silk/tables_pitch_lag.c, and silk/tables_pulses_per_block.c.
 
 const SILK_STEREO_PRED_QUANT_Q13: [i16: 16] = [
     -13732, -10050, -8266, -7526, -6500, -5000, -2950, -820,
@@ -78,6 +78,151 @@ const SILK_TRANSITION_LP_A_Q28: [i32: 10] = [
     35497197, 57401098,
 ];
 
+const SILK_SHELL_CODE_TABLE0: [byte: 152] = [
+    128, 0, 214, 42, 0, 235, 128, 21,
+    0, 244, 184, 72, 11, 0, 248, 214,
+    128, 42, 7, 0, 248, 225, 170, 80,
+    25, 5, 0, 251, 236, 198, 126, 54,
+    18, 3, 0, 250, 238, 211, 159, 82,
+    35, 15, 5, 0, 250, 231, 203, 168,
+    128, 88, 53, 25, 6, 0, 252, 238,
+    216, 185, 148, 108, 71, 40, 18, 4,
+    0, 253, 243, 225, 199, 166, 128, 90,
+    57, 31, 13, 3, 0, 254, 246, 233,
+    212, 183, 147, 109, 73, 44, 23, 10,
+    2, 0, 255, 250, 240, 223, 198, 166,
+    128, 90, 58, 33, 16, 6, 1, 0,
+    255, 251, 244, 231, 210, 181, 146, 110,
+    75, 46, 25, 12, 5, 1, 0, 255,
+    253, 248, 238, 221, 196, 164, 128, 92,
+    60, 35, 18, 8, 3, 1, 0, 255,
+    253, 249, 242, 229, 208, 180, 146, 110,
+    76, 48, 27, 14, 7, 3, 1, 0,
+];
+
+const SILK_SHELL_CODE_TABLE1: [byte: 152] = [
+    129, 0, 207, 50, 0, 236, 129, 20,
+    0, 245, 185, 72, 10, 0, 249, 213,
+    129, 42, 6, 0, 250, 226, 169, 87,
+    27, 4, 0, 251, 233, 194, 130, 62,
+    20, 4, 0, 250, 236, 207, 160, 99,
+    47, 17, 3, 0, 255, 240, 217, 182,
+    131, 81, 41, 11, 1, 0, 255, 254,
+    233, 201, 159, 107, 61, 20, 2, 1,
+    0, 255, 249, 233, 206, 170, 128, 86,
+    50, 23, 7, 1, 0, 255, 250, 238,
+    217, 186, 148, 108, 70, 39, 18, 6,
+    1, 0, 255, 252, 243, 226, 200, 166,
+    128, 90, 56, 30, 13, 4, 1, 0,
+    255, 252, 245, 231, 209, 180, 146, 110,
+    76, 47, 25, 11, 4, 1, 0, 255,
+    253, 248, 237, 219, 194, 163, 128, 93,
+    62, 37, 19, 8, 3, 1, 0, 255,
+    254, 250, 241, 226, 205, 177, 145, 111,
+    79, 51, 30, 15, 6, 2, 1, 0,
+];
+
+const SILK_SHELL_CODE_TABLE2: [byte: 152] = [
+    129, 0, 203, 54, 0, 234, 129, 23,
+    0, 245, 184, 73, 10, 0, 250, 215,
+    129, 41, 5, 0, 252, 232, 173, 86,
+    24, 3, 0, 253, 240, 200, 129, 56,
+    15, 2, 0, 253, 244, 217, 164, 94,
+    38, 10, 1, 0, 253, 245, 226, 189,
+    132, 71, 27, 7, 1, 0, 253, 246,
+    231, 203, 159, 105, 56, 23, 6, 1,
+    0, 255, 248, 235, 213, 179, 133, 85,
+    47, 19, 5, 1, 0, 255, 254, 243,
+    221, 194, 159, 117, 70, 37, 12, 2,
+    1, 0, 255, 254, 248, 234, 208, 171,
+    128, 85, 48, 22, 8, 2, 1, 0,
+    255, 254, 250, 240, 220, 189, 149, 107,
+    67, 36, 16, 6, 2, 1, 0, 255,
+    254, 251, 243, 227, 201, 166, 128, 90,
+    55, 29, 13, 5, 2, 1, 0, 255,
+    254, 252, 246, 234, 213, 183, 147, 109,
+    73, 43, 22, 10, 4, 2, 1, 0,
+];
+
+const SILK_SHELL_CODE_TABLE3: [byte: 152] = [
+    130, 0, 200, 58, 0, 231, 130, 26,
+    0, 244, 184, 76, 12, 0, 249, 214,
+    130, 43, 6, 0, 252, 232, 173, 87,
+    24, 3, 0, 253, 241, 203, 131, 56,
+    14, 2, 0, 254, 246, 221, 167, 94,
+    35, 8, 1, 0, 254, 249, 232, 193,
+    130, 65, 23, 5, 1, 0, 255, 251,
+    239, 211, 162, 99, 45, 15, 4, 1,
+    0, 255, 251, 243, 223, 186, 131, 74,
+    33, 11, 3, 1, 0, 255, 252, 245,
+    230, 202, 158, 105, 57, 24, 8, 2,
+    1, 0, 255, 253, 247, 235, 214, 179,
+    132, 84, 44, 19, 7, 2, 1, 0,
+    255, 254, 250, 240, 223, 196, 159, 112,
+    69, 36, 15, 6, 2, 1, 0, 255,
+    254, 253, 245, 231, 209, 176, 136, 93,
+    55, 27, 11, 3, 2, 1, 0, 255,
+    254, 253, 252, 239, 221, 194, 158, 117,
+    76, 42, 18, 4, 3, 2, 1, 0,
+];
+
+const SILK_SHELL_CODE_TABLE_OFFSETS: [usize: 17] = [
+    0, 0, 2, 5, 9, 14, 20, 27,
+    35, 44, 54, 65, 77, 90, 104, 119,
+    135,
+];
+
+fn silk_shell_hash_value(table: i32, index: usize) u64 {
+    if table == 0 { return SILK_SHELL_CODE_TABLE0[index] as u64; }
+    if table == 1 { return SILK_SHELL_CODE_TABLE1[index] as u64; }
+    if table == 2 { return SILK_SHELL_CODE_TABLE2[index] as u64; }
+    if table == 3 { return SILK_SHELL_CODE_TABLE3[index] as u64; }
+    if table == 4 { return SILK_SHELL_CODE_TABLE_OFFSETS[index] as u64; }
+    return 0;
+}
+
+fn hash_shell_table(table: i32, len: usize) u32 {
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < len {
+        h = (h * (131 as u64) + silk_shell_hash_value(table, i) + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
+export fn silk_shell_table_hash(table: i32) u32 {
+    if table == 0 { return hash_shell_table(0, 152); }
+    if table == 1 { return hash_shell_table(1, 152); }
+    if table == 2 { return hash_shell_table(2, 152); }
+    if table == 3 { return hash_shell_table(3, 152); }
+    if table == 4 { return hash_shell_table(4, 17); }
+    return 0;
+}
+
+export fn silk_shell_code_table_value(table: i32, index: usize) byte {
+    if index >= 152 {
+        return 0;
+    }
+    if table == 0 { return SILK_SHELL_CODE_TABLE0[index]; }
+    if table == 1 { return SILK_SHELL_CODE_TABLE1[index]; }
+    if table == 2 { return SILK_SHELL_CODE_TABLE2[index]; }
+    if table == 3 { return SILK_SHELL_CODE_TABLE3[index]; }
+    return 0;
+}
+
+export fn silk_shell_code_table_offset(pulses: i32) usize {
+    if pulses < 0 || pulses > 16 {
+        return 0 as usize;
+    }
+    const index: usize = pulses as usize;
+    if index >= 17 {
+        return 0 as usize;
+    }
+    return SILK_SHELL_CODE_TABLE_OFFSETS[index];
+}
+
 export fn silk_table_len(table: i32) usize {
     if table == 0 { return 16; }
     if table == 1 { return 25; }
@@ -86,5 +231,10 @@ export fn silk_table_len(table: i32) usize {
     if table == 4 { return 34; }
     if table == 5 { return 15; }
     if table == 6 { return 10; }
+    if table == 7 { return 152; }
+    if table == 8 { return 152; }
+    if table == 9 { return 152; }
+    if table == 10 { return 152; }
+    if table == 11 { return 17; }
     return 0 as usize;
 }

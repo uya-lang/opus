@@ -55,6 +55,11 @@ TABLES = [
     ("src/opus/silk/tables.uya", "SILK_PITCH_CONTOUR_ICDF", 34, 937829793, 0, 8),
     ("src/opus/silk/tables.uya", "SILK_TRANSITION_LP_B_Q28", 15, 258613290, 2147483648, None),
     ("src/opus/silk/tables.uya", "SILK_TRANSITION_LP_A_Q28", 10, 268602790, 2147483648, None),
+    ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE0", 152, 635112220, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE1", 152, 794520531, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE2", 152, 611988706, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE3", 152, 524016143, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE_OFFSETS", 17, 711768652, 0, None),
 ]
 
 EXTRA_ICDFS = [
