@@ -30,3 +30,11 @@ export fn sat32(value: i64) i32 {
     }
     return value as i32;
 }
+
+export fn sat_add32(a: i32, b: i32) i32 {
+    return sat32((a as i64) + (b as i64));
+}
+
+export fn sat_sub32(a: i32, b: i32) i32 {
+    return sat32((a as i64) - (b as i64));
+}

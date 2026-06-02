@@ -147,7 +147,7 @@
 - [x] 实现 `core/saturate.uya`。
 - [x] 实现 `sat16`。
 - [x] 实现 `sat32`。
-- [ ] 实现 saturating add/sub。
+- [x] 实现 saturating add/sub。
 - [ ] 实现 common multiply helpers。
 - [ ] 实现 rounded shift helpers。
 - [ ] 实现 `core/bitops.uya`。

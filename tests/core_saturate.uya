@@ -7,6 +7,8 @@ use src.opus.core.saturate.I32_MAX_I64;
 use src.opus.core.saturate.I32_MIN_I64;
 use src.opus.core.saturate.fits_i16_i32;
 use src.opus.core.saturate.fits_i32_i64;
+use src.opus.core.saturate.sat_add32;
+use src.opus.core.saturate.sat_sub32;
 use src.opus.core.saturate.sat16;
 use src.opus.core.saturate.sat32;
 
@@ -45,4 +47,16 @@ test "sat32 clamps i64 input to signed 32-bit output" {
     try assert_eq_i32(sat32(I32_MAX_I64 + 1L), I32_MAX_I64 as i32);
     try assert_eq_i32(sat32(-123456789L), -123456789);
     try assert_eq_i32(sat32(123456789L), 123456789);
+}
+
+test "saturating i32 add and sub use wide intermediates" {
+    try assert_eq_i32(sat_add32(100, 23), 123);
+    try assert_eq_i32(sat_add32(I32_MAX_I64 as i32, 1), I32_MAX_I64 as i32);
+    try assert_eq_i32(sat_add32(I32_MIN_I64 as i32, -1), I32_MIN_I64 as i32);
+    try assert_eq_i32(sat_add32(I32_MAX_I64 as i32, -7), 2147483640);
+
+    try assert_eq_i32(sat_sub32(100, 23), 77);
+    try assert_eq_i32(sat_sub32(I32_MIN_I64 as i32, 1), I32_MIN_I64 as i32);
+    try assert_eq_i32(sat_sub32(I32_MAX_I64 as i32, -1), I32_MAX_I64 as i32);
+    try assert_eq_i32(sat_sub32(I32_MIN_I64 as i32, -8), -2147483640);
 }
