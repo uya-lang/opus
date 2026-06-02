@@ -1,0 +1,73 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.decode.CeltMonoDecodeScratch;
+use src.opus.celt.decode.celt_decode_mono_i16;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+
+test "celt mono decode integrates entropy bands imdct and deemphasis" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 3);
+
+    var payload: [byte: 64] = [0: 64];
+    var pcm: [i16: 120] = [123: 120];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    const decoded: usize = try celt_decode_mono_i16(&state, &payload[0:64], &pcm[0:120], &scratch);
+
+    try assert_eq_i32(decoded as i32, 120);
+    try assert(scratch.twiddle_ready, "mono decode must cache scalar IMDCT twiddles in scratch");
+    try assert(scratch.spread_decision >= 0, "mono decode must run spread decision stage");
+    try assert(state.loss_count == 0, "successful decode clears CELT loss count");
+}
+
+test "celt mono decode preserves overlap and energy state across calls" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 3);
+    var payload: [byte: 64] = [0: 64];
+    var pcm: [i16: 120] = [0: 120];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    _ = try celt_decode_mono_i16(&state, &payload[0:64], &pcm[0:120], &scratch);
+    const first_energy: i16 = state.old_band_e_q8[0];
+    const first_overlap: i16 = state.overlap_mem_q15[0];
+    _ = try celt_decode_mono_i16(&state, &payload[0:64], &pcm[0:120], &scratch);
+
+    try assert(state.old_loge_q8[0] == state.old_ebands_q8[0], "decode must publish log energy history");
+    try assert(state.old_band_e_q8[0] == state.old_ebands_q8[0], "decode must publish band energy history");
+    try assert(first_energy != state.old_band_e_q8[0] || first_overlap == state.overlap_mem_q15[0] || scratch.twiddle_ready, "stateful decode path must remain reusable");
+}
+
+test "celt mono decode rejects unsupported current configurations" {
+    var stereo: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&stereo, 2);
+    try celt_state_configure_frame(&stereo, 120, 0, 3);
+    var payload: [byte: 8] = [0: 8];
+    var pcm: [i16: 120] = [0: 120];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    const bad_channels: !usize = celt_decode_mono_i16(&stereo, &payload[0:8], &pcm[0:120], &scratch);
+    match bad_channels {
+        error.CeltDecodeError => {}
+        else => { try assert(false, "mono decode must reject stereo state"); }
+    };
+
+    var mono: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&mono, 1);
+    try celt_state_configure_frame(&mono, 240, 0, 3);
+    const bad_duration: !usize = celt_decode_mono_i16(&mono, &payload[0:8], &pcm[0:120], &scratch);
+    match bad_duration {
+        error.CeltDecodeError => {}
+        else => { try assert(false, "duration support is a separate CELT-only task"); }
+    };
+
+    try celt_state_configure_frame(&mono, 120, 0, 21);
+    const bad_band: !usize = celt_decode_mono_i16(&mono, &payload[0:8], &pcm[0:120], &scratch);
+    match bad_band {
+        error.CeltDecodeError => {}
+        else => { try assert(false, "wide band support must wait for full PVQ dimensions"); }
+    };
+}

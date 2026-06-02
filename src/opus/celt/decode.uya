@@ -1,0 +1,364 @@
+use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_DIM;
+use src.opus.celt.bands.celt_apply_anti_collapse_q15;
+use src.opus.celt.bands.celt_decode_anti_collapse_flag;
+use src.opus.celt.bands.celt_decode_band_shapes;
+use src.opus.celt.bands.celt_denormalize_bands_q15;
+use src.opus.celt.mdct_bridge.celt_imdct_overlap_q15;
+use src.opus.celt.mode.celt_mode_eband_width_5ms;
+use src.opus.celt.quant_bands.celt_decode_coarse_energy;
+use src.opus.celt.quant_bands.celt_decode_fine_energy;
+use src.opus.celt.rate.celt_rate_decode_allocation;
+use src.opus.celt.spread.celt_decode_spread_decision;
+use src.opus.celt.state.CELT_MAX_BANDS;
+use src.opus.celt.state.CELT_MAX_OVERLAP;
+use src.opus.celt.state.CELT_ENERGY_HISTORY_LEN;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_energy_index;
+use src.opus.celt.tf.celt_decode_tf_changes;
+use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
+use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
+use src.opus.dsp.window.celt_window_120_q15_boundary;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+
+export error CeltDecodeError;
+
+export const CELT_MONO_DECODE_FRAME_SIZE: i32 = 120;
+export const CELT_MONO_DECODE_MAX_COEFFS: usize = 120;
+export const CELT_MONO_DECODE_MAX_IMDCT: usize = 240;
+export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 28800;
+export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 120;
+const CELT_MONO_DECODE_DEEMPHASIS_Q15: i16 = 27853;
+
+export struct CeltMonoDecodeScratch {
+    band_dims: [i32: CELT_MAX_BANDS],
+    pulse_bits: [i32: CELT_MAX_BANDS],
+    fine_quant: [i32: CELT_MAX_BANDS],
+    tf_res: [i32: CELT_MAX_BANDS],
+    collapse_masks: [u32: CELT_MAX_BANDS],
+    band_energy_q10: [i16: CELT_MAX_BANDS],
+    pulses: [i32: CELT_MONO_DECODE_MAX_SPECTRAL],
+    shape_q15: [i16: CELT_MONO_DECODE_MAX_SPECTRAL],
+    coeff_q15: [i16: CELT_MONO_DECODE_MAX_COEFFS],
+    freq_q15: [i16: CELT_MONO_DECODE_MAX_SPECTRAL],
+    imdct_q15: [i16: CELT_MONO_DECODE_MAX_IMDCT],
+    pcm_q15: [i16: CELT_MONO_DECODE_FRAME_SIZE as usize],
+    window_q15: [i16: CELT_MAX_OVERLAP],
+    twiddle_q15: [i16: CELT_MONO_DECODE_MAX_TWIDDLE],
+    twiddle_ready: bool,
+    spread_decision: i32,
+}
+
+fn clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn clear_u32(values: &[u32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn round_shift_i64_to_i32(value: i64, shift: i32) i32 {
+    const half: i64 = 1L << (shift - 1);
+    if value >= 0L {
+        return sat32((value + half) >> shift);
+    }
+    return sat32(0L - (((0L - value) + half) >> shift));
+}
+
+fn celt_mono_deemphasis_i16(input: &[i16], mem_q15: &i32, output: &[i16]) !void {
+    if output.len < input.len {
+        return error.CeltDecodeError;
+    }
+
+    var prev_q15: i32 = *mem_q15;
+    var i: usize = 0;
+    while i < input.len {
+        const prediction_q15: i32 = round_shift_i64_to_i32((prev_q15 as i64) * (CELT_MONO_DECODE_DEEMPHASIS_Q15 as i64), 15);
+        const sample_q15: i32 = sat32((input.ptr[i] as i64) << 15);
+        const y_q15: i32 = sat32((sample_q15 as i64) + (prediction_q15 as i64));
+        output.ptr[i] = sat16(round_shift_i64_to_i32(y_q15 as i64, 15));
+        prev_q15 = y_q15;
+        i = i + 1;
+    }
+    *mem_q15 = prev_q15;
+}
+
+fn celt_mono_build_band_dims(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !usize {
+    if state.lm != 0 || state.frame_size != CELT_MONO_DECODE_FRAME_SIZE {
+        return error.CeltDecodeError;
+    }
+    if state.start_band < 0 || state.end_band <= state.start_band || state.end_band > state.mode.nb_ebands {
+        return error.CeltDecodeError;
+    }
+
+    clear_i32(&scratch.band_dims[0:CELT_MAX_BANDS]);
+    var total: usize = 0;
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const width: i32 = (celt_mode_eband_width_5ms(&state.mode, band) catch {
+            return error.CeltDecodeError;
+        }) as i32;
+        if width <= 0 || width > CELT_BAND_SHAPE_MAX_DIM {
+            return error.CeltDecodeError;
+        }
+        total = total + (width as usize);
+        if total > CELT_MONO_DECODE_MAX_SPECTRAL {
+            return error.CeltDecodeError;
+        }
+        scratch.band_dims[band as usize] = width;
+        band = band + 1;
+    }
+    return total;
+}
+
+fn celt_mono_copy_energy_q10(state: &CeltDecoderState, scratch: &CeltMonoDecodeScratch) !void {
+    const old_ebands: &[i16] = &state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN];
+    const band_energy: &[i16] = &scratch.band_energy_q10[0:CELT_MAX_BANDS];
+    var i: usize = 0;
+    while i < band_energy.len {
+        band_energy.ptr[i] = 0;
+        i = i + 1;
+    }
+
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const index: usize = celt_state_energy_index(state, 0, band) catch {
+            return error.CeltDecodeError;
+        };
+        if index >= old_ebands.len || band < 0 || band >= (CELT_MAX_BANDS as i32) {
+            return error.CeltDecodeError;
+        }
+        const band_index: usize = band as usize;
+        if band_index >= band_energy.len {
+            return error.CeltDecodeError;
+        }
+        if band_index < band_energy.len && index < old_ebands.len {
+            band_energy.ptr[band_index] = old_ebands.ptr[index];
+        } else {
+            return error.CeltDecodeError;
+        }
+        band = band + 1;
+    }
+}
+
+fn celt_mono_update_energy_history(state: &CeltDecoderState) !void {
+    const old_ebands: &[i16] = &state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN];
+    const old_band_e: &[i16] = &state.old_band_e_q8[0:CELT_ENERGY_HISTORY_LEN];
+    const old_loge: &[i16] = &state.old_loge_q8[0:CELT_ENERGY_HISTORY_LEN];
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const index: usize = celt_state_energy_index(state, 0, band) catch {
+            return error.CeltDecodeError;
+        };
+        if index >= old_ebands.len || index >= old_band_e.len || index >= old_loge.len {
+            return error.CeltDecodeError;
+        }
+        if index < old_ebands.len && index < old_band_e.len && index < old_loge.len {
+            old_band_e.ptr[index] = old_ebands.ptr[index];
+            old_loge.ptr[index] = old_ebands.ptr[index];
+        } else {
+            return error.CeltDecodeError;
+        }
+        band = band + 1;
+    }
+}
+
+fn celt_mono_build_collapse_masks(state: &const CeltDecoderState, total_dim: usize, scratch: &CeltMonoDecodeScratch) void {
+    const band_dims: &[i32] = &scratch.band_dims[0:CELT_MAX_BANDS];
+    const collapse_masks: &[u32] = &scratch.collapse_masks[0:CELT_MAX_BANDS];
+    clear_u32(collapse_masks);
+    var offset: usize = 0;
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        if band < 0 || band >= (CELT_MAX_BANDS as i32) {
+            return;
+        }
+        const band_index: usize = band as usize;
+        if band_index >= band_dims.len || band_index >= collapse_masks.len {
+            return;
+        }
+        var dim: usize = 0;
+        if band_index < band_dims.len {
+            dim = band_dims.ptr[band_index] as usize;
+        } else {
+            return;
+        }
+        var mask: u32 = 0;
+        var i: usize = 0;
+        while i < dim && offset + i < total_dim {
+            if scratch.shape_q15[offset + i] != 0 {
+                mask = 1;
+            }
+            i = i + 1;
+        }
+        if band_index < collapse_masks.len {
+            collapse_masks.ptr[band_index] = mask;
+        } else {
+            return;
+        }
+        offset = offset + dim;
+        band = band + 1;
+    }
+}
+
+fn celt_mono_prepare_tables(scratch: &CeltMonoDecodeScratch) !void {
+    if !scratch.twiddle_ready {
+        mdct_imdct_init_twiddle_q15(
+            CELT_MONO_DECODE_MAX_IMDCT,
+            &scratch.twiddle_q15[0:CELT_MONO_DECODE_MAX_TWIDDLE],
+        ) catch {
+            return error.CeltDecodeError;
+        };
+        scratch.twiddle_ready = true;
+    }
+
+    var i: usize = 0;
+    while i < CELT_MAX_OVERLAP {
+        scratch.window_q15[i] = celt_window_120_q15_boundary(i);
+        i = i + 1;
+    }
+}
+
+export fn celt_decode_mono_i16(
+    state: &CeltDecoderState,
+    payload: &[byte],
+    pcm: &[i16],
+    scratch: &CeltMonoDecodeScratch,
+) !usize {
+    if state.channels != 1 || payload.len == 0 || pcm.len < (state.frame_size as usize) {
+        return error.CeltDecodeError;
+    }
+
+    try celt_state_configure_frame(state, state.frame_size, state.start_band, state.end_band);
+    const total_dim: usize = try celt_mono_build_band_dims(state, scratch);
+    try celt_mono_prepare_tables(scratch);
+
+    clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.tf_res[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.pulses[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+    clear_i16(&scratch.shape_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+    clear_i16(&scratch.freq_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+    clear_i16(&scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS]);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, payload);
+    const total_bits: i32 = (payload.len * 8) as i32;
+
+    celt_decode_coarse_energy(state, &dec, false) catch {
+        return error.CeltDecodeError;
+    };
+    celt_decode_tf_changes(state.start_band, state.end_band, false, &scratch.tf_res[0:CELT_MAX_BANDS], state.lm, &dec) catch {
+        return error.CeltDecodeError;
+    };
+    scratch.spread_decision = celt_decode_spread_decision(&dec, total_bits) catch {
+        return error.CeltDecodeError;
+    };
+
+    _ = celt_rate_decode_allocation(
+        state,
+        &dec,
+        total_bits,
+        &scratch.pulse_bits[0:CELT_MAX_BANDS],
+        &scratch.fine_quant[0:CELT_MAX_BANDS],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+    celt_decode_fine_energy(state, &dec, &scratch.fine_quant[0:CELT_MAX_BANDS]) catch {
+        return error.CeltDecodeError;
+    };
+    _ = celt_decode_band_shapes(
+        &dec,
+        state.start_band,
+        state.end_band,
+        &scratch.band_dims[0:CELT_MAX_BANDS],
+        &scratch.pulse_bits[0:CELT_MAX_BANDS],
+        &scratch.pulses[0:total_dim],
+        &scratch.shape_q15[0:total_dim],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+
+    celt_mono_build_collapse_masks(state, total_dim, scratch);
+    const anti_collapse: bool = celt_decode_anti_collapse_flag(&dec, false, state.lm, 0) catch {
+        return error.CeltDecodeError;
+    };
+    _ = celt_apply_anti_collapse_q15(
+        anti_collapse,
+        state.start_band,
+        state.end_band,
+        1,
+        &scratch.band_dims[0:CELT_MAX_BANDS],
+        &scratch.collapse_masks[0:CELT_MAX_BANDS],
+        &state.old_loge_q8[0:CELT_MAX_BANDS],
+        &state.old_band_e_q8[0:CELT_MAX_BANDS],
+        &scratch.shape_q15[0:total_dim],
+        &state.rng,
+    ) catch {
+        return error.CeltDecodeError;
+    };
+
+    try celt_mono_copy_energy_q10(state, scratch);
+    _ = celt_denormalize_bands_q15(
+        state.start_band,
+        state.end_band,
+        1,
+        &scratch.band_dims[0:CELT_MAX_BANDS],
+        &scratch.band_energy_q10[0:CELT_MAX_BANDS],
+        &scratch.shape_q15[0:total_dim],
+        &scratch.freq_q15[0:total_dim],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+
+    var i: usize = 0;
+    while i < total_dim {
+        scratch.coeff_q15[i] = scratch.freq_q15[i];
+        i = i + 1;
+    }
+
+    celt_imdct_overlap_q15(
+        state,
+        0,
+        &scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS],
+        &scratch.twiddle_q15[0:CELT_MONO_DECODE_MAX_TWIDDLE],
+        &scratch.window_q15[0:CELT_MAX_OVERLAP],
+        &scratch.imdct_q15[0:CELT_MONO_DECODE_MAX_IMDCT],
+        &scratch.pcm_q15[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+    celt_mono_deemphasis_i16(
+        &scratch.pcm_q15[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+        &state.preemph_mem_q15[0],
+        &pcm[0:(CELT_MONO_DECODE_FRAME_SIZE as usize)],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+
+    ec_dec_check(&dec) catch {
+        return error.CeltDecodeError;
+    };
+    try celt_mono_update_energy_history(state);
+    state.loss_count = 0;
+    return CELT_MONO_DECODE_FRAME_SIZE as usize;
+}
