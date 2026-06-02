@@ -1,0 +1,118 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.bands.celt_band_shape_normalize_q15;
+use src.opus.celt.bands.celt_decode_band_shape;
+use src.opus.celt.bands.celt_decode_band_shapes;
+use src.opus.celt.cwrs.celt_encode_pulses;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.entropy.range_enc.ec_enc_uint;
+
+fn encode_band_rank(packet: &[byte], pulses: &[i32], combinations: u32) !usize {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    ec_enc_uint(&enc, try celt_encode_pulses(pulses), combinations);
+    try ec_enc_check(&enc);
+    return try ec_enc_done(&enc);
+}
+
+test "celt band shape normalizes decoded pulses to q15 unit vectors" {
+    var pulses: [i32: 2] = [1, -1];
+    var shape_q15: [i16: 2] = [0: 2];
+    try celt_band_shape_normalize_q15(&pulses[0:2], &shape_q15[0:2]);
+
+    try assert_eq_i32(shape_q15[0] as i32, 23171);
+    try assert_eq_i32(shape_q15[1] as i32, -23171);
+}
+
+test "celt band shape decode reads cwrs rank from range coder" {
+    var packet: [byte: 16] = [0: 16];
+    var expected: [i32: 2] = [-1, -1];
+    _ = try encode_band_rank(&packet[0:16], &expected[0:2], 8);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var pulses: [i32: 2] = [0: 2];
+    var shape_q15: [i16: 2] = [0: 2];
+    const decoded: i32 = try celt_decode_band_shape(&dec, 2, 4, &pulses[0:2], &shape_q15[0:2]);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decoded, 2);
+    try assert_eq_i32(pulses[0], -1);
+    try assert_eq_i32(pulses[1], -1);
+    try assert_eq_i32(shape_q15[0] as i32, -23171);
+    try assert_eq_i32(shape_q15[1] as i32, -23171);
+}
+
+test "celt band shape decode clears zero budget bands" {
+    var packet: [byte: 1] = [0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:1]);
+    var pulses: [i32: 3] = [7: 3];
+    var shape_q15: [i16: 3] = [7: 3];
+    const decoded: i32 = try celt_decode_band_shape(&dec, 3, 0, &pulses[0:3], &shape_q15[0:3]);
+
+    try assert_eq_i32(decoded, 0);
+    try assert_eq_i32(pulses[0], 0);
+    try assert_eq_i32(pulses[1], 0);
+    try assert_eq_i32(pulses[2], 0);
+    try assert_eq_i32(shape_q15[0] as i32, 0);
+    try assert_eq_i32(shape_q15[1] as i32, 0);
+    try assert_eq_i32(shape_q15[2] as i32, 0);
+}
+
+test "celt band shapes decode consecutive band slices" {
+    var packet: [byte: 16] = [0: 16];
+    var expected: [i32: 2] = [1, 0];
+    _ = try encode_band_rank(&packet[0:16], &expected[0:2], 4);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var dims: [i32: 2] = [2, 1];
+    var bits: [i32: 2] = [2, 0];
+    var pulses: [i32: 3] = [9: 3];
+    var shape_q15: [i16: 3] = [9: 3];
+    const decoded: i32 = try celt_decode_band_shapes(
+        &dec,
+        0,
+        2,
+        &dims[0:2],
+        &bits[0:2],
+        &pulses[0:3],
+        &shape_q15[0:3],
+    );
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decoded, 1);
+    try assert_eq_i32(pulses[0], 1);
+    try assert_eq_i32(pulses[1], 0);
+    try assert_eq_i32(pulses[2], 0);
+    try assert_eq_i32(shape_q15[0] as i32, 32767);
+    try assert_eq_i32(shape_q15[1] as i32, 0);
+    try assert_eq_i32(shape_q15[2] as i32, 0);
+}
+
+test "celt band shape decode validates dimensions and buffers" {
+    var packet: [byte: 1] = [0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:1]);
+    var pulses: [i32: 1] = [0];
+    var shape_q15: [i16: 1] = [0];
+
+    const bad_dim: !i32 = celt_decode_band_shape(&dec, 17, 2, &pulses[0:1], &shape_q15[0:1]);
+    match bad_dim {
+        error.CeltBandsError => {}
+        else => { try assert(false, "unsupported PVQ band dimension must fail"); }
+    }
+
+    const short_output: !i32 = celt_decode_band_shape(&dec, 2, 2, &pulses[0:1], &shape_q15[0:1]);
+    match short_output {
+        error.CeltBandsError => {}
+        else => { try assert(false, "short PVQ output buffer must fail"); }
+    }
+}

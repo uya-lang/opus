@@ -1,0 +1,186 @@
+use src.opus.celt.cwrs.CELT_CWRS_MAX_K;
+use src.opus.celt.cwrs.CELT_CWRS_MAX_N;
+use src.opus.celt.cwrs.celt_cwrs_abs_sum;
+use src.opus.celt.cwrs.celt_cwrs_count;
+use src.opus.celt.cwrs.celt_decode_pulses;
+use src.opus.core.saturate.sat16;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_uint;
+
+export error CeltBandsError;
+
+export const CELT_BAND_SHAPE_Q: u32 = 15;
+export const CELT_BAND_SHAPE_UNIT_Q15: i32 = 32768;
+export const CELT_BAND_SHAPE_MAX_DIM: i32 = CELT_CWRS_MAX_N;
+export const CELT_BAND_SHAPE_MAX_PULSES: i32 = CELT_CWRS_MAX_K;
+
+fn celt_band_shape_clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn celt_band_shape_clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn celt_band_shape_isqrt_u64(value: u64) u64 {
+    var bit: u64 = 4611686018427387904;
+    var n: u64 = value;
+    var root: u64 = 0;
+
+    while bit > n {
+        bit = bit >> 2;
+    }
+    while bit != 0 {
+        if n >= root + bit {
+            n = n - (root + bit);
+            root = (root >> 1) + bit;
+        } else {
+            root = root >> 1;
+        }
+        bit = bit >> 2;
+    }
+    return root;
+}
+
+fn celt_band_shape_pulses_from_bits(bits: i32) i32 {
+    if bits <= 0 {
+        return 0;
+    }
+
+    var pulses: i32 = (bits + 1) / 2;
+    if pulses < 1 {
+        pulses = 1;
+    }
+    if pulses > CELT_BAND_SHAPE_MAX_PULSES {
+        pulses = CELT_BAND_SHAPE_MAX_PULSES;
+    }
+    return pulses;
+}
+
+export fn celt_band_shape_normalize_q15(pulses: &[i32], shape_q15: &[i16]) !void {
+    if pulses.len == 0 || pulses.len > (CELT_BAND_SHAPE_MAX_DIM as usize) || shape_q15.len < pulses.len {
+        return error.CeltBandsError;
+    }
+
+    const abs_sum: i32 = celt_cwrs_abs_sum(pulses) catch {
+        return error.CeltBandsError;
+    };
+    if abs_sum == 0 {
+        celt_band_shape_clear_i16(&shape_q15[0:pulses.len]);
+        return;
+    }
+
+    var energy: u64 = 0;
+    var i: usize = 0;
+    while i < pulses.len {
+        const value: i64 = pulses.ptr[i] as i64;
+        energy = energy + ((value * value) as u64);
+        i = i + 1;
+    }
+
+    const sqrt_q15: u64 = celt_band_shape_isqrt_u64(energy << 30);
+    if sqrt_q15 == 0 {
+        return error.CeltBandsError;
+    }
+
+    i = 0;
+    while i < pulses.len {
+        const numerator: i64 = (pulses.ptr[i] as i64) * (1L << 30);
+        var normalized: i32 = (numerator / (sqrt_q15 as i64)) as i32;
+        if numerator >= 0 {
+            normalized = ((numerator + ((sqrt_q15 as i64) / 2L)) / (sqrt_q15 as i64)) as i32;
+        } else {
+            normalized = ((numerator - ((sqrt_q15 as i64) / 2L)) / (sqrt_q15 as i64)) as i32;
+        }
+        shape_q15.ptr[i] = sat16(normalized);
+        i = i + 1;
+    }
+}
+
+export fn celt_decode_band_shape(
+    dec: &EcDec,
+    dim: i32,
+    pulse_bits: i32,
+    pulses: &[i32],
+    shape_q15: &[i16],
+) !i32 {
+    if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
+        return error.CeltBandsError;
+    }
+    const dim_usize: usize = dim as usize;
+    if pulses.len < dim_usize || shape_q15.len < dim_usize {
+        return error.CeltBandsError;
+    }
+
+    celt_band_shape_clear_i32(&pulses[0:dim_usize]);
+    celt_band_shape_clear_i16(&shape_q15[0:dim_usize]);
+
+    const pulse_count: i32 = celt_band_shape_pulses_from_bits(pulse_bits);
+    if pulse_count == 0 {
+        return 0;
+    }
+
+    const combinations: u32 = celt_cwrs_count(dim, pulse_count) catch {
+        return error.CeltBandsError;
+    };
+    if combinations <= 1 {
+        return error.CeltBandsError;
+    }
+
+    const rank: u32 = ec_dec_uint(dec, combinations);
+    celt_decode_pulses(dim, pulse_count, rank, &pulses[0:dim_usize]) catch {
+        return error.CeltBandsError;
+    };
+    try celt_band_shape_normalize_q15(&pulses[0:dim_usize], &shape_q15[0:dim_usize]);
+    return pulse_count;
+}
+
+export fn celt_decode_band_shapes(
+    dec: &EcDec,
+    start_band: i32,
+    end_band: i32,
+    band_dims: &[i32],
+    pulse_bits: &[i32],
+    pulses: &[i32],
+    shape_q15: &[i16],
+) !i32 {
+    if start_band < 0 || end_band < start_band {
+        return error.CeltBandsError;
+    }
+    if band_dims.len < (end_band as usize) || pulse_bits.len < (end_band as usize) {
+        return error.CeltBandsError;
+    }
+
+    var offset: usize = 0;
+    var decoded_pulses: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
+            return error.CeltBandsError;
+        }
+        const dim_usize: usize = dim as usize;
+        if pulses.len < offset + dim_usize || shape_q15.len < offset + dim_usize {
+            return error.CeltBandsError;
+        }
+
+        decoded_pulses = decoded_pulses + (try celt_decode_band_shape(
+            dec,
+            dim,
+            pulse_bits.ptr[band as usize],
+            &pulses[offset:offset + dim_usize],
+            &shape_q15[offset:offset + dim_usize],
+        ));
+        offset = offset + dim_usize;
+        band = band + 1;
+    }
+    return decoded_pulses;
+}
