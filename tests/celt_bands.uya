@@ -5,6 +5,7 @@ use src.opus.celt.bands.celt_apply_intensity_stereo_bands_q15;
 use src.opus.celt.bands.celt_apply_intensity_stereo_q15;
 use src.opus.celt.bands.celt_apply_anti_collapse_q15;
 use src.opus.celt.bands.celt_decode_anti_collapse_flag;
+use src.opus.celt.bands.celt_denormalize_bands_q15;
 use src.opus.celt.bands.celt_decode_intensity_start_band;
 use src.opus.celt.bands.celt_intensity_stereo_weights_q14;
 use src.opus.celt.bands.celt_decode_band_shape;
@@ -271,6 +272,91 @@ test "celt anti collapse preserves decoded and disabled bands" {
     try assert_eq_i32(fixed, 1);
     try assert_eq_i32(shape[0] as i32, 12);
     try assert((shape[2] != 0 || shape[3] != 0), "only still-collapsed band should be repaired");
+}
+
+test "celt denormalize bands scales q15 shapes by q10 log2 energy" {
+    var dims: [i32: 3] = [2, 1, 2];
+    var energy: [i16: 3] = [0, 1024, -1024];
+    var shape: [i16: 5] = [16384, -16384, 10000, 10000, -10000];
+    var output: [i16: 5] = [0: 5];
+
+    const written: usize = try celt_denormalize_bands_q15(
+        0,
+        3,
+        1,
+        &dims[0:3],
+        &energy[0:3],
+        &shape[0:5],
+        &output[0:5],
+    );
+
+    try assert_eq_i32(written as i32, 5);
+    try assert_eq_i32(output[0] as i32, 16384);
+    try assert_eq_i32(output[1] as i32, -16384);
+    try assert_eq_i32(output[2] as i32, 20000);
+    try assert_eq_i32(output[3] as i32, 5000);
+    try assert_eq_i32(output[4] as i32, -5000);
+}
+
+test "celt denormalize bands follows channel and active band layout" {
+    var dims: [i32: 2] = [1, 2];
+    var energy: [i16: 4] = [0, 512, 1024, 0];
+    var shape: [i16: 6] = [10000, 10000, -10000, 10000, 32767, -32768];
+    var output: [i16: 6] = [0: 6];
+
+    const written: usize = try celt_denormalize_bands_q15(
+        0,
+        2,
+        2,
+        &dims[0:2],
+        &energy[0:4],
+        &shape[0:6],
+        &output[0:6],
+    );
+
+    try assert_eq_i32(written as i32, 6);
+    try assert_eq_i32(output[0] as i32, 10000);
+    try assert_eq_i32(output[1] as i32, 14142);
+    try assert_eq_i32(output[2] as i32, -14142);
+    try assert_eq_i32(output[3] as i32, 20000);
+    try assert_eq_i32(output[4] as i32, 32767);
+    try assert_eq_i32(output[5] as i32, -32768);
+}
+
+test "celt denormalize bands validates dimensions and buffers" {
+    var dims: [i32: 1] = [2];
+    var energy: [i16: 1] = [0];
+    var shape: [i16: 1] = [0];
+    var output: [i16: 1] = [0];
+
+    const short_shape: !usize = celt_denormalize_bands_q15(
+        0,
+        1,
+        1,
+        &dims[0:1],
+        &energy[0:1],
+        &shape[0:1],
+        &output[0:1],
+    );
+    match short_shape {
+        error.CeltBandsError => {}
+        else => { try assert(false, "short denormalize shape buffer must fail"); }
+    }
+
+    dims[0] = 0;
+    const bad_dim: !usize = celt_denormalize_bands_q15(
+        0,
+        1,
+        1,
+        &dims[0:1],
+        &energy[0:1],
+        &shape[0:1],
+        &output[0:1],
+    );
+    match bad_dim {
+        error.CeltBandsError => {}
+        else => { try assert(false, "invalid denormalize band dimension must fail"); }
+    }
 }
 
 test "celt band shape decode validates dimensions and buffers" {

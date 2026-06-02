@@ -220,7 +220,7 @@
 - [x] 实现 PVQ band shape decode。
 - [x] 实现 stereo intensity decode。
 - [x] 实现 anti-collapse decode。
-- [ ] 实现 denormalize bands。
+- [x] 实现 denormalize bands。
 - [ ] 实现 IMDCT integration。
 - [ ] 实现 CELT-only mono decode。
 - [ ] 实现 CELT-only stereo decode。

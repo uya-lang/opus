@@ -16,6 +16,7 @@ export const CELT_BAND_SHAPE_MAX_DIM: i32 = CELT_CWRS_MAX_N;
 export const CELT_BAND_SHAPE_MAX_PULSES: i32 = CELT_CWRS_MAX_K;
 export const CELT_INTENSITY_WEIGHT_Q: u32 = 14;
 export const CELT_ANTI_COLLAPSE_MIN_Q15: i16 = 1;
+const CELT_EXP2_FRAC_Q15: [i32: 9] = [32768, 35733, 38968, 42496, 46341, 50535, 55109, 60099, 65536];
 
 fn celt_band_shape_clear_i32(values: &[i32]) void {
     var i: usize = 0;
@@ -76,6 +77,102 @@ fn celt_abs_i32(value: i32) i32 {
         return -value;
     }
     return value;
+}
+
+fn celt_floor_div_i32(value: i32, divisor: i32) i32 {
+    if value >= 0 {
+        return value / divisor;
+    }
+    return -(((0 - value) + divisor - 1) / divisor);
+}
+
+fn celt_exp2_q10_to_q15(log2_q10: i32) i32 {
+    var int_part: i32 = celt_floor_div_i32(log2_q10, 1024);
+    var frac_q10: i32 = log2_q10 - (int_part * 1024);
+    var frac_index: i32 = (frac_q10 + 64) / 128;
+    if frac_index < 0 {
+        frac_index = 0;
+    }
+    if frac_index >= 8 {
+        frac_index = 0;
+        int_part = int_part + 1;
+    }
+
+    var table_index: usize = 0;
+    if frac_index > 0 && frac_index < 9 {
+        table_index = frac_index as usize;
+    }
+    var gain_q15: i32 = CELT_EXP2_FRAC_Q15[table_index];
+    if int_part >= 15 {
+        return 2147483647;
+    }
+    if int_part >= 0 {
+        return gain_q15 << int_part;
+    }
+    const shift: i32 = 0 - int_part;
+    if shift >= 31 {
+        return 0;
+    }
+    return (gain_q15 + (1 << (shift - 1))) >> shift;
+}
+
+export fn celt_denormalize_bands_q15(
+    start_band: i32,
+    end_band: i32,
+    channels: i32,
+    band_dims: &[i32],
+    band_energy_q10: &[i16],
+    shape_q15: &[i16],
+    output_q15: &[i16],
+) !usize {
+    if channels < 1 || channels > 2 || start_band < 0 || end_band < start_band {
+        return error.CeltBandsError;
+    }
+    if band_dims.len < (end_band as usize) || band_energy_q10.len < ((end_band as usize) * (channels as usize)) {
+        return error.CeltBandsError;
+    }
+
+    var total_dim: usize = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
+            return error.CeltBandsError;
+        }
+        total_dim = total_dim + (dim as usize);
+        band = band + 1;
+    }
+    const required: usize = total_dim * (channels as usize);
+    if shape_q15.len < required || output_q15.len < required {
+        return error.CeltBandsError;
+    }
+
+    var channel: i32 = 0;
+    while channel < channels {
+        var offset: usize = (channel as usize) * total_dim;
+        band = start_band;
+        while band < end_band {
+            const dim_usize: usize = band_dims.ptr[band as usize] as usize;
+            const energy_index: usize = (channel as usize) * (end_band as usize) + (band as usize);
+            const gain_q15: i32 = celt_exp2_q10_to_q15(band_energy_q10.ptr[energy_index] as i32);
+            var i: usize = 0;
+            while i < dim_usize {
+                const scaled: i64 = (shape_q15.ptr[offset + i] as i64) * (gain_q15 as i64);
+                var value: i32 = (scaled >> 15) as i32;
+                if scaled >= 0L {
+                    value = ((scaled + (1L << 14)) >> 15) as i32;
+                } else {
+                    value = (0L - (((0L - scaled) + (1L << 14)) >> 15)) as i32;
+                }
+                output_q15.ptr[offset + i] = sat16(value);
+                i = i + 1;
+            }
+            offset = offset + dim_usize;
+            band = band + 1;
+        }
+        channel = channel + 1;
+    }
+    return required;
 }
 
 fn celt_anti_collapse_band_is_zero(shape_q15: &[i16]) bool {
