@@ -1,0 +1,79 @@
+export enum OpusMode {
+    SILK = 0,
+    CELT = 1,
+    HYBRID = 2,
+}
+
+export enum OpusBandwidth {
+    NARROWBAND = 0,
+    MEDIUMBAND = 1,
+    WIDEBAND = 2,
+    SUPERWIDEBAND = 3,
+    FULLBAND = 4,
+}
+
+export enum OpusApplication {
+    VOIP = 2048,
+    AUDIO = 2049,
+    RESTRICTED_LOWDELAY = 2051,
+}
+
+export enum OpusSignalHint {
+    AUTO = 0,
+    VOICE = 1,
+    MUSIC = 2,
+}
+
+export const OPUS_SIGNAL_AUTO_CTL: i32 = -1000;
+export const OPUS_SIGNAL_VOICE_CTL: i32 = 3001;
+export const OPUS_SIGNAL_MUSIC_CTL: i32 = 3002;
+
+export struct PacketInfo {
+    mode: OpusMode,
+    bandwidth: OpusBandwidth,
+    channels: u8,
+    frame_count: u8,
+    frame_duration_us: u32,
+    duration_samples_48k: u32,
+    payload_offset: usize,
+    payload_len: usize,
+    self_delimited: bool,
+    has_padding: bool,
+}
+
+export struct OpusDecoderConfig {
+    sample_rate_hz: u32,
+    channels: u8,
+}
+
+export struct OpusEncoderConfig {
+    sample_rate_hz: u32,
+    channels: u8,
+    application: OpusApplication,
+    signal_hint: OpusSignalHint,
+    bitrate_bps: u32,
+    complexity: u8,
+    max_bandwidth: OpusBandwidth,
+    vbr: bool,
+    inband_fec: bool,
+    packet_loss_percent: u8,
+}
+
+export fn opus_decoder_config_default() OpusDecoderConfig {
+    return OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+}
+
+export fn opus_encoder_config_default() OpusEncoderConfig {
+    return OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 0,
+        complexity: 5,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 0,
+    };
+}

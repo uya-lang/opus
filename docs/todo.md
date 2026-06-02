@@ -46,14 +46,14 @@
 
 ## 2. Core 类型和常量
 
-- [ ] 实现 `core/types.uya`。
-- [ ] 定义 `OpusMode`。
-- [ ] 定义 `OpusBandwidth`。
-- [ ] 定义 `OpusApplication`。
-- [ ] 定义 `OpusSignalHint`。
-- [ ] 定义 `PacketInfo`。
-- [ ] 定义 `OpusDecoderConfig`。
-- [ ] 定义 `OpusEncoderConfig`。
+- [x] 实现 `core/types.uya`。
+- [x] 定义 `OpusMode`。
+- [x] 定义 `OpusBandwidth`。
+- [x] 定义 `OpusApplication`。
+- [x] 定义 `OpusSignalHint`。
+- [x] 定义 `PacketInfo`。
+- [x] 定义 `OpusDecoderConfig`。
+- [x] 定义 `OpusEncoderConfig`。
 - [ ] 实现 `core/constants.uya`。
 - [ ] 定义 `MAX_CHANNELS`。
 - [ ] 定义 `MAX_FRAME_MS`。

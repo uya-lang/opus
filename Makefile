@@ -4,7 +4,7 @@ BUILD_DIR := build
 BIN_DIR := bin
 SMOKE_SRC := src/opus/main.uya
 SMOKE_BIN := $(BUILD_DIR)/opus-smoke
-TEST_SRCS := tests/scaffold_modules.uya
+TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 
@@ -39,7 +39,7 @@ smoke: require-uya
 test: check
 	@for test_src in $(TEST_SRCS); do \
 		printf 'test: %s\n' "$$test_src"; \
-		$(UYA) test "$$test_src"; \
+		$(UYA) test "$$test_src" --project-root .; \
 	done
 
 bench: require-uya

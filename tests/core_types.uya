@@ -1,0 +1,90 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.OpusSignalHint;
+use src.opus.core.types.OPUS_SIGNAL_AUTO_CTL;
+use src.opus.core.types.OPUS_SIGNAL_MUSIC_CTL;
+use src.opus.core.types.OPUS_SIGNAL_VOICE_CTL;
+use src.opus.core.types.PacketInfo;
+use src.opus.core.types.opus_decoder_config_default;
+use src.opus.core.types.opus_encoder_config_default;
+
+test "opus mode variants are stable" {
+    try assert(OpusMode.SILK == OpusMode.SILK, "silk mode is available");
+    try assert(OpusMode.CELT == OpusMode.CELT, "celt mode is available");
+    try assert(OpusMode.HYBRID == OpusMode.HYBRID, "hybrid mode is available");
+}
+
+test "opus bandwidth variants are ordered from narrow to full" {
+    try assert(OpusBandwidth.NARROWBAND < OpusBandwidth.MEDIUMBAND, "narrowband before mediumband");
+    try assert(OpusBandwidth.MEDIUMBAND < OpusBandwidth.WIDEBAND, "mediumband before wideband");
+    try assert(OpusBandwidth.WIDEBAND < OpusBandwidth.SUPERWIDEBAND, "wideband before superwideband");
+    try assert(OpusBandwidth.SUPERWIDEBAND < OpusBandwidth.FULLBAND, "superwideband before fullband");
+}
+
+test "opus ctl compatible application values are stable" {
+    try assert_eq_i32(OpusApplication.VOIP as i32, 2048);
+    try assert_eq_i32(OpusApplication.AUDIO as i32, 2049);
+    try assert_eq_i32(OpusApplication.RESTRICTED_LOWDELAY as i32, 2051);
+}
+
+test "opus ctl compatible signal hint values are stable" {
+    try assert(OpusSignalHint.AUTO == OpusSignalHint.AUTO, "auto hint is available");
+    try assert(OpusSignalHint.VOICE == OpusSignalHint.VOICE, "voice hint is available");
+    try assert(OpusSignalHint.MUSIC == OpusSignalHint.MUSIC, "music hint is available");
+    try assert_eq_i32(OPUS_SIGNAL_AUTO_CTL, -1000);
+    try assert_eq_i32(OPUS_SIGNAL_VOICE_CTL, 3001);
+    try assert_eq_i32(OPUS_SIGNAL_MUSIC_CTL, 3002);
+}
+
+test "packet info carries parser metadata without payload ownership" {
+    const info: PacketInfo = PacketInfo{
+        mode: OpusMode.CELT,
+        bandwidth: OpusBandwidth.FULLBAND,
+        channels: 2,
+        frame_count: 1,
+        frame_duration_us: 20000,
+        duration_samples_48k: 960,
+        payload_offset: 1,
+        payload_len: 23,
+        self_delimited: false,
+        has_padding: false,
+    };
+
+    try assert(info.mode == OpusMode.CELT, "packet mode");
+    try assert(info.bandwidth == OpusBandwidth.FULLBAND, "packet bandwidth");
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+    try assert_eq_i32(info.payload_offset as i32, 1);
+    try assert_eq_i32(info.payload_len as i32, 23);
+    try assert(info.self_delimited == false, "self delimited");
+    try assert(info.has_padding == false, "padding");
+}
+
+test "decoder default config targets the common mono 48k decode path" {
+    const cfg: OpusDecoderConfig = opus_decoder_config_default();
+
+    try assert_eq_i32(cfg.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(cfg.channels as i32, 1);
+}
+
+test "encoder default config has explicit non-measured defaults" {
+    const cfg: OpusEncoderConfig = opus_encoder_config_default();
+
+    try assert_eq_i32(cfg.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(cfg.channels as i32, 1);
+    try assert(cfg.application == OpusApplication.AUDIO, "default application");
+    try assert(cfg.signal_hint == OpusSignalHint.AUTO, "default signal hint");
+    try assert_eq_i32(cfg.bitrate_bps as i32, 0);
+    try assert_eq_i32(cfg.complexity as i32, 5);
+    try assert(cfg.max_bandwidth == OpusBandwidth.FULLBAND, "default bandwidth");
+    try assert(cfg.vbr == true, "default vbr");
+    try assert(cfg.inband_fec == false, "default fec");
+    try assert_eq_i32(cfg.packet_loss_percent as i32, 0);
+}
