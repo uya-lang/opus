@@ -163,7 +163,7 @@
 
 验收标准：
 
-- [ ] 定点 helper 是算术入口，SILK/CELT 不散落重复 magic shift。
+- [x] 定点 helper 是算术入口，SILK/CELT 不散落重复 magic shift。
 - [ ] 所有 Q-format 表和变量命名带清晰后缀或注释。
 
 ## 6. 表迁移和校验
