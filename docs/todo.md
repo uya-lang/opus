@@ -225,7 +225,7 @@
 - [x] 实现 CELT-only mono decode。
 - [x] 实现 CELT-only stereo decode。
 - [x] 支持 NB/WB/SWB/FB。
-- [ ] 支持 2.5ms。
+- [x] 支持 2.5ms。
 - [ ] 支持 5ms。
 - [ ] 支持 10ms。
 - [ ] 支持 20ms。
