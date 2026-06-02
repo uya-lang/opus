@@ -26,11 +26,11 @@ use src.opus.entropy.range_dec.ec_dec_init;
 
 export error CeltDecodeError;
 
-export const CELT_MONO_DECODE_MAX_FRAME_SIZE: i32 = 480;
-export const CELT_MONO_DECODE_MAX_COEFFS: usize = 480;
-export const CELT_MONO_DECODE_MAX_IMDCT: usize = 960;
-export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 460800;
-export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 800;
+export const CELT_MONO_DECODE_MAX_FRAME_SIZE: i32 = 960;
+export const CELT_MONO_DECODE_MAX_COEFFS: usize = 960;
+export const CELT_MONO_DECODE_MAX_IMDCT: usize = 1920;
+export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 1843200;
+export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 1600;
 const CELT_MONO_DECODE_DEEMPHASIS_Q15: i16 = 27853;
 
 export struct CeltMonoDecodeScratch {
@@ -107,7 +107,7 @@ fn celt_mono_deemphasis_i16(input: &[i16], mem_q15: &i32, output: &[i16]) !void 
 }
 
 fn celt_mono_build_band_dims(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !usize {
-    if state.lm < 0 || state.lm > 2 || state.frame_size <= 0 || state.frame_size > CELT_MONO_DECODE_MAX_FRAME_SIZE {
+    if state.lm < 0 || state.lm > 3 || state.frame_size <= 0 || state.frame_size > CELT_MONO_DECODE_MAX_FRAME_SIZE {
         return error.CeltDecodeError;
     }
     if state.start_band < 0 || state.end_band <= state.start_band || state.end_band > state.mode.nb_ebands {

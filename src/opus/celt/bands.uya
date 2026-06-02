@@ -13,7 +13,7 @@ export error CeltBandsError;
 export const CELT_BAND_SHAPE_Q: u32 = 15;
 export const CELT_BAND_SHAPE_UNIT_Q15: i32 = 32768;
 export const CELT_BAND_SHAPE_MAX_DIM: i32 = CELT_CWRS_MAX_N;
-export const CELT_BAND_SHAPE_MAX_DECODE_DIM: i32 = CELT_BAND_SHAPE_MAX_DIM * 2;
+export const CELT_BAND_SHAPE_MAX_DECODE_DIM: i32 = CELT_BAND_SHAPE_MAX_DIM * 4;
 export const CELT_BAND_SHAPE_MAX_PULSES: i32 = CELT_CWRS_MAX_K;
 export const CELT_INTENSITY_WEIGHT_Q: u32 = 14;
 export const CELT_ANTI_COLLAPSE_MIN_Q15: i16 = 1;
