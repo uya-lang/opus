@@ -146,7 +146,7 @@
 - [x] 实现 `core/qformat.uya`。
 - [x] 实现 `core/saturate.uya`。
 - [x] 实现 `sat16`。
-- [ ] 实现 `sat32`。
+- [x] 实现 `sat32`。
 - [ ] 实现 saturating add/sub。
 - [ ] 实现 common multiply helpers。
 - [ ] 实现 rounded shift helpers。

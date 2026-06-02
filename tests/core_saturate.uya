@@ -8,6 +8,7 @@ use src.opus.core.saturate.I32_MIN_I64;
 use src.opus.core.saturate.fits_i16_i32;
 use src.opus.core.saturate.fits_i32_i64;
 use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
 
 test "saturate module exposes stable signed bounds" {
     try assert_eq_i32(I16_MIN_I32, -32768);
@@ -35,4 +36,13 @@ test "sat16 clamps i32 input to signed 16-bit output" {
     try assert_eq_i32(sat16(I16_MAX_I32 + 1) as i32, I16_MAX_I32);
     try assert_eq_i32(sat16(-12345) as i32, -12345);
     try assert_eq_i32(sat16(12345) as i32, 12345);
+}
+
+test "sat32 clamps i64 input to signed 32-bit output" {
+    try assert_eq_i32(sat32(I32_MIN_I64), I32_MIN_I64 as i32);
+    try assert_eq_i32(sat32(I32_MAX_I64), I32_MAX_I64 as i32);
+    try assert_eq_i32(sat32(I32_MIN_I64 - 1L), I32_MIN_I64 as i32);
+    try assert_eq_i32(sat32(I32_MAX_I64 + 1L), I32_MAX_I64 as i32);
+    try assert_eq_i32(sat32(-123456789L), -123456789);
+    try assert_eq_i32(sat32(123456789L), 123456789);
 }
