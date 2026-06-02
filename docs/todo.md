@@ -132,7 +132,7 @@
 - [x] 测试 raw end bits。
 - [x] 测试 1 byte buffer 边界。
 - [x] 测试随机符号序列 roundtrip。
-- [ ] 测试截断 bitstream 错误。
+- [x] 测试截断 bitstream 错误。
 - [ ] benchmark entropy decode，记录 ns/symbol 和 alloc count。
 
 验收标准：
