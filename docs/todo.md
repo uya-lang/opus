@@ -15,7 +15,7 @@
 
 ## 1. 工程骨架
 
-- [ ] 创建 `src/opus/` 模块根。
+- [x] 创建 `src/opus/` 模块根。
 - [ ] 创建 `src/opus/core/`。
 - [ ] 创建 `src/opus/packet/`。
 - [ ] 创建 `src/opus/entropy/`。
