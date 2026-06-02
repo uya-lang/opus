@@ -46,9 +46,12 @@ test "Q-format unit helpers reject unsupported shifts without overflow" {
 test "Q-format integer conversion uses explicit floor semantics" {
     try assert_eq_i64(q_from_i32(3, 12), 12288L);
     try assert_eq_i64(q_from_i32(-2, 15), -65536L);
+    try assert_eq_i64(q_from_i32(-2147483647 - 1, 30), -2305843009213693952L);
     try assert_eq_i64(q_from_i32(5, 31), 0L);
     try assert_eq_i32(q_to_i32_floor(12288L, 12), 3);
     try assert_eq_i32(q_to_i32_floor(-513L, 8), -3);
+    try assert_eq_i32(q_to_i32_floor(9223372036854775807L, 0), 2147483647);
+    try assert_eq_i32(q_to_i32_floor(-9223372036854775807L - 1L, 0), -2147483647 - 1);
     try assert_eq_i32(q_to_i32_floor(7L, 31), 0);
 }
 
@@ -57,6 +60,8 @@ test "Q-format rescale preserves power-of-two fixed-point values" {
     try assert_eq_i64(q_rescale_i64(98304L, 15, 0), 3L);
     try assert_eq_i64(q_rescale_i64(-513L, 8, 4), -33L);
     try assert_eq_i64(q_rescale_i64(128L, 7, 7), 128L);
+    try assert_eq_i64(q_rescale_i64(9223372036854775807L, 0, 1), 9223372036854775807L);
+    try assert_eq_i64(q_rescale_i64(-9223372036854775807L - 1L, 0, 1), -9223372036854775807L - 1L);
 }
 
 test "Q-format fractional masks expose low bits only" {
@@ -83,12 +88,15 @@ test "rounded shift helpers use half-up fixed-point scaling" {
     try assert_eq_i32(round_shift_i32(-7, 1), -3);
     try assert_eq_i32(round_shift_i32(1234, 0), 1234);
     try assert_eq_i32(round_shift_i32(1234, 31), 0);
+    try assert_eq_i32(round_shift_i32(2147483647, 1), 1073741824);
 
     try assert_eq_i32(round_shift_i64_to_i32(98304L, 15), 3);
     try assert_eq_i32(round_shift_i64_to_i32(49152L, 15), 2);
     try assert_eq_i32(round_shift_i64_to_i32(-49152L, 15), -1);
     try assert_eq_i32(round_shift_i64_to_i32(1234L, 0), 1234);
     try assert_eq_i32(round_shift_i64_to_i32(1234L, 31), 0);
+    try assert_eq_i32(round_shift_i64_to_i32(9223372036854775807L, 1), 2147483647);
+    try assert_eq_i32(round_shift_i64_to_i32(-9223372036854775807L - 1L, 0), -2147483647 - 1);
 }
 
 test "each Q-format primitive has explicit golden cases" {

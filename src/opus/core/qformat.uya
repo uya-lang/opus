@@ -8,6 +8,20 @@ export const Q12_ONE: i32 = 4096;
 export const Q14_ONE: i32 = 16384;
 export const Q15_ONE: i32 = 32768;
 export const Q16_ONE: i32 = 65536;
+const I32_MIN_I64: i64 = -2147483647L - 1L;
+const I32_MAX_I64: i64 = 2147483647L;
+const I64_MIN: i64 = -9223372036854775807L - 1L;
+const I64_MAX: i64 = 9223372036854775807L;
+
+fn clamp_i64_to_i32(value: i64) i32 {
+    if value > I32_MAX_I64 {
+        return I32_MAX_I64 as i32;
+    }
+    if value < I32_MIN_I64 {
+        return I32_MIN_I64 as i32;
+    }
+    return value as i32;
+}
 
 export fn q_unit_i32(q: u32) i32 {
     if q > Q_SHIFT_MAX {
@@ -27,17 +41,17 @@ export fn q_from_i32(value: i32, q: u32) i64 {
     if q > Q_SHIFT_MAX {
         return 0;
     }
-    return (value as i64) << (q as i32);
+    return (value as i64) * q_unit_i64(q);
 }
 
 export fn q_to_i32_floor(value_q: i64, q: u32) i32 {
     if q == 0 {
-        return value_q as i32;
+        return clamp_i64_to_i32(value_q);
     }
     if q > Q_SHIFT_MAX {
         return 0;
     }
-    return (value_q >> (q as i32)) as i32;
+    return clamp_i64_to_i32(value_q >> (q as i32));
 }
 
 export fn q_rescale_i64(value_q: i64, from_q: u32, to_q: u32) i64 {
@@ -49,7 +63,14 @@ export fn q_rescale_i64(value_q: i64, from_q: u32, to_q: u32) i64 {
         if shift > Q_SHIFT_MAX {
             return 0;
         }
-        return value_q << (shift as i32);
+        const scale: i64 = q_unit_i64(shift);
+        if value_q > I64_MAX / scale {
+            return I64_MAX;
+        }
+        if value_q < I64_MIN / scale {
+            return I64_MIN;
+        }
+        return value_q * scale;
     }
 
     const rshift: u32 = from_q - to_q;
@@ -93,17 +114,20 @@ export fn round_shift_i32(value: i32, shift: u32) i32 {
     if shift > Q_SHIFT_MAX {
         return 0;
     }
-    const half: i32 = 1 << ((shift - 1) as i32);
-    return (value + half) >> (shift as i32);
+    const half: i64 = 1L << ((shift - 1) as i32);
+    return clamp_i64_to_i32(((value as i64) + half) >> (shift as i32));
 }
 
 export fn round_shift_i64_to_i32(value: i64, shift: u32) i32 {
     if shift == 0 {
-        return value as i32;
+        return clamp_i64_to_i32(value);
     }
     if shift > Q_SHIFT_MAX {
         return 0;
     }
     const half: i64 = 1L << ((shift - 1) as i32);
-    return ((value + half) >> (shift as i32)) as i32;
+    if value > I64_MAX - half {
+        return I32_MAX_I64 as i32;
+    }
+    return clamp_i64_to_i32((value + half) >> (shift as i32));
 }

@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.core.qformat.q_from_i32;
 use src.opus.dsp.filters.DspFilterError;
 use src.opus.dsp.filters.fir_causal_q15_i16;
 use src.opus.dsp.filters.fir_dot_q15_i16;
@@ -39,7 +40,7 @@ test "iir one pole q15 keeps caller supplied state" {
     try assert_eq_i32(output[1] as i32, 750);
     try assert_eq_i32(output[2] as i32, 875);
     try assert_eq_i32(output[3] as i32, 938);
-    try assert_eq_i32(state_q15, (938 as i32) << 15);
+    try assert_eq_i32(state_q15, q_from_i32(938, 15) as i32);
 }
 
 test "filter helpers reject invalid lengths on cold path" {

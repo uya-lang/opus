@@ -1,4 +1,5 @@
 use src.opus.core.qformat.mul16_16_i64;
+use src.opus.core.qformat.q_from_i32;
 use src.opus.core.qformat.round_shift_i64_to_i32;
 use src.opus.core.saturate.sat16;
 use src.opus.core.saturate.sat32;
@@ -52,7 +53,7 @@ export fn iir_one_pole_q15_i16(input: &[i16], b0_q15: i16, a1_q15: i16, state_q1
         const y_q15: i32 = sat32(feed_q15 + (round_shift_i64_to_i32(feedback_q30, 15) as i64));
         const y_i16: i16 = sat16(round_shift_i64_to_i32(y_q15 as i64, 15));
         output.ptr[i] = y_i16;
-        prev_q15 = (y_i16 as i32) << 15;
+        prev_q15 = q_from_i32(y_i16 as i32, 15) as i32;
         i = i + 1;
     }
     *state_q15 = prev_q15;
