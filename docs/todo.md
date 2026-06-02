@@ -168,17 +168,19 @@
 
 ## 6. 表迁移和校验
 
-- [ ] 盘点 RFC/upstream 必需表。
-- [ ] 创建 `silk/tables.uya`。
-- [ ] 创建 `celt/tables.uya`。
-- [ ] 创建 `entropy/cdf.uya`。
-- [ ] 创建 `dsp/window.uya` 表。
-- [ ] 创建 `docs/table_inventory.md`。
-- [ ] 为每个表记录来源、元素类型、Q-format、长度。
-- [ ] 编写 `tools/check_tables.uya` 或等价测试。
-- [ ] 测试表长度。
-- [ ] 测试表 hash。
-- [ ] 测试关键表单调性/边界。
+- [~] 盘点 RFC/upstream 必需表。
+- [x] 创建 `silk/tables.uya`。
+- [x] 创建 `celt/tables.uya`。
+- [x] 创建 `entropy/cdf.uya`。
+- [x] 创建 `dsp/window.uya` 表。
+- [x] 创建 `docs/table_inventory.md`。
+- [x] 为每个表记录来源、元素类型、Q-format、长度。
+- [x] 编写 `tools/check_tables.uya` 或等价测试。
+- [x] 测试表长度。
+- [x] 测试表 hash。
+- [x] 测试关键表单调性/边界。
+
+备注：本轮已迁移并校验 decoder 早期路径需要的 CELT/SILK/entropy/window 表；FFT/MDCT twiddle、pulse cache、完整 NLSF codebook 等大生成表随后续 CELT/SILK 模块的 golden test 导入，避免脱离使用点提前落入不可验证的静态数据。
 
 验收标准：
 

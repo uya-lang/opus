@@ -1,0 +1,50 @@
+# Opus Table Inventory
+
+Baseline: Xiph.Org Opus `v1.5.2`, peeled commit `ddbe48383984d56acd9e1ab6a090c54ca6b735a6`.
+
+Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multiplier `131`, seed `2166136261 % mod`. Signed integer tables are normalized by adding the offset shown before hashing.
+
+| Uya table | Source | Element type | Q-format / unit | Length | Hash | Hash offset |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| `CELT_EBAND_5MS` | `celt/modes.c` `eband5ms` | `i16` | MDCT bin band edge | 22 | 417698738 | 32768 |
+| `CELT_BAND_ALLOCATION_Q5` | `celt/modes.c` `band_allocation` | `byte` | 1/32 bit/sample | 231 | 305564943 | 0 |
+| `CELT_LOGN400` | `celt/static_modes_fixed.h` `logN400` | `i16` | logN, Q0 | 21 | 874482495 | 32768 |
+| `CELT_TRIM_ICDF` | `celt/celt.h` `trim_icdf` | `byte` | iCDF, `ftb=7` | 11 | 441834106 | 0 |
+| `CELT_SPREAD_ICDF` | `celt/celt.h` `spread_icdf` | `byte` | iCDF, `ftb=5` | 4 | checked by shape | 0 |
+| `CELT_TAPSET_ICDF` | `celt/celt.h` `tapset_icdf` | `byte` | iCDF, `ftb=2` | 3 | checked by shape | 0 |
+| `CELT_SMALL_ENERGY_ICDF` | `celt/quant_bands.c` `small_energy_icdf` | `byte` | iCDF, `ftb=2` | 3 | checked by shape | 0 |
+| `CELT_TO_OPUS_BANDWIDTH_TABLE` | `celt/celt.h` `toOpusTable` | `byte` | TOC mapping byte | 20 | 745419304 | 0 |
+| `CELT_FROM_OPUS_BANDWIDTH_TABLE` | `celt/celt.h` `fromOpusTable` | `byte` | TOC mapping byte | 16 | 111883760 | 0 |
+| `CELT_WINDOW_120_Q15` | `celt/static_modes_fixed.h` `window120` | `i16` | Q15 window coefficient | 120 | 992882619 | 32768 |
+| `EC_TELL_FRAC_CORRECTION_Q15` | `celt/entcode.c` `correction` | `u32` | Q15 correction | 8 | 253150762 | 0 |
+| `EC_BINARY_ICDF` | local entropy helper | `byte` | iCDF, `ftb=8` | 2 | checked by shape | 0 |
+| `EC_UNIFORM_3_ICDF` | local entropy helper / SILK uniform | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `EC_UNIFORM_4_ICDF` | local entropy helper / SILK uniform | `byte` | iCDF, `ftb=8` | 4 | checked by shape | 0 |
+| `SILK_STEREO_PRED_QUANT_Q13` | `silk/tables_other.c` | `i16` | Q13 predictor | 16 | 953048638 | 32768 |
+| `SILK_STEREO_PRED_JOINT_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 25 | 695407113 | 0 |
+| `SILK_STEREO_ONLY_CODE_MID_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 2 | checked by shape | 0 |
+| `SILK_LBRR_FLAGS_2_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `SILK_LBRR_FLAGS_3_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 7 | checked by shape | 0 |
+| `SILK_LSB_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 2 | checked by shape | 0 |
+| `SILK_LTP_SCALE_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `SILK_TYPE_OFFSET_VAD_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 4 | checked by shape | 0 |
+| `SILK_TYPE_OFFSET_NO_VAD_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 2 | checked by shape | 0 |
+| `SILK_NLSF_INTERPOLATION_FACTOR_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 5 | checked by shape | 0 |
+| `SILK_QUANTIZATION_OFFSETS_Q10` | `silk/tables_other.c` | `i16` | Q10 offset | 4 | checked by source | 32768 |
+| `SILK_LTP_SCALES_Q14` | `silk/tables_other.c` | `i16` | Q14 scale | 3 | checked by source | 32768 |
+| `SILK_UNIFORM3_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `SILK_UNIFORM4_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 4 | checked by shape | 0 |
+| `SILK_UNIFORM5_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 5 | checked by shape | 0 |
+| `SILK_UNIFORM6_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 6 | checked by shape | 0 |
+| `SILK_UNIFORM8_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 8 | checked by shape | 0 |
+| `SILK_NLSF_EXT_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 7 | checked by shape | 0 |
+| `SILK_PITCH_LAG_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 32 | 133391234 | 0 |
+| `SILK_PITCH_DELTA_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 21 | 232661751 | 0 |
+| `SILK_PITCH_CONTOUR_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 34 | 937829793 | 0 |
+| `SILK_PITCH_CONTOUR_NB_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 11 | checked by shape | 0 |
+| `SILK_PITCH_CONTOUR_10_MS_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 12 | checked by shape | 0 |
+| `SILK_PITCH_CONTOUR_10_MS_NB_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `SILK_TRANSITION_LP_B_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][3]` | 15 | 258613290 | 2147483648 |
+| `SILK_TRANSITION_LP_A_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][2]` | 10 | 268602790 | 2147483648 |
+
+Deferred for CELT foundation work: generated FFT bit-reversal tables, FFT twiddles, MDCT twiddles, pulse cache payloads, and full NLSF codebooks. They are large generated tables tied directly to the CELT mode/MDCT and SILK NLSF implementations and should be imported with those modules' golden tests.

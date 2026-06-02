@@ -1,0 +1,70 @@
+// Imported from Xiph.Org Opus v1.5.2, commit ddbe48383984d56acd9e1ab6a090c54ca6b735a6.
+// Sources: celt/modes.c, celt/static_modes_fixed.h, celt/celt.h, celt/quant_bands.c.
+
+export const CELT_EBAND_5MS_LEN: usize = 22;
+export const CELT_BAND_ALLOCATION_ROWS: usize = 11;
+export const CELT_BAND_ALLOCATION_COLS: usize = 21;
+export const CELT_LOGN400_LEN: usize = 21;
+
+const CELT_EBAND_5MS: [i16: 22] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 34, 40, 48, 60, 78, 100,
+];
+
+// Units are 1/32 bit/sample.
+const CELT_BAND_ALLOCATION_Q5: [byte: 231] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    90, 80, 75, 69, 63, 56, 49, 40, 34, 29, 20, 18, 10, 0, 0, 0, 0, 0, 0, 0, 0,
+    110, 100, 90, 84, 78, 71, 65, 58, 51, 45, 39, 32, 26, 20, 12, 0, 0, 0, 0, 0, 0,
+    118, 110, 103, 93, 86, 80, 75, 70, 65, 59, 53, 47, 40, 31, 23, 15, 4, 0, 0, 0, 0,
+    126, 119, 112, 104, 95, 89, 83, 78, 72, 66, 60, 54, 47, 39, 32, 25, 17, 12, 1, 0, 0,
+    134, 127, 120, 114, 103, 97, 91, 85, 78, 72, 66, 60, 54, 47, 41, 35, 29, 23, 16, 10, 1,
+    144, 137, 130, 124, 113, 107, 101, 95, 88, 82, 76, 70, 64, 57, 51, 45, 39, 33, 26, 15, 1,
+    152, 145, 138, 132, 123, 117, 111, 105, 98, 92, 86, 80, 74, 67, 61, 55, 49, 43, 36, 20, 1,
+    162, 155, 148, 142, 133, 127, 121, 115, 108, 102, 96, 90, 84, 77, 71, 65, 59, 53, 46, 30, 1,
+    172, 165, 158, 152, 143, 137, 131, 125, 118, 112, 106, 100, 94, 87, 81, 75, 69, 63, 56, 45, 20,
+    200, 200, 200, 200, 200, 200, 200, 200, 198, 193, 188, 183, 178, 173, 168, 163, 158, 153, 148, 129, 104,
+];
+
+const CELT_LOGN400: [i16: 21] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 16, 16, 16, 21, 21, 24, 29, 34, 36,
+];
+
+const CELT_PRED_COEF_Q15: [i16: 4] = [29440, 26112, 21248, 16384];
+const CELT_BETA_COEF_Q15: [i16: 4] = [30147, 22282, 12124, 6554];
+export const CELT_BETA_INTRA_Q15: i16 = 4915;
+
+const CELT_TRIM_ICDF: [byte: 11] = [126, 124, 119, 109, 87, 41, 19, 9, 4, 2, 0];
+const CELT_SPREAD_ICDF: [byte: 4] = [25, 23, 2, 0];
+const CELT_TAPSET_ICDF: [byte: 3] = [2, 1, 0];
+const CELT_SMALL_ENERGY_ICDF: [byte: 3] = [2, 1, 0];
+
+const CELT_TO_OPUS_BANDWIDTH_TABLE: [byte: 20] = [
+    224, 232, 240, 248,
+    192, 200, 208, 216,
+    160, 168, 176, 184,
+    0, 0, 0, 0,
+    128, 136, 144, 152,
+];
+const CELT_FROM_OPUS_BANDWIDTH_TABLE: [byte: 16] = [
+    128, 136, 144, 152,
+    64, 72, 80, 88,
+    32, 40, 48, 56,
+    0, 8, 16, 24,
+];
+
+export fn celt_table_len(table: i32) usize {
+    if table == 0 { return 22; }
+    if table == 1 { return 231; }
+    if table == 2 { return 21; }
+    if table == 3 { return 11; }
+    if table == 4 { return 20; }
+    if table == 5 { return 16; }
+    return 0 as usize;
+}
+
+export fn celt_eband_5ms_boundary(index: usize) i16 {
+    if index < 22 {
+        return CELT_EBAND_5MS[index];
+    }
+    return 0;
+}

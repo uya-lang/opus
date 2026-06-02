@@ -1,0 +1,90 @@
+// Imported from Xiph.Org Opus v1.5.2, commit ddbe48383984d56acd9e1ab6a090c54ca6b735a6.
+// Sources: silk/tables_other.c and silk/tables_pitch_lag.c.
+
+const SILK_STEREO_PRED_QUANT_Q13: [i16: 16] = [
+    -13732, -10050, -8266, -7526, -6500, -5000, -2950, -820,
+    820, 2950, 5000, 6500, 7526, 8266, 10050, 13732,
+];
+
+const SILK_STEREO_PRED_JOINT_ICDF: [byte: 25] = [
+    249, 247, 246, 245, 244, 234, 210, 202, 201, 200,
+    197, 174, 82, 59, 56, 55, 54, 46, 22, 12,
+    11, 10, 9, 7, 0,
+];
+
+const SILK_STEREO_ONLY_CODE_MID_ICDF: [byte: 2] = [64, 0];
+const SILK_LBRR_FLAGS_2_ICDF: [byte: 3] = [203, 150, 0];
+const SILK_LBRR_FLAGS_3_ICDF: [byte: 7] = [215, 195, 166, 125, 110, 82, 0];
+const SILK_LSB_ICDF: [byte: 2] = [120, 0];
+const SILK_LTP_SCALE_ICDF: [byte: 3] = [128, 64, 0];
+const SILK_TYPE_OFFSET_VAD_ICDF: [byte: 4] = [232, 158, 10, 0];
+const SILK_TYPE_OFFSET_NO_VAD_ICDF: [byte: 2] = [230, 0];
+const SILK_NLSF_INTERPOLATION_FACTOR_ICDF: [byte: 5] = [243, 221, 192, 181, 0];
+
+// Flattened [2][2], Q10.
+const SILK_QUANTIZATION_OFFSETS_Q10: [i16: 4] = [100, 240, 32, 100];
+const SILK_LTP_SCALES_Q14: [i16: 3] = [15565, 12288, 8192];
+
+const SILK_UNIFORM3_ICDF: [byte: 3] = [171, 85, 0];
+const SILK_UNIFORM4_ICDF: [byte: 4] = [192, 128, 64, 0];
+const SILK_UNIFORM5_ICDF: [byte: 5] = [205, 154, 102, 51, 0];
+const SILK_UNIFORM6_ICDF: [byte: 6] = [213, 171, 128, 85, 43, 0];
+const SILK_UNIFORM8_ICDF: [byte: 8] = [224, 192, 160, 128, 96, 64, 32, 0];
+const SILK_NLSF_EXT_ICDF: [byte: 7] = [100, 40, 16, 7, 3, 1, 0];
+
+const SILK_PITCH_LAG_ICDF: [byte: 32] = [
+    253, 250, 244, 233, 212, 182, 150, 131,
+    120, 110, 98, 85, 72, 60, 49, 40,
+    32, 25, 19, 15, 13, 11, 9, 8,
+    7, 6, 5, 4, 3, 2, 1, 0,
+];
+
+const SILK_PITCH_DELTA_ICDF: [byte: 21] = [
+    210, 208, 206, 203, 199, 193, 183, 168, 142, 104, 74,
+    52, 37, 27, 20, 14, 10, 6, 4, 2, 0,
+];
+
+const SILK_PITCH_CONTOUR_ICDF: [byte: 34] = [
+    223, 201, 183, 167, 152, 138, 124, 111, 98, 88, 79, 70,
+    62, 56, 50, 44, 39, 35, 31, 27, 24, 21, 18, 16,
+    14, 12, 10, 8, 6, 4, 3, 2, 1, 0,
+];
+
+const SILK_PITCH_CONTOUR_NB_ICDF: [byte: 11] = [
+    188, 176, 155, 138, 119, 97, 67, 43, 26, 10, 0,
+];
+
+const SILK_PITCH_CONTOUR_10_MS_ICDF: [byte: 12] = [
+    165, 119, 80, 61, 47, 35, 27, 20, 14, 9, 4, 0,
+];
+
+const SILK_PITCH_CONTOUR_10_MS_NB_ICDF: [byte: 3] = [113, 63, 0];
+
+// Flattened [5][3], Q28.
+const SILK_TRANSITION_LP_B_Q28: [i32: 15] = [
+    250767114, 501534038, 250767114,
+    209867381, 419732057, 209867381,
+    170987846, 341967853, 170987846,
+    131531482, 263046905, 131531482,
+    89306658, 178584282, 89306658,
+];
+
+// Flattened [5][2], Q28.
+const SILK_TRANSITION_LP_A_Q28: [i32: 10] = [
+    506393414, 239854379,
+    411067935, 169683996,
+    306733530, 116694253,
+    185807084, 77959395,
+    35497197, 57401098,
+];
+
+export fn silk_table_len(table: i32) usize {
+    if table == 0 { return 16; }
+    if table == 1 { return 25; }
+    if table == 2 { return 32; }
+    if table == 3 { return 21; }
+    if table == 4 { return 34; }
+    if table == 5 { return 15; }
+    if table == 6 { return 10; }
+    return 0 as usize;
+}

@@ -13,6 +13,58 @@ export struct WindowTableQ15 {
     symmetric: bool,
 }
 
+// Imported from Xiph.Org Opus v1.5.2 celt/static_modes_fixed.h window120.
+// Q15 sine-derived CELT MDCT overlap window for 120-sample overlap.
+const CELT_WINDOW_120_Q15: [i16: 120] = [
+    2, 20, 55, 108, 178, 266, 372, 494, 635, 792,
+    966, 1157, 1365, 1590, 1831, 2089, 2362, 2651, 2956, 3276,
+    3611, 3961, 4325, 4703, 5094, 5499, 5916, 6346, 6788, 7241,
+    7705, 8179, 8663, 9156, 9657, 10167, 10684, 11207, 11736, 12271,
+    12810, 13353, 13899, 14447, 14997, 15547, 16098, 16648, 17197, 17744,
+    18287, 18827, 19363, 19893, 20418, 20936, 21447, 21950, 22445, 22931,
+    23407, 23874, 24330, 24774, 25208, 25629, 26039, 26435, 26819, 27190,
+    27548, 27893, 28224, 28541, 28845, 29135, 29411, 29674, 29924, 30160,
+    30384, 30594, 30792, 30977, 31151, 31313, 31463, 31602, 31731, 31849,
+    31958, 32057, 32148, 32229, 32303, 32370, 32429, 32481, 32528, 32568,
+    32604, 32634, 32661, 32683, 32701, 32717, 32729, 32740, 32748, 32754,
+    32758, 32762, 32764, 32766, 32767, 32767, 32767, 32767, 32767, 32767,
+];
+
+export fn celt_window_120_q15_len() usize {
+    return 120;
+}
+
+export fn celt_window_120_q15_hash() !u32 {
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < 120 {
+        const normalized: u64 = try (((CELT_WINDOW_120_Q15[i] as i32) + 32768) as! u64);
+        h = (h * (131 as u64) + normalized + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
+export fn celt_window_120_q15_boundary(index: usize) i16 {
+    if index < 120 {
+        return CELT_WINDOW_120_Q15[index];
+    }
+    return 0;
+}
+
+export fn celt_window_120_q15_is_non_decreasing() bool {
+    var i: usize = 1;
+    while i < 120 {
+        if CELT_WINDOW_120_Q15[i - 1] > CELT_WINDOW_120_Q15[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+
 export fn window_table_q15_init(kind: WindowKind, values_q15: &[i16], symmetric: bool) !WindowTableQ15 {
     if values_q15.len == 0 {
         return error.DspWindowError;

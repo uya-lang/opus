@@ -1,5 +1,35 @@
 export error EntropyCdfError;
 
+// Imported from Xiph.Org Opus v1.5.2 celt/entcode.c ec_tell_frac correction table.
+// Q15 reciprocal correction used by range encoder/decoder fractional bit accounting.
+const EC_TELL_FRAC_CORRECTION_Q15: [u32: 8] = [
+    35733, 38967, 42495, 46340, 50535, 55109, 60097, 65535,
+];
+
+// Common one-bit and small uniform iCDFs shared by SILK/CELT callers.
+const EC_BINARY_ICDF: [byte: 2] = [128, 0];
+const EC_UNIFORM_3_ICDF: [byte: 3] = [171, 85, 0];
+const EC_UNIFORM_4_ICDF: [byte: 4] = [192, 128, 64, 0];
+
+export fn entropy_cdf_table_len(table: i32) usize {
+    if table == 0 { return 8; }
+    if table == 1 { return 2; }
+    if table == 2 { return 3; }
+    if table == 3 { return 4; }
+    return 0;
+}
+
+export fn entropy_cdf_tell_frac_correction_hash() u32 {
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < 8 {
+        h = (h * (131 as u64) + (EC_TELL_FRAC_CORRECTION_Q15[i] as u64) + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
 export fn icdf_is_valid(icdf: &[byte], ftb: u32) bool {
     if icdf.len == 0 || ftb == 0 || ftb > 8 {
         return false;
