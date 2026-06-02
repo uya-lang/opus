@@ -1,0 +1,83 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_bits;
+use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_dec_uint;
+use src.opus.entropy.range_dec.ec_dec_update;
+use src.opus.entropy.range_dec.ec_decode;
+use src.opus.entropy.range_dec.ec_decode_bin;
+use src.opus.entropy.range_dec.ec_ilog;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.entropy.range_dec.ec_tell_frac;
+
+test "range decoder initializes and reports fractional tell state" {
+    const packet: [byte: 16] = [139, 165, 14, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 174, 168];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+
+    try assert_eq_i32(ec_tell(&dec) as i32, 1);
+    try assert_eq_i32(ec_tell_frac(&dec) as i32, 8);
+    try ec_dec_check(&dec);
+}
+
+test "range decoder decodes mixed symbols from an Opus-compatible vector" {
+    const packet: [byte: 16] = [139, 165, 14, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 174, 168];
+    const icdf: [byte: 4] = [200, 100, 40, 0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+
+    const s0: u32 = ec_decode(&dec, 5);
+    try assert_eq_i32(s0 as i32, 2);
+    ec_dec_update(&dec, s0, s0 + 1, 5);
+    try assert_eq_i32(ec_tell(&dec) as i32, 4);
+    try assert_eq_i32(ec_tell_frac(&dec) as i32, 27);
+
+    const s1: u32 = ec_decode_bin(&dec, 3);
+    try assert_eq_i32(s1 as i32, 5);
+    ec_dec_update(&dec, s1, s1 + 1, 8);
+    try assert_eq_i32(ec_tell(&dec) as i32, 7);
+    try assert_eq_i32(ec_tell_frac(&dec) as i32, 51);
+
+    try assert_eq_i32(ec_dec_icdf(&dec, &icdf[0:4], 8), 2);
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 3), 1);
+    try assert_eq_i32(ec_dec_uint(&dec, 100) as i32, 17);
+    try assert_eq_i32(ec_dec_uint(&dec, 5000) as i32, 1000);
+    try assert_eq_i32(ec_dec_bits(&dec, 5) as i32, 21);
+    try assert_eq_i32(ec_dec_bits(&dec, 10) as i32, 683);
+    try assert_eq_i32(ec_tell(&dec) as i32, 46);
+    try assert_eq_i32(ec_tell_frac(&dec) as i32, 363);
+    try ec_dec_check(&dec);
+}
+
+test "range decoder flags truncated input through ec_dec_check" {
+    const truncated: [byte: 1] = [139];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &truncated[0:1]);
+
+    const result: !void = ec_dec_check(&dec);
+    match result {
+        error.EntropyDecoderError => {}
+        else => { try assert(false, "truncated entropy stream must be reported"); }
+    }
+}
+
+test "range decoder validates invalid public parameters without error unions on hot APIs" {
+    const packet: [byte: 16] = [139, 165, 14, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 174, 168];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+
+    try assert_eq_i32(ec_ilog(0) as i32, 0);
+    try assert_eq_i32(ec_ilog(1) as i32, 1);
+    try assert_eq_i32(ec_ilog(255) as i32, 8);
+    _ = ec_decode(&dec, 0);
+
+    const result: !void = ec_dec_check(&dec);
+    match result {
+        error.EntropyDecoderError => {}
+        else => { try assert(false, "invalid entropy parameters must set state error"); }
+    }
+}

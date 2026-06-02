@@ -102,20 +102,20 @@
 
 ## 4. Entropy Range Coder
 
-- [ ] 实现 `entropy/range_dec.uya` 状态。
-- [ ] 实现 `ec_dec_init`。
-- [ ] 实现 range normalization。
-- [ ] 实现 `ec_decode`。
-- [ ] 实现 `ec_decode_bin`。
-- [ ] 实现 `ec_dec_update`。
-- [ ] 实现 `ec_dec_icdf`。
-- [ ] 实现 `ec_dec_bit_logp`。
-- [ ] 实现 `ec_dec_uint`。
-- [ ] 实现 `ec_dec_bits`。
-- [ ] 实现 `ec_tell`。
-- [ ] 实现 `ec_tell_frac`。
-- [ ] 实现 `ec_dec_check`，把热路径 `error` 标志转换成 public error。
-- [ ] 确认 entropy symbol hot API 不返回 `!T`，错误先写入 state。
+- [x] 实现 `entropy/range_dec.uya` 状态。
+- [x] 实现 `ec_dec_init`。
+- [x] 实现 range normalization。
+- [x] 实现 `ec_decode`。
+- [x] 实现 `ec_decode_bin`。
+- [x] 实现 `ec_dec_update`。
+- [x] 实现 `ec_dec_icdf`。
+- [x] 实现 `ec_dec_bit_logp`。
+- [x] 实现 `ec_dec_uint`。
+- [x] 实现 `ec_dec_bits`。
+- [x] 实现 `ec_tell`。
+- [x] 实现 `ec_tell_frac`。
+- [x] 实现 `ec_dec_check`，把热路径 `error` 标志转换成 public error。
+- [x] 确认 entropy symbol hot API 不返回 `!T`，错误先写入 state。
 - [ ] 实现 `entropy/range_enc.uya` 状态。
 - [ ] 实现 `ec_enc_init`。
 - [ ] 实现 `ec_encode`。
