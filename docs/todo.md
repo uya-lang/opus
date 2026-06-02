@@ -206,7 +206,7 @@
 
 验收标准：
 
-- [ ] CELT 基础模块不依赖 SILK。
+- [x] CELT 基础模块不依赖 SILK。
 - [ ] cwrs 和 MDCT 可独立调试。
 
 ## 8. CELT-only Decoder

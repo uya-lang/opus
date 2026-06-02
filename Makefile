@@ -32,6 +32,7 @@ check: require-uya
 	@rg -q 'Decoder Conformance' docs/conformance.md
 	@$(UYA) check $(SMOKE_SRC)
 	@$(UYA) --version >/dev/null
+	@python3 tools/check_module_boundaries.py
 	@printf '%s\n' "check: scaffold OK"
 
 smoke: require-uya
