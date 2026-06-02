@@ -1,0 +1,123 @@
+use src.opus.celt.mode.CeltMode;
+use src.opus.celt.mode.celt_mode_48000;
+use src.opus.celt.mode.celt_mode_lm_from_frame_size;
+
+export error CeltStateError;
+
+export const CELT_MAX_BANDS: usize = 21;
+export const CELT_MAX_OVERLAP: usize = 120;
+export const CELT_DECODE_MEM: usize = 960;
+export const CELT_STATE_MAX_CHANNELS: usize = 2;
+export const CELT_ENERGY_HISTORY_LEN: usize = CELT_MAX_BANDS * CELT_STATE_MAX_CHANNELS;
+export const CELT_OVERLAP_HISTORY_LEN: usize = CELT_MAX_OVERLAP * CELT_STATE_MAX_CHANNELS;
+export const CELT_DECODE_MEM_LEN: usize = CELT_DECODE_MEM * CELT_STATE_MAX_CHANNELS;
+
+export struct CeltDecoderState {
+    channels: i32,
+    start_band: i32,
+    end_band: i32,
+    overlap: i32,
+    downsample: i32,
+    frame_size: i32,
+    lm: i32,
+    mode: CeltMode,
+    old_ebands_q8: [i16: CELT_ENERGY_HISTORY_LEN],
+    old_band_e_q8: [i16: CELT_ENERGY_HISTORY_LEN],
+    old_loge_q8: [i16: CELT_ENERGY_HISTORY_LEN],
+    preemph_mem_q15: [i32: CELT_STATE_MAX_CHANNELS],
+    overlap_mem_q15: [i16: CELT_OVERLAP_HISTORY_LEN],
+    decode_mem: [i32: CELT_DECODE_MEM_LEN],
+    rng: u32,
+    loss_count: i32,
+}
+
+fn clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn validate_channel_count(channels: i32) !void {
+    if channels < 1 || channels > (CELT_STATE_MAX_CHANNELS as i32) {
+        return error.CeltStateError;
+    }
+}
+
+export fn celt_state_energy_index(state: &const CeltDecoderState, channel: i32, band: i32) !usize {
+    if channel < 0 || channel >= state.channels || band < 0 || band >= state.mode.nb_ebands {
+        return error.CeltStateError;
+    }
+    return (channel as usize) * CELT_MAX_BANDS + (band as usize);
+}
+
+export fn celt_state_overlap_index(state: &const CeltDecoderState, channel: i32, sample: i32) !usize {
+    if channel < 0 || channel >= state.channels || sample < 0 || sample >= state.overlap {
+        return error.CeltStateError;
+    }
+    return (channel as usize) * CELT_MAX_OVERLAP + (sample as usize);
+}
+
+export fn celt_state_clear_history(state: &CeltDecoderState) void {
+    clear_i16(&state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
+    clear_i16(&state.old_band_e_q8[0:CELT_ENERGY_HISTORY_LEN]);
+    clear_i16(&state.old_loge_q8[0:CELT_ENERGY_HISTORY_LEN]);
+    clear_i16(&state.overlap_mem_q15[0:CELT_OVERLAP_HISTORY_LEN]);
+    clear_i32(&state.preemph_mem_q15[0:CELT_STATE_MAX_CHANNELS]);
+    clear_i32(&state.decode_mem[0:CELT_DECODE_MEM_LEN]);
+    state.rng = 0;
+    state.loss_count = 0;
+}
+
+export fn celt_state_init(state: &CeltDecoderState, channels: i32) !void {
+    try validate_channel_count(channels);
+
+    const mode: CeltMode = celt_mode_48000();
+    state.channels = channels;
+    state.start_band = 0;
+    state.end_band = mode.nb_ebands;
+    state.overlap = mode.overlap;
+    state.downsample = 1;
+    state.frame_size = mode.short_mdct_size;
+    state.lm = 0;
+    state.mode = mode;
+    celt_state_clear_history(state);
+}
+
+export fn celt_state_reset(state: &CeltDecoderState) void {
+    const channels: i32 = state.channels;
+    const mode: CeltMode = state.mode;
+    state.start_band = 0;
+    state.end_band = mode.nb_ebands;
+    state.overlap = mode.overlap;
+    state.downsample = 1;
+    state.frame_size = mode.short_mdct_size;
+    state.lm = 0;
+    state.channels = channels;
+    state.mode = mode;
+    celt_state_clear_history(state);
+}
+
+export fn celt_state_configure_frame(state: &CeltDecoderState, frame_size: i32, start_band: i32, end_band: i32) !void {
+    if start_band < 0 || end_band <= start_band || end_band > state.mode.nb_ebands {
+        return error.CeltStateError;
+    }
+
+    const lm: i32 = celt_mode_lm_from_frame_size(&state.mode, frame_size) catch {
+        return error.CeltStateError;
+    };
+
+    state.frame_size = frame_size;
+    state.lm = lm;
+    state.start_band = start_band;
+    state.end_band = end_band;
+}

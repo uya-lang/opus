@@ -1,0 +1,123 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.state.CELT_DECODE_MEM_LEN;
+use src.opus.celt.state.CELT_ENERGY_HISTORY_LEN;
+use src.opus.celt.state.CELT_OVERLAP_HISTORY_LEN;
+use src.opus.celt.state.CELT_STATE_MAX_CHANNELS;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_energy_index;
+use src.opus.celt.state.celt_state_init;
+use src.opus.celt.state.celt_state_overlap_index;
+use src.opus.celt.state.celt_state_reset;
+
+test "celt state initializes static 48k decoder history" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+
+    try assert_eq_i32(state.channels, 2);
+    try assert_eq_i32(state.start_band, 0);
+    try assert_eq_i32(state.end_band, 21);
+    try assert_eq_i32(state.overlap, 120);
+    try assert_eq_i32(state.downsample, 1);
+    try assert_eq_i32(state.frame_size, 120);
+    try assert_eq_i32(state.lm, 0);
+    try assert_eq_i32(state.mode.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(CELT_STATE_MAX_CHANNELS as i32, 2);
+    try assert_eq_i32(CELT_ENERGY_HISTORY_LEN as i32, 42);
+    try assert_eq_i32(CELT_OVERLAP_HISTORY_LEN as i32, 240);
+    try assert_eq_i32(CELT_DECODE_MEM_LEN as i32, 1920);
+    try assert_eq_i32(state.old_band_e_q8[0] as i32, 0);
+    try assert_eq_i32(state.overlap_mem_q15[0] as i32, 0);
+    try assert_eq_i32(state.preemph_mem_q15[0], 0);
+}
+
+test "celt state validates channel count" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    const zero_channels: !void = celt_state_init(&state, 0);
+    match zero_channels {
+        error.CeltStateError => {}
+        else => { try assert(false, "zero channels must fail"); }
+    }
+
+    const too_many_channels: !void = celt_state_init(&state, 3);
+    match too_many_channels {
+        error.CeltStateError => {}
+        else => { try assert(false, "channels past Opus max must fail"); }
+    }
+}
+
+test "celt state maps energy and overlap history by channel" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+
+    try assert_eq_i32((try celt_state_energy_index(&state, 0, 0)) as i32, 0);
+    try assert_eq_i32((try celt_state_energy_index(&state, 1, 0)) as i32, 21);
+    try assert_eq_i32((try celt_state_energy_index(&state, 1, 20)) as i32, 41);
+    try assert_eq_i32((try celt_state_overlap_index(&state, 0, 119)) as i32, 119);
+    try assert_eq_i32((try celt_state_overlap_index(&state, 1, 0)) as i32, 120);
+
+    const bad_band: !usize = celt_state_energy_index(&state, 1, 21);
+    match bad_band {
+        error.CeltStateError => {}
+        else => { try assert(false, "band past mode must fail"); }
+    }
+
+    const bad_sample: !usize = celt_state_overlap_index(&state, 0, 120);
+    match bad_sample {
+        error.CeltStateError => {}
+        else => { try assert(false, "sample past overlap must fail"); }
+    }
+}
+
+test "celt state configures frame bands and LM" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+
+    try celt_state_configure_frame(&state, 960, 2, 21);
+    try assert_eq_i32(state.frame_size, 960);
+    try assert_eq_i32(state.lm, 3);
+    try assert_eq_i32(state.start_band, 2);
+    try assert_eq_i32(state.end_band, 21);
+
+    const bad_frame: !void = celt_state_configure_frame(&state, 2400, 0, 21);
+    match bad_frame {
+        error.CeltStateError => {}
+        else => { try assert(false, "unsupported CELT frame size must fail"); }
+    }
+
+    const bad_bands: !void = celt_state_configure_frame(&state, 120, 5, 5);
+    match bad_bands {
+        error.CeltStateError => {}
+        else => { try assert(false, "empty band range must fail"); }
+    }
+}
+
+test "celt state reset clears histories without changing channel layout" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+
+    state.old_band_e_q8[41] = 123;
+    state.old_loge_q8[3] = -45;
+    state.overlap_mem_q15[120] = 300;
+    state.preemph_mem_q15[1] = 7000;
+    state.decode_mem[1919] = -9;
+    state.rng = 99;
+    state.loss_count = 4;
+    try celt_state_configure_frame(&state, 960, 3, 20);
+
+    celt_state_reset(&state);
+
+    try assert_eq_i32(state.channels, 2);
+    try assert_eq_i32(state.frame_size, 120);
+    try assert_eq_i32(state.lm, 0);
+    try assert_eq_i32(state.start_band, 0);
+    try assert_eq_i32(state.end_band, 21);
+    try assert_eq_i32(state.old_band_e_q8[41] as i32, 0);
+    try assert_eq_i32(state.old_loge_q8[3] as i32, 0);
+    try assert_eq_i32(state.overlap_mem_q15[120] as i32, 0);
+    try assert_eq_i32(state.preemph_mem_q15[1], 0);
+    try assert_eq_i32(state.decode_mem[1919], 0);
+    try assert_eq_i32(state.rng as i32, 0);
+    try assert_eq_i32(state.loss_count, 0);
+}

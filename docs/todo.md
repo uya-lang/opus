@@ -211,7 +211,7 @@
 
 ## 8. CELT-only Decoder
 
-- [ ] 实现 `celt/state.uya`。
+- [x] 实现 `celt/state.uya`。
 - [ ] 实现 `celt/quant_bands.uya` coarse energy decode。
 - [ ] 实现 fine energy decode。
 - [ ] 实现 TF changes decode。
