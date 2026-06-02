@@ -22,7 +22,7 @@
 - [x] 创建 `src/opus/dsp/`。
 - [x] 创建 `src/opus/silk/`。
 - [x] 创建 `src/opus/celt/`。
-- [ ] 创建 `src/opus/hybrid/`。
+- [x] 创建 `src/opus/hybrid/`。
 - [ ] 创建 `src/opus/api/`。
 - [ ] 创建 `src/opus/container/`。
 - [ ] 创建 `src/opus/cli/`。
