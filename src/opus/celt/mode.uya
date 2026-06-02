@@ -1,3 +1,6 @@
+use src.opus.celt.tables.CELT_EBAND_5MS_LEN;
+use src.opus.celt.tables.celt_eband_5ms_boundary;
+
 export error CeltModeError;
 
 export const CELT_MODE_48000_SAMPLE_RATE_HZ: u32 = 48000;
@@ -38,4 +41,30 @@ export fn celt_mode_for_sample_rate(sample_rate_hz: u32) !CeltMode {
         return celt_mode_48000();
     }
     return error.CeltModeError;
+}
+
+export fn celt_mode_eband_boundary_5ms(mode: &const CeltMode, boundary_index: i32) !i16 {
+    if boundary_index < 0 {
+        return error.CeltModeError;
+    }
+    if boundary_index > mode.nb_ebands {
+        return error.CeltModeError;
+    }
+    const index: usize = boundary_index as usize;
+    if index >= CELT_EBAND_5MS_LEN {
+        return error.CeltModeError;
+    }
+    return celt_eband_5ms_boundary(index);
+}
+
+export fn celt_mode_eband_width_5ms(mode: &const CeltMode, band_index: i32) !i16 {
+    if band_index < 0 {
+        return error.CeltModeError;
+    }
+    if band_index >= mode.nb_ebands {
+        return error.CeltModeError;
+    }
+    const start: i16 = try celt_mode_eband_boundary_5ms(mode, band_index);
+    const end: i16 = try celt_mode_eband_boundary_5ms(mode, band_index + 1);
+    return end - start;
 }

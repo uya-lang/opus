@@ -9,6 +9,8 @@ use src.opus.celt.mode.CELT_MODE_48000_OVERLAP;
 use src.opus.celt.mode.CELT_MODE_48000_SAMPLE_RATE_HZ;
 use src.opus.celt.mode.CELT_MODE_48000_SHORT_MDCT_SIZE;
 use src.opus.celt.mode.CeltMode;
+use src.opus.celt.mode.celt_mode_eband_boundary_5ms;
+use src.opus.celt.mode.celt_mode_eband_width_5ms;
 use src.opus.celt.mode.celt_mode_48000;
 use src.opus.celt.mode.celt_mode_for_sample_rate;
 
@@ -43,5 +45,36 @@ test "celt mode lookup accepts only the static Opus 48k mode for now" {
     match bad {
         error.CeltModeError => {}
         else => { try assert(false, "unsupported CELT mode must fail"); }
+    }
+}
+
+test "celt mode eband query exposes 5ms static boundaries" {
+    const mode: CeltMode = celt_mode_48000();
+    try assert_eq_i32((try celt_mode_eband_boundary_5ms(&mode, 0)) as i32, 0);
+    try assert_eq_i32((try celt_mode_eband_boundary_5ms(&mode, 8)) as i32, 8);
+    try assert_eq_i32((try celt_mode_eband_boundary_5ms(&mode, 13)) as i32, 20);
+    try assert_eq_i32((try celt_mode_eband_boundary_5ms(&mode, 21)) as i32, 100);
+    try assert_eq_i32((try celt_mode_eband_width_5ms(&mode, 0)) as i32, 1);
+    try assert_eq_i32((try celt_mode_eband_width_5ms(&mode, 20)) as i32, 22);
+}
+
+test "celt mode eband query rejects invalid indexes" {
+    const mode: CeltMode = celt_mode_48000();
+    const negative_boundary: !i16 = celt_mode_eband_boundary_5ms(&mode, -1);
+    match negative_boundary {
+        error.CeltModeError => {}
+        else => { try assert(false, "negative boundary must fail"); }
+    }
+
+    const over_boundary: !i16 = celt_mode_eband_boundary_5ms(&mode, 22);
+    match over_boundary {
+        error.CeltModeError => {}
+        else => { try assert(false, "boundary past nb_ebands must fail"); }
+    }
+
+    const over_width: !i16 = celt_mode_eband_width_5ms(&mode, 21);
+    match over_width {
+        error.CeltModeError => {}
+        else => { try assert(false, "band past nb_ebands must fail"); }
     }
 }
