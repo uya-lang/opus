@@ -1,0 +1,97 @@
+use src.opus.core.saturate.sat16;
+use src.opus.core.saturate.sat32;
+use src.opus.hybrid.state.HYBRID_MAX_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_MIN_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
+use src.opus.hybrid.state.HybridDecoderState;
+
+export error HybridMergeError;
+
+export struct HybridMergeResult {
+    decoded_samples_48k: i32,
+    channels: i32,
+}
+
+fn hybrid_merge_validate_state(state: &const HybridDecoderState) !void {
+    if state.channels < 1 || state.channels > (HYBRID_STATE_MAX_CHANNELS as i32) {
+        return error.HybridMergeError;
+    }
+    if state.frame_size_48k != HYBRID_MIN_FRAME_SAMPLES_48K && state.frame_size_48k != (HYBRID_MAX_FRAME_SAMPLES_48K as i32) {
+        return error.HybridMergeError;
+    }
+    if state.silk_frame_size <= 0 || state.silk_frame_size * 3 != state.frame_size_48k {
+        return error.HybridMergeError;
+    }
+}
+
+fn hybrid_merge_round_div3(value: i64) i32 {
+    if value >= 0L {
+        return ((value + 1L) / 3L) as i32;
+    }
+    return (0L - (((0L - value) + 1L) / 3L)) as i32;
+}
+
+fn hybrid_merge_lowband_phase_q14(previous_q14: i32, current_q14: i32, phase: i32) i32 {
+    if phase >= 2 {
+        return current_q14;
+    }
+    const delta_q14: i64 = (current_q14 as i64) - (previous_q14 as i64);
+    const phase_delta_q14: i32 = hybrid_merge_round_div3(delta_q14 * ((phase + 1) as i64));
+    return sat32((previous_q14 as i64) + (phase_delta_q14 as i64));
+}
+
+fn hybrid_merge_q14_to_i16(value_q14: i32) i16 {
+    const value: i64 = value_q14 as i64;
+    if value >= 0L {
+        return sat16(((value + 8192L) / 16384L) as i32);
+    }
+    return sat16((0L - (((0L - value) + 8192L) / 16384L)) as i32);
+}
+
+export fn hybrid_merge_i16(
+    state: &HybridDecoderState,
+    lowband_q14: &[i32],
+    highband_q14: &[i32],
+    pcm_i16: &[i16],
+) !HybridMergeResult {
+    try hybrid_merge_validate_state(state);
+
+    const channels: usize = state.channels as usize;
+    const lowband_frame: usize = state.silk_frame_size as usize;
+    const frame_48k: usize = state.frame_size_48k as usize;
+    const lowband_required: usize = lowband_frame * channels;
+    const highband_required: usize = frame_48k * channels;
+    if lowband_q14.len < lowband_required || highband_q14.len < highband_required || pcm_i16.len < highband_required {
+        return error.HybridMergeError;
+    }
+
+    var low_sample: usize = 0;
+    while low_sample < lowband_frame {
+        var channel: i32 = 0;
+        while channel < state.channels {
+            const channel_index: usize = channel as usize;
+            const low_index: usize = low_sample * channels + channel_index;
+            const previous_q14: i32 = state.merge_mem_q14[channel_index];
+            const current_q14: i32 = lowband_q14.ptr[low_index];
+
+            var phase: i32 = 0;
+            while phase < 3 {
+                const out_frame: usize = low_sample * 3 + (phase as usize);
+                const out_index: usize = out_frame * channels + channel_index;
+                const low_q14: i32 = hybrid_merge_lowband_phase_q14(previous_q14, current_q14, phase);
+                const mixed_q14: i32 = sat32((low_q14 as i64) + (highband_q14.ptr[out_index] as i64));
+                pcm_i16.ptr[out_index] = hybrid_merge_q14_to_i16(mixed_q14);
+                phase = phase + 1;
+            }
+
+            state.merge_mem_q14[channel_index] = current_q14;
+            channel = channel + 1;
+        }
+        low_sample = low_sample + 1;
+    }
+
+    return HybridMergeResult{
+        decoded_samples_48k: state.frame_size_48k,
+        channels: state.channels,
+    };
+}
