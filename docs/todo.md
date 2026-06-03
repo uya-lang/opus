@@ -326,7 +326,7 @@
 ## 12. Hybrid Decoder
 
 - [x] 实现 `hybrid/state.uya`。
-- [ ] 实现 `hybrid/delay.uya`。
+- [x] 实现 `hybrid/delay.uya`。
 - [ ] 实现 SILK/CELT budget split。
 - [ ] 实现 SILK lowband decode glue。
 - [ ] 实现 CELT highband decode glue。

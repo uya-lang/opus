@@ -1,0 +1,124 @@
+use src.opus.hybrid.state.HYBRID_DELAY_BUFFER_LEN;
+use src.opus.hybrid.state.HYBRID_MAX_DELAY_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_MAX_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_MIN_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
+use src.opus.hybrid.state.HybridDecoderState;
+
+export error HybridDelayError;
+
+fn hybrid_delay_validate_state(state: &const HybridDecoderState) !void {
+    if state.channels < 1 || state.channels > (HYBRID_STATE_MAX_CHANNELS as i32) {
+        return error.HybridDelayError;
+    }
+    if state.frame_size_48k <= 0 || state.delay_samples_48k <= 0 {
+        return error.HybridDelayError;
+    }
+    if state.frame_size_48k != HYBRID_MIN_FRAME_SAMPLES_48K && state.frame_size_48k != (HYBRID_MAX_FRAME_SAMPLES_48K as i32) {
+        return error.HybridDelayError;
+    }
+    if state.delay_samples_48k > (HYBRID_MAX_DELAY_SAMPLES_48K as i32) || state.frame_size_48k <= state.delay_samples_48k {
+        return error.HybridDelayError;
+    }
+}
+
+fn hybrid_delay_validate_channel(state: &const HybridDecoderState, channel: i32, input_len: usize, output_len: usize) !usize {
+    try hybrid_delay_validate_state(state);
+    if channel < 0 || channel >= state.channels {
+        return error.HybridDelayError;
+    }
+    const frame_len: usize = state.frame_size_48k as usize;
+    if input_len < frame_len || output_len < frame_len {
+        return error.HybridDelayError;
+    }
+    return frame_len;
+}
+
+export fn hybrid_delay_apply_channel_q14(state: &HybridDecoderState, channel: i32, input_q14: &[i32], output_q14: &[i32]) !usize {
+    const frame_len: usize = try hybrid_delay_validate_channel(state, channel, input_q14.len, output_q14.len);
+    const delay: i32 = state.delay_samples_48k;
+    const delay_base: usize = (channel as usize) * HYBRID_MAX_DELAY_SAMPLES_48K;
+    var prior_delay_q14: [i32: HYBRID_MAX_DELAY_SAMPLES_48K] = [0: HYBRID_MAX_DELAY_SAMPLES_48K];
+
+    var delay_sample: i32 = 0;
+    while delay_sample < delay {
+        const delay_offset: usize = delay_sample as usize;
+        const delay_index: usize = delay_base + delay_offset;
+        const source_index: usize = (state.frame_size_48k - delay + delay_sample) as usize;
+        prior_delay_q14[delay_offset] = state.delay_q14[delay_index];
+        state.delay_q14[delay_index] = input_q14.ptr[source_index];
+        delay_sample = delay_sample + 1;
+    }
+
+    var sample: i32 = state.frame_size_48k;
+    while sample > delay {
+        sample = sample - 1;
+        const out_index: usize = sample as usize;
+        const source_index: usize = (sample - delay) as usize;
+        output_q14.ptr[out_index] = input_q14.ptr[source_index];
+    }
+
+    delay_sample = 0;
+    while delay_sample < delay {
+        const out_index: usize = delay_sample as usize;
+        output_q14.ptr[out_index] = prior_delay_q14[out_index];
+        delay_sample = delay_sample + 1;
+    }
+
+    return frame_len;
+}
+
+export fn hybrid_delay_apply_interleaved_q14(state: &HybridDecoderState, input_q14: &[i32], output_q14: &[i32]) !usize {
+    try hybrid_delay_validate_state(state);
+    const frame_len: usize = state.frame_size_48k as usize;
+    const channels: usize = state.channels as usize;
+    const required: usize = frame_len * channels;
+    if input_q14.len < required || output_q14.len < required {
+        return error.HybridDelayError;
+    }
+    const delay: i32 = state.delay_samples_48k;
+    var prior_delay_q14: [i32: HYBRID_DELAY_BUFFER_LEN] = [0: HYBRID_DELAY_BUFFER_LEN];
+
+    var channel_update: i32 = 0;
+    while channel_update < state.channels {
+        const delay_base: usize = (channel_update as usize) * HYBRID_MAX_DELAY_SAMPLES_48K;
+        var delay_sample: i32 = 0;
+        while delay_sample < delay {
+            const delay_offset: usize = delay_sample as usize;
+            const delay_index: usize = delay_base + delay_offset;
+            const source_frame: usize = (state.frame_size_48k - delay + delay_sample) as usize;
+            const source_index: usize = source_frame * channels + (channel_update as usize);
+            prior_delay_q14[delay_index] = state.delay_q14[delay_index];
+            state.delay_q14[delay_index] = input_q14.ptr[source_index];
+            delay_sample = delay_sample + 1;
+        }
+        channel_update = channel_update + 1;
+    }
+
+    var sample: i32 = state.frame_size_48k;
+    while sample > delay {
+        sample = sample - 1;
+        var channel: i32 = 0;
+        while channel < state.channels {
+            const out_index: usize = (sample as usize) * channels + (channel as usize);
+            const source_index: usize = ((sample - delay) as usize) * channels + (channel as usize);
+            output_q14.ptr[out_index] = input_q14.ptr[source_index];
+            channel = channel + 1;
+        }
+    }
+
+    var delay_sample: i32 = 0;
+    while delay_sample < delay {
+        var channel: i32 = 0;
+        while channel < state.channels {
+            const delay_base: usize = (channel as usize) * HYBRID_MAX_DELAY_SAMPLES_48K;
+            const delay_index: usize = delay_base + (delay_sample as usize);
+            const out_index: usize = (delay_sample as usize) * channels + (channel as usize);
+            output_q14.ptr[out_index] = prior_delay_q14[delay_index];
+            channel = channel + 1;
+        }
+        delay_sample = delay_sample + 1;
+    }
+
+    return frame_len;
+}
