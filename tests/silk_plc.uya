@@ -167,3 +167,33 @@ test "silk plc concealment decays energy across consecutive losses" {
     try assert_eq_i32(state.history_q14[304], 7000);
     try assert_eq_i32(state.history_q14[305], -7000);
 }
+
+test "silk plc voiced concealment extrapolates from previous pitch period" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.prev_signal_type = SILK_SIGNAL_TYPE_VOICED;
+    state.prev_lag = 40;
+
+    var i: usize = 0;
+    while i < 40 {
+        state.history_q14[264 + i] = ((i as i32) + 1) * 100;
+        i = i + 1;
+    }
+    i = 0;
+    while i < 320 {
+        state.history_q14[304 + i] = 9000;
+        i = i + 1;
+    }
+
+    var out_q14: [i32: 320] = [0: 320];
+    _ = try silk_plc_conceal_frame_q14(&state, 0, &out_q14[0:320]);
+
+    try assert_eq_i32(out_q14[0], 100);
+    try assert_eq_i32(out_q14[1], 200);
+    try assert_eq_i32(out_q14[39], 4000);
+    try assert_eq_i32(out_q14[40], 100);
+    try assert_eq_i32(out_q14[79], 4000);
+    try assert_eq_i32(out_q14[319], 4000);
+    try assert_eq_i32(state.history_q14[304], 100);
+    try assert_eq_i32(state.history_q14[623], 4000);
+}

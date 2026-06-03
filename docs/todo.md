@@ -305,7 +305,7 @@
 - [x] 实现 `silk/plc.uya`。
 - [x] 实现 SILK lost-frame concealment。
 - [x] 实现 SILK energy decay。
-- [ ] 实现 SILK pitch extrapolation。
+- [x] 实现 SILK pitch extrapolation。
 - [ ] 实现 `silk/fec.uya`。
 - [ ] 实现 LBRR packet 检测。
 - [ ] 实现 delayed FEC decode。

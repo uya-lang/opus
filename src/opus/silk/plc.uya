@@ -153,6 +153,37 @@ fn silk_plc_copy_previous_frame_q14(state: &const SilkDecoderState, channel: i32
     }
 }
 
+fn silk_plc_extrapolate_pitch_q14(state: &const SilkDecoderState, channel: i32, out_q14: &[i32], frame_len: usize, pitch_lag: i32) !void {
+    if out_q14.len < frame_len || pitch_lag <= 0 {
+        return error.SilkPlcError;
+    }
+    const pitch_lag_len: usize = pitch_lag as usize;
+    if pitch_lag_len > SILK_PLC_HISTORY_WRITE_INDEX {
+        return error.SilkPlcError;
+    }
+
+    var i: usize = 0;
+    while i < frame_len {
+        if i < pitch_lag_len {
+            const source_sample: usize = SILK_PLC_HISTORY_WRITE_INDEX - pitch_lag_len + i;
+            const state_index: usize = silk_plc_state_history_index(state, channel, source_sample) catch {
+                return error.SilkPlcError;
+            };
+            if state_index >= SILK_CHANNEL_HISTORY_LEN {
+                return error.SilkPlcError;
+            }
+            out_q14.ptr[i] = state.history_q14[state_index];
+        } else {
+            const previous_period_index: usize = i - pitch_lag_len;
+            if previous_period_index >= frame_len {
+                return error.SilkPlcError;
+            }
+            out_q14.ptr[i] = out_q14.ptr[previous_period_index];
+        }
+        i = i + 1;
+    }
+}
+
 fn silk_plc_update_history_q14(state: &SilkDecoderState, channel: i32, frame_q14: &[i32], frame_len: usize) !void {
     if frame_q14.len < frame_len || SILK_PLC_HISTORY_WRITE_INDEX + frame_len > SILK_STATE_HISTORY_LEN {
         return error.SilkPlcError;
@@ -246,7 +277,11 @@ export fn silk_plc_conceal_frame_q14(state: &SilkDecoderState, channel: i32, out
         return error.SilkPlcError;
     }
 
-    try silk_plc_copy_previous_frame_q14(state, channel, &out_q14[0:frame_len], frame_len);
+    if context.voiced {
+        try silk_plc_extrapolate_pitch_q14(state, channel, &out_q14[0:frame_len], frame_len, context.pitch_lag);
+    } else {
+        try silk_plc_copy_previous_frame_q14(state, channel, &out_q14[0:frame_len], frame_len);
+    }
     try silk_plc_apply_energy_decay_q14(&out_q14[0:frame_len], frame_len, context.loss_count);
     try silk_plc_update_history_q14(state, channel, &out_q14[0:frame_len], frame_len);
     try silk_plc_mark_lost_frame(state);
