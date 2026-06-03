@@ -404,10 +404,6 @@ fn celt_channel_pulse_count_from_q3(
     }
     if split_stereo {
         channel_bits_q3 = total_bits_q3 / state.channels;
-        const extra: i32 = total_bits_q3 - (channel_bits_q3 * state.channels);
-        if channel < extra {
-            channel_bits_q3 = channel_bits_q3 + 1;
-        }
     }
     const pseudo: i32 = celt_rate_bits2pulses_pseudo(&state.mode, band, state.lm, channel_bits_q3) catch {
         return error.CeltDecodeError;

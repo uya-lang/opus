@@ -211,6 +211,54 @@ const RFC8251_TESTVECTOR01_PACKET4_FRAME2: [byte: 195] = [
     31, 110, 23
 ];
 
+const RFC8251_TESTVECTOR01_PACKET12_FRAME0: [byte: 200] = [
+    97, 193, 246, 208, 35, 210, 233, 2, 67, 28, 133, 201, 56, 235, 86, 248,
+    221, 42, 228, 57, 221, 76, 40, 139, 57, 227, 179, 88, 217, 103, 250, 54,
+    64, 218, 236, 38, 136, 176, 206, 71, 148, 93, 9, 151, 234, 150, 9, 12,
+    252, 160, 241, 184, 74, 36, 70, 195, 159, 83, 9, 253, 174, 147, 168, 147,
+    124, 205, 196, 216, 31, 5, 90, 206, 246, 157, 164, 87, 51, 127, 216, 195,
+    20, 88, 94, 55, 165, 191, 171, 31, 76, 5, 26, 153, 44, 174, 188, 217,
+    213, 9, 182, 157, 127, 143, 215, 160, 113, 234, 77, 31, 166, 232, 253, 130,
+    0, 92, 97, 20, 179, 96, 17, 61, 221, 160, 11, 175, 26, 6, 136, 28,
+    236, 220, 144, 224, 122, 85, 164, 225, 124, 80, 44, 43, 18, 182, 82, 124,
+    249, 105, 187, 212, 87, 242, 78, 129, 110, 65, 196, 227, 52, 140, 111, 151,
+    99, 14, 254, 96, 70, 108, 102, 122, 134, 93, 168, 0, 255, 166, 146, 210,
+    5, 55, 243, 24, 252, 85, 43, 55, 45, 188, 247, 39, 242, 172, 23, 238,
+    12, 161, 88, 42, 141, 247, 12, 176
+];
+
+const RFC8251_TESTVECTOR01_PACKET12_FRAME1: [byte: 200] = [
+    97, 193, 243, 207, 222, 13, 9, 47, 93, 2, 228, 3, 94, 134, 53, 88,
+    167, 166, 66, 20, 217, 31, 39, 91, 202, 39, 104, 38, 55, 159, 172, 1,
+    182, 111, 128, 119, 2, 28, 137, 94, 159, 122, 234, 251, 44, 228, 147, 15,
+    253, 39, 6, 2, 62, 57, 137, 52, 45, 54, 167, 128, 232, 32, 65, 79,
+    26, 139, 60, 238, 12, 2, 67, 154, 143, 69, 232, 71, 209, 109, 194, 242,
+    54, 103, 115, 216, 121, 19, 19, 245, 95, 241, 216, 91, 160, 13, 181, 128,
+    253, 210, 80, 97, 73, 91, 211, 200, 200, 236, 125, 62, 138, 106, 215, 120,
+    143, 151, 7, 39, 225, 148, 185, 74, 198, 225, 93, 41, 20, 107, 44, 158,
+    132, 180, 196, 221, 83, 217, 129, 65, 121, 237, 113, 173, 111, 29, 203, 103,
+    100, 114, 252, 244, 26, 116, 168, 192, 44, 14, 245, 10, 159, 66, 230, 136,
+    62, 51, 139, 248, 71, 81, 77, 94, 36, 46, 98, 164, 213, 203, 190, 129,
+    126, 149, 48, 42, 175, 99, 13, 242, 146, 201, 220, 202, 224, 105, 195, 129,
+    93, 115, 200, 34, 143, 161, 195, 0
+];
+
+const RFC8251_TESTVECTOR01_PACKET12_FRAME2: [byte: 199] = [
+    97, 214, 165, 130, 134, 239, 196, 201, 77, 133, 111, 122, 147, 115, 65, 0,
+    155, 184, 201, 249, 160, 198, 166, 193, 8, 179, 161, 178, 26, 97, 226, 153,
+    16, 130, 13, 207, 252, 50, 55, 224, 229, 235, 46, 71, 125, 76, 159, 217,
+    156, 123, 203, 253, 215, 251, 104, 169, 152, 199, 106, 153, 115, 182, 119, 58,
+    225, 29, 65, 64, 36, 140, 80, 132, 130, 192, 183, 27, 37, 57, 191, 195,
+    138, 45, 123, 165, 5, 177, 243, 158, 135, 76, 210, 151, 145, 111, 53, 171,
+    246, 94, 75, 72, 162, 241, 142, 9, 159, 67, 65, 203, 110, 8, 235, 110,
+    141, 129, 189, 105, 232, 176, 168, 182, 135, 187, 221, 52, 135, 65, 235, 190,
+    183, 177, 20, 81, 217, 53, 28, 83, 4, 49, 199, 209, 181, 111, 203, 252,
+    26, 75, 200, 71, 38, 31, 162, 176, 178, 34, 57, 214, 218, 17, 68, 211,
+    234, 11, 221, 1, 101, 137, 106, 128, 255, 63, 166, 162, 90, 74, 224, 27,
+    122, 139, 86, 179, 35, 143, 121, 91, 175, 170, 22, 49, 244, 163, 165, 73,
+    19, 88, 131, 233, 226, 66, 232
+];
+
 fn celt_conformance_checksum_i16(pcm: &[i16]) !u64 {
     var checksum: u64 = 1469598103934665603;
     var i: usize = 0;
@@ -481,6 +529,50 @@ test "celt stereo decode accepts RFC8251 testvector01 fifth packet frames in ord
     match decoded2 {
         count => { try assert_eq_i32(count as i32, 960); }
         error.CeltDecodeError => { try assert(false, "fifth packet frame 2 must decode"); }
+    };
+}
+
+test "celt stereo decode accepts RFC8251 testvector01 thirteenth packet first CELT frame" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 960, 0, 21);
+
+    var payload: [byte: 200] = RFC8251_TESTVECTOR01_PACKET12_FRAME0;
+    var pcm: [i16: 1920] = [0: 1920];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    const decoded: usize = try celt_decode_stereo_i16(&state, &payload[0:200], &pcm[0:1920], &scratch);
+
+    try assert_eq_i32(decoded as i32, 960);
+    try assert(state.freq_history_ready, "real RFC8251 frame must update CELT frequency history");
+}
+
+test "celt stereo decode accepts RFC8251 testvector01 thirteenth packet frames in order" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 960, 0, 21);
+
+    var frame0: [byte: 200] = RFC8251_TESTVECTOR01_PACKET12_FRAME0;
+    var frame1: [byte: 200] = RFC8251_TESTVECTOR01_PACKET12_FRAME1;
+    var frame2: [byte: 199] = RFC8251_TESTVECTOR01_PACKET12_FRAME2;
+    var pcm: [i16: 1920] = [0: 1920];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+
+    const decoded0: !usize = celt_decode_stereo_i16(&state, &frame0[0:200], &pcm[0:1920], &scratch);
+    match decoded0 {
+        count => { try assert_eq_i32(count as i32, 960); }
+        error.CeltDecodeError => { try assert(false, "thirteenth packet frame 0 must decode"); }
+    };
+    try celt_state_configure_frame(&state, 960, 0, 21);
+    const decoded1: !usize = celt_decode_stereo_i16(&state, &frame1[0:200], &pcm[0:1920], &scratch);
+    match decoded1 {
+        count => { try assert_eq_i32(count as i32, 960); }
+        error.CeltDecodeError => { try assert(false, "thirteenth packet frame 1 must decode"); }
+    };
+    try celt_state_configure_frame(&state, 960, 0, 21);
+    const decoded2: !usize = celt_decode_stereo_i16(&state, &frame2[0:199], &pcm[0:1920], &scratch);
+    match decoded2 {
+        count => { try assert_eq_i32(count as i32, 960); }
+        error.CeltDecodeError => { try assert(false, "thirteenth packet frame 2 must decode"); }
     };
 }
 
