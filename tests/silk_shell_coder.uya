@@ -37,6 +37,35 @@ fn assert_shell_roundtrip(input: &[i16]) !void {
     }
 }
 
+fn assert_shell_vector(input: &[i16], expected_packet: &[byte], expected_used: i32, expected_total: i32) !void {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+    const total: i32 = try silk_shell_encoder(&enc, input);
+    const used: usize = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+
+    try assert_eq_i32(total, expected_total);
+    try assert_eq_i32(used as i32, expected_used);
+    var i: usize = 0;
+    while i < expected_packet.len {
+        try assert_eq_i32(packet[i] as i32, expected_packet.ptr[i] as i32);
+        i = i + 1;
+    }
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, expected_packet);
+    var decoded: [i16: 16] = [99: 16];
+    try silk_shell_decoder(&dec, &decoded[0:16], expected_total);
+    try ec_dec_check(&dec);
+
+    i = 0;
+    while i < 16 {
+        try assert_eq_i32(decoded[i] as i32, input.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
 test "silk shell coder tables match upstream shapes and hashes" {
     try assert_eq_i32(SILK_SHELL_CODEC_FRAME_LENGTH as i32, 16);
     try assert_eq_i32(SILK_SHELL_MAX_PULSES, 16);
@@ -60,6 +89,16 @@ test "silk shell coder roundtrips representative 16-pulse blocks" {
     try assert_shell_roundtrip(&sparse[0:16]);
     try assert_shell_roundtrip(&balanced[0:16]);
     try assert_shell_roundtrip(&left_heavy[0:16]);
+}
+
+test "silk shell coder matches fixed bitstream vectors" {
+    var sparse: [i16: 16] = [3, 0, 1, 0, 0, 2, 0, 0, 4, 0, 0, 1, 0, 0, 0, 5];
+    const sparse_packet: [byte: 16] = [59, 51, 172, 46, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var left_heavy: [i16: 16] = [8, 4, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const left_heavy_packet: [byte: 16] = [255, 254, 245, 240, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    try assert_shell_vector(&sparse[0:16], &sparse_packet[0:16], 5, 16);
+    try assert_shell_vector(&left_heavy[0:16], &left_heavy_packet[0:16], 4, 16);
 }
 
 test "silk shell coder validates pulse counts and output buffers" {

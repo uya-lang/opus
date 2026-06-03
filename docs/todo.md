@@ -256,7 +256,7 @@
 - [x] 实现 LTP coefficient decode。
 - [x] 实现 LTP synthesis。
 - [x] 实现 `silk/stereo.uya`。
-- [ ] 测试 shell coder vectors。
+- [x] 测试 shell coder vectors。
 - [ ] 测试 NLSF stabilization。
 - [ ] 测试 LPC synthesis golden。
 - [ ] 测试 LTP synthesis golden。
