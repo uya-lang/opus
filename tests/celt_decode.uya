@@ -52,6 +52,7 @@ test "celt mono decode integrates entropy bands imdct and deemphasis" {
     try assert(scratch.twiddle_ready, "mono decode must cache scalar IMDCT twiddles in scratch");
     try assert(scratch.spread_decision >= 0, "mono decode must run spread decision stage");
     try assert(state.loss_count == 0, "successful decode clears CELT loss count");
+    try assert(state.freq_history_ready, "successful decode must publish frequency-domain PLC history");
 }
 
 test "celt-only mono conformance vector locks packet pcm and state fingerprint" {
@@ -144,6 +145,7 @@ test "celt stereo decode writes interleaved pcm and updates both channel states"
     try assert_eq_i32(decoded as i32, 120);
     try assert(scratch.twiddle_ready, "stereo decode must reuse cached scalar IMDCT twiddles");
     try assert(state.loss_count == 0, "successful stereo decode clears CELT loss count");
+    try assert(state.freq_history_ready, "successful stereo decode must publish frequency-domain PLC history");
     try assert(state.old_loge_q8[0] == state.old_ebands_q8[0], "left channel log energy must be published");
     try assert(state.old_loge_q8[21] == state.old_ebands_q8[21], "right channel log energy must be published");
     try assert(pcm[0] != 321 || pcm[1] != 321 || pcm[238] != 321 || pcm[239] != 321, "stereo decode must write interleaved output samples");

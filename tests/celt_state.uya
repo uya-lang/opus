@@ -7,6 +7,7 @@ use src.opus.celt.state.CELT_STATE_MAX_CHANNELS;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_energy_index;
+use src.opus.celt.state.celt_state_frequency_index;
 use src.opus.celt.state.celt_state_init;
 use src.opus.celt.state.celt_state_mark_lost_frame;
 use src.opus.celt.state.celt_state_overlap_index;
@@ -31,6 +32,8 @@ test "celt state initializes static 48k decoder history" {
     try assert_eq_i32(state.old_band_e_q8[0] as i32, 0);
     try assert_eq_i32(state.overlap_mem_q15[0] as i32, 0);
     try assert_eq_i32(state.preemph_mem_q15[0], 0);
+    try assert_eq_i32(state.freq_mem_q15[0] as i32, 0);
+    try assert(!state.freq_history_ready, "new state must not advertise frequency history");
 }
 
 test "celt state validates channel count" {
@@ -103,6 +106,8 @@ test "celt state reset clears histories without changing channel layout" {
     state.overlap_mem_q15[120] = 300;
     state.preemph_mem_q15[1] = 7000;
     state.decode_mem[1919] = -9;
+    state.freq_mem_q15[1919] = 456;
+    state.freq_history_ready = true;
     state.rng = 99;
     state.loss_count = 4;
     try celt_state_configure_frame(&state, 960, 3, 20);
@@ -119,6 +124,8 @@ test "celt state reset clears histories without changing channel layout" {
     try assert_eq_i32(state.overlap_mem_q15[120] as i32, 0);
     try assert_eq_i32(state.preemph_mem_q15[1], 0);
     try assert_eq_i32(state.decode_mem[1919], 0);
+    try assert_eq_i32(state.freq_mem_q15[1919] as i32, 0);
+    try assert(!state.freq_history_ready, "reset must clear frequency-domain PLC history");
     try assert_eq_i32(state.rng as i32, 0);
     try assert_eq_i32(state.loss_count, 0);
 }
@@ -138,6 +145,9 @@ test "celt state lost frame update decays active histories and saturates count" 
     state.overlap_mem_q15[120] = -800;
     state.preemph_mem_q15[0] = 9000;
     state.preemph_mem_q15[1] = -7000;
+    const right_freq: usize = try celt_state_frequency_index(&state, 1, 10);
+    state.freq_mem_q15[right_freq] = 6000;
+    state.freq_history_ready = true;
     state.rng = 17;
 
     try celt_state_mark_lost_frame(&state);
@@ -151,6 +161,7 @@ test "celt state lost frame update decays active histories and saturates count" 
     try assert_eq_i32(state.overlap_mem_q15[120] as i32, -400);
     try assert_eq_i32(state.preemph_mem_q15[0], 4500);
     try assert_eq_i32(state.preemph_mem_q15[1], -3500);
+    try assert_eq_i32(state.freq_mem_q15[right_freq] as i32, 3000);
 
     state.loss_count = 127;
     try celt_state_mark_lost_frame(&state);

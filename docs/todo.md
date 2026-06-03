@@ -310,7 +310,7 @@
 - [x] 实现 LBRR packet 检测。
 - [x] 实现 delayed FEC decode。
 - [x] 实现 `celt/plc.uya`。
-- [ ] 实现 CELT frequency-domain PLC 初版。
+- [x] 实现 CELT frequency-domain PLC 初版。
 - [ ] 实现 decoder API 中的 empty packet PLC。
 - [ ] 实现 `decode_fec` 参数语义。
 - [ ] 测试单包丢失。

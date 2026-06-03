@@ -2,6 +2,7 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.plc.CELT_PLC_MAX_LOSS_COUNT;
 use src.opus.celt.plc.CeltPlcContext;
+use src.opus.celt.plc.CeltPlcScratch;
 use src.opus.celt.plc.celt_plc_conceal_i16;
 use src.opus.celt.plc.celt_plc_context_from_state;
 use src.opus.celt.state.CELT_DECODE_MEM;
@@ -41,7 +42,8 @@ test "celt plc conceals mono frame from decode history and updates state" {
     state.rng = 7;
 
     var pcm: [i16: 480] = [0: 480];
-    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:480]);
+    var scratch: CeltPlcScratch = CeltPlcScratch{};
+    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:480], &scratch);
 
     try assert_eq_i32(decoded as i32, 480);
     try assert_eq_i32(pcm[0] as i32, 3000);
@@ -63,8 +65,9 @@ test "celt plc applies decay across consecutive losses" {
 
     var first: [i16: 120] = [0: 120];
     var second: [i16: 120] = [0: 120];
-    _ = try celt_plc_conceal_i16(&state, &first[0:120]);
-    _ = try celt_plc_conceal_i16(&state, &second[0:120]);
+    var scratch: CeltPlcScratch = CeltPlcScratch{};
+    _ = try celt_plc_conceal_i16(&state, &first[0:120], &scratch);
+    _ = try celt_plc_conceal_i16(&state, &second[0:120], &scratch);
 
     try assert_eq_i32(first[0] as i32, 8000);
     try assert_eq_i32(first[1] as i32, -8000);
@@ -86,7 +89,8 @@ test "celt plc supports stereo interleaved output and overlap fallback" {
     state.overlap_mem_q15[121] = -444;
 
     var pcm: [i16: 240] = [0: 240];
-    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:240]);
+    var scratch: CeltPlcScratch = CeltPlcScratch{};
+    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:240], &scratch);
 
     try assert_eq_i32(decoded as i32, 120);
     try assert_eq_i32(pcm[0] as i32, 111);
@@ -94,6 +98,45 @@ test "celt plc supports stereo interleaved output and overlap fallback" {
     try assert_eq_i32(pcm[2] as i32, 333);
     try assert_eq_i32(pcm[3] as i32, -444);
     try assert_eq_i32(state.loss_count, 1);
+}
+
+test "celt plc prefers frequency history over decode memory" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+    const tail: usize = CELT_DECODE_MEM - 120;
+    var fill: usize = 0;
+    while fill < 120 {
+        state.decode_mem[tail + fill] = 1234;
+        fill = fill + 1;
+    }
+    state.freq_mem_q15[0] = 32767;
+    state.freq_history_ready = true;
+
+    var pcm: [i16: 120] = [0: 120];
+    var scratch: CeltPlcScratch = CeltPlcScratch{};
+    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:120], &scratch);
+
+    try assert_eq_i32(decoded as i32, 120);
+    try assert(scratch.twiddle_ready, "frequency PLC must prepare reusable IMDCT twiddles");
+    try assert(scratch.used_frequency_history, "frequency PLC must report the frequency-history path");
+    var any_spectral_sample: bool = false;
+    var any_not_time_copy: bool = false;
+    var i: usize = 0;
+    while i < 120 {
+        if pcm[i] != 0 {
+            any_spectral_sample = true;
+        }
+        if pcm[i] != 1234 {
+            any_not_time_copy = true;
+        }
+        i = i + 1;
+    }
+    try assert(any_spectral_sample, "nonzero spectral history must synthesize nonzero PCM in the concealed frame");
+    try assert(any_not_time_copy, "frequency PLC must not copy stale time-domain memory when spectral history exists");
+    try assert_eq_i32(state.decode_mem[tail], pcm[0] as i32);
+    try assert_eq_i32(state.loss_count, 1);
+    try assert(state.freq_mem_q15[0] > 0 && state.freq_mem_q15[0] < 32767, "lost-frame marker must decay retained spectral history");
 }
 
 test "celt plc validates state and output bounds" {
@@ -109,14 +152,15 @@ test "celt plc validates state and output bounds" {
     try celt_state_init(&state, 1);
     try celt_state_configure_frame(&state, 120, 0, 21);
     var pcm: [i16: 120] = [0: 120];
-    const short_output: !usize = celt_plc_conceal_i16(&state, &pcm[0:119]);
+    var scratch: CeltPlcScratch = CeltPlcScratch{};
+    const short_output: !usize = celt_plc_conceal_i16(&state, &pcm[0:119], &scratch);
     match short_output {
         error.CeltPlcError => {}
         else => { try assert(false, "CELT PLC must reject short PCM output"); }
     }
 
     state.loss_count = CELT_PLC_MAX_LOSS_COUNT + 1;
-    const bad_loss_count: !usize = celt_plc_conceal_i16(&state, &pcm[0:120]);
+    const bad_loss_count: !usize = celt_plc_conceal_i16(&state, &pcm[0:120], &scratch);
     match bad_loss_count {
         error.CeltPlcError => {}
         else => { try assert(false, "CELT PLC must reject invalid loss counters"); }

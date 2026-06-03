@@ -27,6 +27,8 @@ export struct CeltDecoderState {
     preemph_mem_q15: [i32: CELT_STATE_MAX_CHANNELS],
     overlap_mem_q15: [i16: CELT_OVERLAP_HISTORY_LEN],
     decode_mem: [i32: CELT_DECODE_MEM_LEN],
+    freq_mem_q15: [i16: CELT_DECODE_MEM_LEN],
+    freq_history_ready: bool,
     rng: u32,
     loss_count: i32,
 }
@@ -67,6 +69,13 @@ export fn celt_state_overlap_index(state: &const CeltDecoderState, channel: i32,
     return (channel as usize) * CELT_MAX_OVERLAP + (sample as usize);
 }
 
+export fn celt_state_frequency_index(state: &const CeltDecoderState, channel: i32, sample: i32) !usize {
+    if channel < 0 || channel >= state.channels || sample < 0 || sample >= state.frame_size {
+        return error.CeltStateError;
+    }
+    return (channel as usize) * CELT_DECODE_MEM + (sample as usize);
+}
+
 export fn celt_state_clear_history(state: &CeltDecoderState) void {
     clear_i16(&state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
     clear_i16(&state.old_band_e_q8[0:CELT_ENERGY_HISTORY_LEN]);
@@ -74,6 +83,8 @@ export fn celt_state_clear_history(state: &CeltDecoderState) void {
     clear_i16(&state.overlap_mem_q15[0:CELT_OVERLAP_HISTORY_LEN]);
     clear_i32(&state.preemph_mem_q15[0:CELT_STATE_MAX_CHANNELS]);
     clear_i32(&state.decode_mem[0:CELT_DECODE_MEM_LEN]);
+    clear_i16(&state.freq_mem_q15[0:CELT_DECODE_MEM_LEN]);
+    state.freq_history_ready = false;
     state.rng = 0;
     state.loss_count = 0;
 }
@@ -148,6 +159,18 @@ export fn celt_state_mark_lost_frame(state: &CeltDecoderState) !void {
             state.old_loge_q8[energy_index] = decay_i16_half(state.old_loge_q8[energy_index]);
             band = band + 1;
         }
+
+        if state.freq_history_ready {
+            var coeff: i32 = 0;
+            while coeff < state.frame_size {
+                const freq_index: usize = try celt_state_frequency_index(state, channel, coeff);
+                if freq_index >= CELT_DECODE_MEM_LEN {
+                    return error.CeltStateError;
+                }
+                state.freq_mem_q15[freq_index] = decay_i16_half(state.freq_mem_q15[freq_index]);
+                coeff = coeff + 1;
+            }
+        }
         channel = channel + 1;
     }
 
@@ -170,4 +193,21 @@ export fn celt_state_configure_frame(state: &CeltDecoderState, frame_size: i32, 
     state.lm = lm;
     state.start_band = start_band;
     state.end_band = end_band;
+}
+
+export fn celt_state_save_frequency_history_q15(state: &CeltDecoderState, channel: i32, coeff_q15: &[i16]) !void {
+    if state.frame_size <= 0 || state.frame_size > (CELT_DECODE_MEM as i32) || coeff_q15.len < (state.frame_size as usize) {
+        return error.CeltStateError;
+    }
+
+    var sample: i32 = 0;
+    while sample < state.frame_size {
+        const freq_index: usize = try celt_state_frequency_index(state, channel, sample);
+        if freq_index >= CELT_DECODE_MEM_LEN {
+            return error.CeltStateError;
+        }
+        state.freq_mem_q15[freq_index] = coeff_q15.ptr[sample as usize];
+        sample = sample + 1;
+    }
+    state.freq_history_ready = true;
 }

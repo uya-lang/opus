@@ -15,6 +15,7 @@ use src.opus.celt.state.CELT_ENERGY_HISTORY_LEN;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_energy_index;
+use src.opus.celt.state.celt_state_save_frequency_history_q15;
 use src.opus.celt.tf.celt_decode_tf_changes;
 use src.opus.core.saturate.sat16;
 use src.opus.core.saturate.sat32;
@@ -371,6 +372,11 @@ fn celt_decode_channels_i16(
             scratch.coeff_q15[i] = scratch.freq_q15[spectral_offset + i];
             i = i + 1;
         }
+        try celt_state_save_frequency_history_q15(
+            state,
+            channel,
+            &scratch.coeff_q15[0:(state.frame_size as usize)],
+        );
 
         celt_imdct_overlap_q15(
             state,

@@ -4,13 +4,21 @@ use src.opus.celt.state.CELT_MAX_OVERLAP;
 use src.opus.celt.state.CELT_OVERLAP_HISTORY_LEN;
 use src.opus.celt.state.CELT_STATE_MAX_CHANNELS;
 use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_frequency_index;
 use src.opus.celt.state.celt_state_mark_lost_frame;
 use src.opus.celt.state.celt_state_overlap_index;
+use src.opus.celt.deemphasis.CELT_DEEMPHASIS_DEFAULT_COEF_Q15;
+use src.opus.celt.deemphasis.celt_deemphasis_i16;
+use src.opus.celt.mdct_bridge.celt_imdct_overlap_q15;
 use src.opus.core.saturate.sat16;
+use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
+use src.opus.dsp.window.celt_window_120_q15_boundary;
 
 export error CeltPlcError;
 
 export const CELT_PLC_MAX_LOSS_COUNT: i32 = 127;
+export const CELT_PLC_MAX_IMDCT: usize = 1920;
+export const CELT_PLC_MAX_TWIDDLE: usize = 1843200;
 
 export struct CeltPlcContext {
     channels: i32,
@@ -20,6 +28,18 @@ export struct CeltPlcContext {
     end_band: i32,
     loss_count: i32,
     rng: u32,
+}
+
+export struct CeltPlcScratch {
+    coeff_q15: [i16: CELT_DECODE_MEM],
+    imdct_q15: [i16: CELT_PLC_MAX_IMDCT],
+    pcm_q15: [i16: CELT_DECODE_MEM],
+    pcm_i16: [i16: CELT_DECODE_MEM],
+    window_q15: [i16: CELT_MAX_OVERLAP],
+    twiddle_q15: [i16: CELT_PLC_MAX_TWIDDLE],
+    twiddle_ready: bool,
+    twiddle_imdct_len: i32,
+    used_frequency_history: bool,
 }
 
 fn celt_plc_validate_state(state: &const CeltDecoderState) !void {
@@ -49,6 +69,14 @@ export fn celt_plc_context_from_state(context: &CeltPlcContext, state: &const Ce
     context.end_band = state.end_band;
     context.loss_count = state.loss_count;
     context.rng = state.rng;
+}
+
+fn clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
 }
 
 fn celt_plc_decode_mem_index(state: &const CeltDecoderState, channel: i32, sample: i32) !usize {
@@ -103,14 +131,31 @@ fn celt_plc_store_history_sample(state: &CeltDecoderState, channel: i32, sample:
     state.decode_mem[mem_index] = value as i32;
 }
 
-export fn celt_plc_conceal_i16(state: &CeltDecoderState, pcm: &[i16]) !usize {
-    var context: CeltPlcContext = CeltPlcContext{};
-    try celt_plc_context_from_state(&context, state);
-    const frame_len: usize = context.frame_size as usize;
-    const channels: usize = context.channels as usize;
-    if pcm.len < frame_len * channels {
+fn celt_plc_prepare_frequency_tables(state: &const CeltDecoderState, scratch: &CeltPlcScratch) !void {
+    const imdct_len: i32 = state.frame_size * 2;
+    if imdct_len <= 0 || imdct_len > (CELT_PLC_MAX_IMDCT as i32) {
         return error.CeltPlcError;
     }
+
+    if !scratch.twiddle_ready || scratch.twiddle_imdct_len != imdct_len {
+        mdct_imdct_init_twiddle_q15(imdct_len as usize, &scratch.twiddle_q15[0:CELT_PLC_MAX_TWIDDLE]) catch {
+            return error.CeltPlcError;
+        };
+        scratch.twiddle_ready = true;
+        scratch.twiddle_imdct_len = imdct_len;
+    }
+
+    var i: usize = 0;
+    while i < CELT_MAX_OVERLAP {
+        scratch.window_q15[i] = celt_window_120_q15_boundary(i);
+        i = i + 1;
+    }
+}
+
+fn celt_plc_conceal_time_i16(state: &CeltDecoderState, pcm: &[i16], scratch: &CeltPlcScratch, context: &const CeltPlcContext) !usize {
+    const frame_len: usize = context.frame_size as usize;
+    const channels: usize = context.channels as usize;
+    scratch.used_frequency_history = false;
 
     var channel: i32 = 0;
     while channel < context.channels {
@@ -129,4 +174,84 @@ export fn celt_plc_conceal_i16(state: &CeltDecoderState, pcm: &[i16]) !usize {
         return error.CeltPlcError;
     };
     return frame_len;
+}
+
+fn celt_plc_load_frequency_coefficients(state: &const CeltDecoderState, channel: i32, scratch: &CeltPlcScratch) !void {
+    const frame_len: usize = state.frame_size as usize;
+    clear_i16(&scratch.coeff_q15[0:CELT_DECODE_MEM]);
+    var sample: i32 = 0;
+    while sample < state.frame_size {
+        const freq_index: usize = celt_state_frequency_index(state, channel, sample) catch {
+            return error.CeltPlcError;
+        };
+        if freq_index >= CELT_DECODE_MEM_LEN {
+            return error.CeltPlcError;
+        }
+        scratch.coeff_q15[sample as usize] = state.freq_mem_q15[freq_index];
+        sample = sample + 1;
+    }
+    if frame_len > CELT_DECODE_MEM {
+        return error.CeltPlcError;
+    }
+}
+
+fn celt_plc_conceal_frequency_i16(state: &CeltDecoderState, pcm: &[i16], scratch: &CeltPlcScratch, context: &const CeltPlcContext) !usize {
+    const frame_len: usize = context.frame_size as usize;
+    const channels: usize = context.channels as usize;
+    try celt_plc_prepare_frequency_tables(state, scratch);
+    scratch.used_frequency_history = true;
+
+    var channel: i32 = 0;
+    while channel < context.channels {
+        try celt_plc_load_frequency_coefficients(state, channel, scratch);
+        celt_imdct_overlap_q15(
+            state,
+            channel,
+            &scratch.coeff_q15[0:frame_len],
+            &scratch.twiddle_q15[0:CELT_PLC_MAX_TWIDDLE],
+            &scratch.window_q15[0:CELT_MAX_OVERLAP],
+            &scratch.imdct_q15[0:CELT_PLC_MAX_IMDCT],
+            &scratch.pcm_q15[0:frame_len],
+        ) catch {
+            return error.CeltPlcError;
+        };
+        celt_deemphasis_i16(
+            &scratch.pcm_q15[0:frame_len],
+            CELT_DEEMPHASIS_DEFAULT_COEF_Q15,
+            &state.preemph_mem_q15[channel as usize],
+            &scratch.pcm_i16[0:frame_len],
+        ) catch {
+            return error.CeltPlcError;
+        };
+
+        var sample: i32 = 0;
+        while sample < context.frame_size {
+            const out_sample: i16 = scratch.pcm_i16[sample as usize];
+            const out_index: usize = (sample as usize) * channels + (channel as usize);
+            pcm.ptr[out_index] = out_sample;
+            try celt_plc_store_history_sample(state, channel, sample, out_sample);
+            sample = sample + 1;
+        }
+        channel = channel + 1;
+    }
+
+    celt_state_mark_lost_frame(state) catch {
+        return error.CeltPlcError;
+    };
+    return frame_len;
+}
+
+export fn celt_plc_conceal_i16(state: &CeltDecoderState, pcm: &[i16], scratch: &CeltPlcScratch) !usize {
+    var context: CeltPlcContext = CeltPlcContext{};
+    try celt_plc_context_from_state(&context, state);
+    const frame_len: usize = context.frame_size as usize;
+    const channels: usize = context.channels as usize;
+    if pcm.len < frame_len * channels {
+        return error.CeltPlcError;
+    }
+
+    if state.freq_history_ready {
+        return celt_plc_conceal_frequency_i16(state, pcm, scratch, &context);
+    }
+    return celt_plc_conceal_time_i16(state, pcm, scratch, &context);
 }
