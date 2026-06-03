@@ -1,0 +1,120 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.stereo.SILK_STEREO_INTERP_LEN_MS;
+use src.opus.silk.stereo.SILK_STEREO_PRED_COUNT;
+use src.opus.silk.stereo.SilkStereoState;
+use src.opus.silk.stereo.silk_stereo_decode_mid_only;
+use src.opus.silk.stereo.silk_stereo_decode_pred_q13;
+use src.opus.silk.stereo.silk_stereo_ms_to_lr_i16;
+use src.opus.silk.stereo.silk_stereo_reset;
+use src.opus.silk.tables.silk_stereo_only_code_mid_icdf_value;
+use src.opus.silk.tables.silk_stereo_pred_joint_icdf_value;
+use src.opus.silk.tables.silk_uniform3_icdf_value;
+use src.opus.silk.tables.silk_uniform5_icdf_value;
+
+test "silk stereo state reset clears predictor and delay history" {
+    var state: SilkStereoState = SilkStereoState{};
+    state.pred_prev_q13[0] = 11;
+    state.pred_prev_q13[1] = -22;
+    state.s_mid[0] = 33;
+    state.s_side[1] = -44;
+
+    silk_stereo_reset(&state);
+
+    try assert_eq_i32(SILK_STEREO_PRED_COUNT as i32, 2);
+    try assert_eq_i32(SILK_STEREO_INTERP_LEN_MS, 8);
+    try assert_eq_i32(state.pred_prev_q13[0], 0);
+    try assert_eq_i32(state.pred_prev_q13[1], 0);
+    try assert_eq_i32(state.s_mid[0] as i32, 0);
+    try assert_eq_i32(state.s_side[1] as i32, 0);
+}
+
+test "silk stereo decodes and dequantizes mid-side predictors" {
+    var packet: [byte: 32] = [0: 32];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:32]);
+    var joint_icdf: [byte: 25] = [0: 25];
+    var uniform3: [byte: 3] = [0: 3];
+    var uniform5: [byte: 5] = [0: 5];
+    var i: usize = 0;
+    while i < 25 {
+        joint_icdf[i] = silk_stereo_pred_joint_icdf_value(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 3 {
+        uniform3[i] = silk_uniform3_icdf_value(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 5 {
+        uniform5[i] = silk_uniform5_icdf_value(i);
+        i = i + 1;
+    }
+
+    ec_enc_icdf(&enc, 13, &joint_icdf[0:25], 8);
+    ec_enc_icdf(&enc, 1, &uniform3[0:3], 8);
+    ec_enc_icdf(&enc, 4, &uniform5[0:5], 8);
+    ec_enc_icdf(&enc, 2, &uniform3[0:3], 8);
+    ec_enc_icdf(&enc, 0, &uniform5[0:5], 8);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:32]);
+    var pred_q13: [i32: 2] = [0: 2];
+    try silk_stereo_decode_pred_q13(&dec, &pred_q13[0:2]);
+
+    try assert_eq_i32(pred_q13[0], -5946);
+    try assert_eq_i32(pred_q13[1], 6602);
+}
+
+test "silk stereo decodes mid-only flag" {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+    var icdf: [byte: 2] = [0: 2];
+    icdf[0] = silk_stereo_only_code_mid_icdf_value(0);
+    icdf[1] = silk_stereo_only_code_mid_icdf_value(1);
+    ec_enc_icdf(&enc, 1, &icdf[0:2], 8);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    try assert_eq_i32(try silk_stereo_decode_mid_only(&dec), 1);
+}
+
+test "silk stereo converts delayed mid-side buffers to left-right" {
+    var state: SilkStereoState = SilkStereoState{};
+    state.s_mid[0] = 10;
+    state.s_mid[1] = -20;
+    state.s_side[0] = 3;
+    state.s_side[1] = -4;
+    var mid: [i16: 6] = [0, 0, 100, 200, 300, 400];
+    var side: [i16: 6] = [0, 0, 7, -9, 11, -13];
+    var pred_q13: [i32: 2] = [0: 2];
+
+    try silk_stereo_ms_to_lr_i16(&state, &mid[0:6], &side[0:6], &pred_q13[0:2], 16, 4);
+
+    try assert_eq_i32(mid[1] as i32, -24);
+    try assert_eq_i32(side[1] as i32, -16);
+    try assert_eq_i32(mid[2] as i32, 107);
+    try assert_eq_i32(side[2] as i32, 93);
+    try assert_eq_i32(mid[4] as i32, 311);
+    try assert_eq_i32(side[4] as i32, 289);
+    try assert_eq_i32(state.s_mid[0] as i32, 300);
+    try assert_eq_i32(state.s_mid[1] as i32, 400);
+    try assert_eq_i32(state.s_side[0] as i32, 11);
+    try assert_eq_i32(state.pred_prev_q13[0], 0);
+
+    const bad_len: !void = silk_stereo_ms_to_lr_i16(&state, &mid[0:5], &side[0:6], &pred_q13[0:2], 16, 4);
+    match bad_len {
+        error.SilkStereoError => {}
+        else => { try assert(false, "stereo MS to LR needs frame length plus two delayed samples"); }
+    }
+}

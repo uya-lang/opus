@@ -1,0 +1,181 @@
+use src.opus.core.saturate.sat16;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.silk.tables.silk_stereo_only_code_mid_icdf_value;
+use src.opus.silk.tables.silk_stereo_pred_joint_icdf_value;
+use src.opus.silk.tables.silk_stereo_pred_quant_q13;
+use src.opus.silk.tables.silk_uniform3_icdf_value;
+use src.opus.silk.tables.silk_uniform5_icdf_value;
+
+export error SilkStereoError;
+
+export const SILK_STEREO_PRED_COUNT: usize = 2;
+export const SILK_STEREO_INTERP_LEN_MS: i32 = 8;
+const SILK_STEREO_QUANT_SUB_STEPS: i32 = 5;
+const SILK_STEREO_QUANT_STEP_Q16: i32 = 6554;
+
+export struct SilkStereoState {
+    pred_prev_q13: [i32: SILK_STEREO_PRED_COUNT],
+    s_mid: [i16: 2],
+    s_side: [i16: 2],
+}
+
+fn smulwb_i32(a: i32, b: i32) i32 {
+    return (((a as i64) * (b as i64)) >> 16) as i32;
+}
+
+fn round_shift_i64_to_i32(value: i64, shift: i32) i32 {
+    if shift <= 0 {
+        return value as i32;
+    }
+    if shift == 1 {
+        return ((value >> 1) + (value & 1L)) as i32;
+    }
+    return (((value >> (shift - 1)) + 1L) >> 1) as i32;
+}
+
+fn fill_stereo_pred_joint_icdf(out: &[byte]) !void {
+    if out.len < 25 {
+        return error.SilkStereoError;
+    }
+    var i: usize = 0;
+    while i < 25 {
+        out.ptr[i] = silk_stereo_pred_joint_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_uniform3_icdf(out: &[byte]) !void {
+    if out.len < 3 {
+        return error.SilkStereoError;
+    }
+    var i: usize = 0;
+    while i < 3 {
+        out.ptr[i] = silk_uniform3_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_uniform5_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        return error.SilkStereoError;
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_uniform5_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+export fn silk_stereo_reset(state: &SilkStereoState) void {
+    state.pred_prev_q13[0] = 0;
+    state.pred_prev_q13[1] = 0;
+    state.s_mid[0] = 0;
+    state.s_mid[1] = 0;
+    state.s_side[0] = 0;
+    state.s_side[1] = 0;
+}
+
+export fn silk_stereo_decode_pred_q13(dec: &EcDec, pred_q13: &[i32]) !void {
+    if pred_q13.len < SILK_STEREO_PRED_COUNT {
+        return error.SilkStereoError;
+    }
+
+    var joint_icdf: [byte: 25] = [0: 25];
+    var uniform3: [byte: 3] = [0: 3];
+    var uniform5: [byte: 5] = [0: 5];
+    try fill_stereo_pred_joint_icdf(&joint_icdf[0:25]);
+    try fill_uniform3_icdf(&uniform3[0:3]);
+    try fill_uniform5_icdf(&uniform5[0:5]);
+
+    var ix0: [i32: 2] = [0: 2];
+    var ix1: [i32: 2] = [0: 2];
+    var ix2: [i32: 2] = [0: 2];
+    const joint: i32 = ec_dec_icdf(dec, &joint_icdf[0:25], 8);
+    ix2[0] = joint / 5;
+    ix2[1] = joint - 5 * ix2[0];
+
+    var n: usize = 0;
+    while n < SILK_STEREO_PRED_COUNT {
+        ix0[n] = ec_dec_icdf(dec, &uniform3[0:3], 8);
+        ix1[n] = ec_dec_icdf(dec, &uniform5[0:5], 8);
+        n = n + 1;
+    }
+
+    n = 0;
+    while n < SILK_STEREO_PRED_COUNT {
+        const quant_index: i32 = ix0[n] + 3 * ix2[n];
+        if quant_index < 0 || quant_index + 1 >= 16 {
+            return error.SilkStereoError;
+        }
+        const low_q13: i32 = silk_stereo_pred_quant_q13(quant_index as usize) as i32;
+        const high_q13: i32 = silk_stereo_pred_quant_q13((quant_index as usize) + 1) as i32;
+        const step_q13: i32 = smulwb_i32(high_q13 - low_q13, SILK_STEREO_QUANT_STEP_Q16);
+        pred_q13.ptr[n] = low_q13 + step_q13 * (2 * ix1[n] + 1);
+        n = n + 1;
+    }
+
+    pred_q13.ptr[0] = pred_q13.ptr[0] - pred_q13.ptr[1];
+}
+
+export fn silk_stereo_decode_mid_only(dec: &EcDec) !i32 {
+    var icdf: [byte: 2] = [0: 2];
+    icdf[0] = silk_stereo_only_code_mid_icdf_value(0);
+    icdf[1] = silk_stereo_only_code_mid_icdf_value(1);
+    return ec_dec_icdf(dec, &icdf[0:2], 8);
+}
+
+fn apply_stereo_side_prediction(mid: &[i16], side: &[i16], pred0_q13: i32, pred1_q13: i32, n: usize) void {
+    var sum_q11: i32 = ((mid.ptr[n] as i32) + (mid.ptr[n + 2] as i32) + ((mid.ptr[n + 1] as i32) << 1)) << 9;
+    var side_q8: i32 = (side.ptr[n + 1] as i32) << 8;
+    side_q8 = side_q8 + smulwb_i32(sum_q11, pred0_q13);
+    side_q8 = side_q8 + smulwb_i32((mid.ptr[n + 1] as i32) << 11, pred1_q13);
+    side.ptr[n + 1] = sat16(round_shift_i64_to_i32(side_q8 as i64, 8));
+}
+
+export fn silk_stereo_ms_to_lr_i16(state: &SilkStereoState, mid: &[i16], side: &[i16], pred_q13: &[i32], fs_khz: i32, frame_length: i32) !void {
+    if frame_length <= 0 || fs_khz <= 0 || pred_q13.len < SILK_STEREO_PRED_COUNT || mid.len < ((frame_length + 2) as usize) || side.len < ((frame_length + 2) as usize) {
+        return error.SilkStereoError;
+    }
+
+    mid.ptr[0] = state.s_mid[0];
+    mid.ptr[1] = state.s_mid[1];
+    side.ptr[0] = state.s_side[0];
+    side.ptr[1] = state.s_side[1];
+    state.s_mid[0] = mid.ptr[frame_length as usize];
+    state.s_mid[1] = mid.ptr[(frame_length as usize) + 1];
+    state.s_side[0] = side.ptr[frame_length as usize];
+    state.s_side[1] = side.ptr[(frame_length as usize) + 1];
+
+    var pred0_q13: i32 = state.pred_prev_q13[0];
+    var pred1_q13: i32 = state.pred_prev_q13[1];
+    const interp_len: i32 = SILK_STEREO_INTERP_LEN_MS * fs_khz;
+    const denom_q16: i32 = 65536 / interp_len;
+    const delta0_q13: i32 = round_shift_i64_to_i32(((pred_q13.ptr[0] - state.pred_prev_q13[0]) * denom_q16) as i64, 16);
+    const delta1_q13: i32 = round_shift_i64_to_i32(((pred_q13.ptr[1] - state.pred_prev_q13[1]) * denom_q16) as i64, 16);
+    var n: usize = 0;
+    while n < (frame_length as usize) && n < (interp_len as usize) {
+        pred0_q13 = pred0_q13 + delta0_q13;
+        pred1_q13 = pred1_q13 + delta1_q13;
+        apply_stereo_side_prediction(mid, side, pred0_q13, pred1_q13, n);
+        n = n + 1;
+    }
+
+    pred0_q13 = pred_q13.ptr[0];
+    pred1_q13 = pred_q13.ptr[1];
+    while n < (frame_length as usize) {
+        apply_stereo_side_prediction(mid, side, pred0_q13, pred1_q13, n);
+        n = n + 1;
+    }
+    state.pred_prev_q13[0] = pred_q13.ptr[0];
+    state.pred_prev_q13[1] = pred_q13.ptr[1];
+
+    n = 0;
+    while n < (frame_length as usize) {
+        const mid_sample: i32 = mid.ptr[n + 1] as i32;
+        const side_sample: i32 = side.ptr[n + 1] as i32;
+        mid.ptr[n + 1] = sat16(mid_sample + side_sample);
+        side.ptr[n + 1] = sat16(mid_sample - side_sample);
+        n = n + 1;
+    }
+}

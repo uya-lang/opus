@@ -271,6 +271,41 @@ export fn silk_sign_icdf_value(index: usize) byte {
     return SILK_SIGN_ICDF[index];
 }
 
+export fn silk_stereo_pred_quant_q13(index: usize) i16 {
+    if index >= 16 {
+        return 0;
+    }
+    return SILK_STEREO_PRED_QUANT_Q13[index];
+}
+
+export fn silk_stereo_pred_joint_icdf_value(index: usize) byte {
+    if index >= 25 {
+        return 0;
+    }
+    return SILK_STEREO_PRED_JOINT_ICDF[index];
+}
+
+export fn silk_stereo_only_code_mid_icdf_value(index: usize) byte {
+    if index >= 2 {
+        return 0;
+    }
+    return SILK_STEREO_ONLY_CODE_MID_ICDF[index];
+}
+
+export fn silk_uniform3_icdf_value(index: usize) byte {
+    if index >= 3 {
+        return 0;
+    }
+    return SILK_UNIFORM3_ICDF[index];
+}
+
+export fn silk_uniform5_icdf_value(index: usize) byte {
+    if index >= 5 {
+        return 0;
+    }
+    return SILK_UNIFORM5_ICDF[index];
+}
+
 export fn silk_shell_code_table_value(table: i32, index: usize) byte {
     if index >= 152 {
         return 0;
