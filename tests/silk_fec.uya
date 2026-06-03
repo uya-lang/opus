@@ -522,7 +522,10 @@ test "silk delayed fec falls back to plc when LBRR is absent" {
     try assert(!result.used_fec, "absent LBRR must not report delayed FEC recovery");
     try assert(result.used_plc, "absent LBRR must use PLC fallback");
     try assert_eq_i32(result.decoded_samples as i32, 320);
+    try assert(!result.plan.can_recover, "absent LBRR must retain a non-recoverable plan");
     try assert(result.plan.needs_plc, "fallback result must retain a PLC plan");
+    try assert_eq_i32(result.plan.available_channels, 0);
+    try assert(!result.plan.channel_available[0], "mono fallback must not mark a missing LBRR channel available");
     try assert_eq_i32(out_q14[0], 3);
     try assert_eq_i32(out_q14[319], 960);
     try assert_eq_i32(state.loss_count, 1);

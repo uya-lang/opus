@@ -316,7 +316,7 @@
 - [x] 测试单包丢失。
 - [x] 测试连续丢包。
 - [x] 测试有 FEC 的上一帧恢复。
-- [ ] 测试无 FEC fallback 到 PLC。
+- [x] 测试无 FEC fallback 到 PLC。
 
 验收标准：
 
