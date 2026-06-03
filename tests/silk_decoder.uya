@@ -353,7 +353,7 @@ fn test_decoder_encode_pulse_blocks(enc: &EcEnc, signed_pulses: &[i16], frame_le
     try test_decoder_encode_pulse_signs(enc, signed_pulses, &encoded_totals[0:blocks], SILK_SIGNAL_TYPE_UNVOICED, quant_offset_type);
 }
 
-fn encode_simple_silk_unvoiced_payload(payload: &[byte], frame_length: i32, codebook: i32, lpc_order: i32) !usize {
+fn encode_simple_silk_unvoiced_frame_side_info(enc: &EcEnc, frame_length: i32, codebook: i32, lpc_order: i32, conditional_coding: bool) !void {
     if frame_length != 80 && frame_length != 120 && frame_length != 160 && frame_length != 240 && frame_length != 320 {
         try assert(false, "simple SILK payload helper only covers 10ms and 20ms frames");
     }
@@ -361,35 +361,35 @@ fn encode_simple_silk_unvoiced_payload(payload: &[byte], frame_length: i32, code
         try assert(false, "simple SILK payload helper needs a supported LPC order");
     }
     const nb_subframes: i32 = frame_length / 40;
-    var enc: EcEnc = EcEnc{};
-    ec_enc_init(&enc, payload);
-
-    ec_enc_bit_logp(&enc, 1, 1);
-    ec_enc_bit_logp(&enc, 0, 1);
 
     var type_icdf: [byte: 4] = [0: 4];
     try test_decoder_fill_type_offset_vad_icdf(&type_icdf[0:4]);
-    ec_enc_icdf(&enc, 1, &type_icdf[0:4], 8);
+    ec_enc_icdf(enc, 1, &type_icdf[0:4], 8);
 
-    var gain_icdf: [byte: 8] = [0: 8];
-    try test_decoder_fill_gain_icdf(&gain_icdf[0:8], 1);
-    ec_enc_icdf(&enc, 1, &gain_icdf[0:8], 8);
+    if !conditional_coding {
+        var gain_icdf: [byte: 8] = [0: 8];
+        try test_decoder_fill_gain_icdf(&gain_icdf[0:8], 1);
+        ec_enc_icdf(enc, 1, &gain_icdf[0:8], 8);
 
-    var uniform8_icdf: [byte: 8] = [0: 8];
-    try test_decoder_fill_uniform8_icdf(&uniform8_icdf[0:8]);
-    ec_enc_icdf(&enc, 5, &uniform8_icdf[0:8], 8);
+        var uniform8_icdf: [byte: 8] = [0: 8];
+        try test_decoder_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+        ec_enc_icdf(enc, 5, &uniform8_icdf[0:8], 8);
+    }
 
     var delta_gain_icdf: [byte: 41] = [0: 41];
     try test_decoder_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
-    var subframe: i32 = 1;
+    var subframe: i32 = 0;
+    if !conditional_coding {
+        subframe = 1;
+    }
     while subframe < nb_subframes {
-        ec_enc_icdf(&enc, 4, &delta_gain_icdf[0:41], 8);
+        ec_enc_icdf(enc, 4, &delta_gain_icdf[0:41], 8);
         subframe = subframe + 1;
     }
 
     var cb1_icdf: [byte: 32] = [0: 32];
     try test_decoder_fill_nlsf_cb1_icdf(&cb1_icdf[0:32], codebook, SILK_SIGNAL_TYPE_UNVOICED);
-    ec_enc_icdf(&enc, 0, &cb1_icdf[0:32], 8);
+    ec_enc_icdf(enc, 0, &cb1_icdf[0:32], 8);
 
     var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
     var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
@@ -397,18 +397,18 @@ fn encode_simple_silk_unvoiced_payload(payload: &[byte], frame_length: i32, code
 
     var order_index: usize = 0;
     while order_index < (lpc_order as usize) {
-        try test_decoder_encode_nlsf_residual(&enc, codebook, ec_ix[order_index], 0);
+        try test_decoder_encode_nlsf_residual(enc, codebook, ec_ix[order_index], 0);
         order_index = order_index + 1;
     }
     if nb_subframes == 4 {
         var interpolation_icdf: [byte: 5] = [0: 5];
         try test_decoder_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
-        ec_enc_icdf(&enc, 4, &interpolation_icdf[0:5], 8);
+        ec_enc_icdf(enc, 4, &interpolation_icdf[0:5], 8);
     }
 
     var seed_icdf: [byte: 4] = [0: 4];
     try test_decoder_fill_uniform4_icdf(&seed_icdf[0:4]);
-    ec_enc_icdf(&enc, 2, &seed_icdf[0:4], 8);
+    ec_enc_icdf(enc, 2, &seed_icdf[0:4], 8);
 
     var pulses: [i16: SILK_CONTROL_MAX_FRAME_SAMPLES] = [0: SILK_CONTROL_MAX_FRAME_SAMPLES];
     pulses[0] = -3;
@@ -428,11 +428,37 @@ fn encode_simple_silk_unvoiced_payload(payload: &[byte], frame_length: i32, code
     pulses[240] = 3;
     pulses[319] = -2;
     var encoded_totals: [i32: 20] = [0: 20];
-    try test_decoder_encode_pulse_blocks(&enc, &pulses[0:SILK_CONTROL_MAX_FRAME_SAMPLES], frame_length, 5, 1, &encoded_totals[0:20]);
+    try test_decoder_encode_pulse_blocks(enc, &pulses[0:SILK_CONTROL_MAX_FRAME_SAMPLES], frame_length, 5, 1, &encoded_totals[0:20]);
+}
+
+fn encode_simple_silk_unvoiced_packet_payload(payload: &[byte], frame_length: i32, frames_per_packet: i32, codebook: i32, lpc_order: i32) !usize {
+    if frames_per_packet < 1 || frames_per_packet > 3 {
+        try assert(false, "simple SILK payload helper only covers one to three packet frames");
+    }
+
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, payload);
+
+    var frame: i32 = 0;
+    while frame < frames_per_packet {
+        ec_enc_bit_logp(&enc, 1, 1);
+        frame = frame + 1;
+    }
+    ec_enc_bit_logp(&enc, 0, 1);
+
+    frame = 0;
+    while frame < frames_per_packet {
+        try encode_simple_silk_unvoiced_frame_side_info(&enc, frame_length, codebook, lpc_order, frame > 0);
+        frame = frame + 1;
+    }
 
     const used: usize = try ec_enc_done(&enc);
     try ec_enc_check(&enc);
     return used;
+}
+
+fn encode_simple_silk_unvoiced_payload(payload: &[byte], frame_length: i32, codebook: i32, lpc_order: i32) !usize {
+    return encode_simple_silk_unvoiced_packet_payload(payload, frame_length, 1, codebook, lpc_order);
 }
 
 fn encode_simple_nb_mb_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
@@ -441,6 +467,14 @@ fn encode_simple_nb_mb_unvoiced_payload(payload: &[byte], frame_length: i32) !us
 
 fn encode_simple_wb_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
     return encode_simple_silk_unvoiced_payload(payload, frame_length, SILK_NLSF_CODEBOOK_WB, 16);
+}
+
+fn encode_simple_nb_mb_40ms_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
+    return encode_simple_silk_unvoiced_packet_payload(payload, frame_length, 2, SILK_NLSF_CODEBOOK_NB_MB, 10);
+}
+
+fn encode_simple_wb_40ms_unvoiced_payload(payload: &[byte]) !usize {
+    return encode_simple_silk_unvoiced_packet_payload(payload, 320, 2, SILK_NLSF_CODEBOOK_WB, 16);
 }
 
 fn encode_simple_nb_10ms_unvoiced_payload(payload: &[byte]) !usize {
@@ -588,6 +622,77 @@ test "silk mono packet decoder supports wideband 20ms packets" {
     try assert(!state.first_frame_after_reset, "WB 20ms decode must advance SILK state");
     try assert(state.rng != 0, "WB 20ms decode must advance the SILK random seed");
     try assert(test_decoder_checksum_i32(&out_q14[0:320]) != 0, "WB 20ms decode must produce synthesized output");
+}
+
+test "silk mono packet decoder supports narrowband 40ms packets" {
+    var packet: [byte: 384] = [0: 384];
+    packet[0] = 16;
+    _ = try encode_simple_nb_mb_40ms_unvoiced_payload(&packet[1:383], 160);
+    const packet_len: usize = 384;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 320] = [0: 320];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:320]);
+
+    try assert_eq_i32(decoded as i32, 320);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 8);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 160);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "NB 40ms decode must advance SILK state");
+    try assert(state.rng != 0, "NB 40ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:160]) != 0, "NB 40ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[160:160]) != 0, "NB 40ms second frame must produce synthesized output");
+}
+
+test "silk mono packet decoder supports mediumband 40ms packets" {
+    var packet: [byte: 512] = [0: 512];
+    packet[0] = 48;
+    _ = try encode_simple_nb_mb_40ms_unvoiced_payload(&packet[1:511], 240);
+    const packet_len: usize = 512;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 480] = [0: 480];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:480]);
+
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 12);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 240);
+    try assert_eq_i32(state.subframe_length, 60);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "MB 40ms decode must advance SILK state");
+    try assert(state.rng != 0, "MB 40ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:240]) != 0, "MB 40ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[240:240]) != 0, "MB 40ms second frame must produce synthesized output");
+}
+
+test "silk mono packet decoder supports wideband 40ms packets" {
+    var packet: [byte: 768] = [0: 768];
+    packet[0] = 80;
+    _ = try encode_simple_wb_40ms_unvoiced_payload(&packet[1:767]);
+    const packet_len: usize = 768;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 640] = [0: 640];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:640]);
+
+    try assert_eq_i32(decoded as i32, 640);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 16);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 320);
+    try assert_eq_i32(state.subframe_length, 80);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 16);
+    try assert(!state.first_frame_after_reset, "WB 40ms decode must advance SILK state");
+    try assert(state.rng != 0, "WB 40ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:320]) != 0, "WB 40ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[320:320]) != 0, "WB 40ms second frame must produce synthesized output");
 }
 
 test "silk mono packet decoder rejects stereo packets and short output" {

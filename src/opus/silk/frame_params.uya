@@ -36,12 +36,22 @@ fn sample_rate_for_bandwidth(bandwidth: OpusBandwidth) !i32 {
     return error.SilkFrameParamsError;
 }
 
-fn frame_ms_from_duration_us(frame_duration_us: u32) !i32 {
+fn internal_frame_ms_from_duration_us(frame_duration_us: u32) !i32 {
     if frame_duration_us == 10000 {
         return 10;
     }
-    if frame_duration_us == 20000 {
+    if frame_duration_us == 20000 || frame_duration_us == 40000 {
         return 20;
+    }
+    return error.SilkFrameParamsError;
+}
+
+fn internal_frames_from_duration_us(frame_duration_us: u32) !i32 {
+    if frame_duration_us == 10000 || frame_duration_us == 20000 {
+        return 1;
+    }
+    if frame_duration_us == 40000 {
+        return 2;
     }
     return error.SilkFrameParamsError;
 }
@@ -55,7 +65,12 @@ export fn silk_frame_params_from_packet_info(info: &const PacketInfo, params: &S
     }
 
     const sample_rate_hz: i32 = try sample_rate_for_bandwidth(info.bandwidth);
-    const frame_ms: i32 = try frame_ms_from_duration_us(info.frame_duration_us);
+    const frame_ms: i32 = try internal_frame_ms_from_duration_us(info.frame_duration_us);
+    const frames_per_opus_frame: i32 = try internal_frames_from_duration_us(info.frame_duration_us);
+    const frames_per_packet: i32 = (info.frame_count as i32) * frames_per_opus_frame;
+    if frames_per_packet < 1 || frames_per_packet > 3 {
+        return error.SilkFrameParamsError;
+    }
     const fs_khz: i32 = sample_rate_hz / 1000;
     const nb_subframes: i32 = frame_ms / SILK_SUBFR_MS;
     const frame_length: i32 = fs_khz * frame_ms;
@@ -72,7 +87,7 @@ export fn silk_frame_params_from_packet_info(info: &const PacketInfo, params: &S
     params.subframe_length = subframe_length;
     params.nb_subframes = nb_subframes;
     params.lpc_order = lpc_order;
-    params.frames_per_packet = info.frame_count as i32;
+    params.frames_per_packet = frames_per_packet;
 }
 
 export fn silk_frame_params_apply(params: &const SilkFrameParams, state: &SilkDecoderState, control: &SilkDecoderControl) !void {
