@@ -30,6 +30,8 @@ use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+use src.opus.silk.tables.silk_ltp_scale_icdf_value;
+use src.opus.silk.tables.silk_ltp_scale_q14;
 use src.opus.silk.tables.silk_nlsf_ext_icdf_value;
 use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
 use src.opus.silk.tables.silk_pitch_contour_10_ms_icdf_value;
@@ -90,6 +92,8 @@ export struct SilkEntropyDecoder {
     pitch_contour_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
     ltp_periodicity_indices: [i32: SILK_ENTROPY_FLAG_CAPACITY],
     ltp_coefficients_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    ltp_scale_indices: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    ltp_scaling_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -320,6 +324,17 @@ fn fill_pitch_contour_icdf(out: &[byte], fs_khz: i32, nb_subframes: i32) !usize 
     return error.SilkEntropyDecodeError;
 }
 
+fn fill_ltp_scale_icdf(out: &[byte]) !void {
+    if out.len < 3 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 3 {
+        out.ptr[i] = silk_ltp_scale_icdf_value(i);
+        i = i + 1;
+    }
+}
+
 fn fill_nlsf_cb1_icdf(out: &[byte], codebook: i32, signal_type: i32) !void {
     if out.len < SILK_NLSF_CB1_ICDF_STRIDE || signal_type < 0 || signal_type > 1 {
         return error.SilkEntropyDecodeError;
@@ -493,6 +508,8 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_bool(&decoder.pitch_contour_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_i32(&decoder.ltp_periodicity_indices[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_bool(&decoder.ltp_coefficients_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.ltp_scale_indices[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.ltp_scaling_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -946,6 +963,49 @@ export fn silk_entropy_decode_ltp_coefficients(decoder: &SilkEntropyDecoder, con
 
     decoder.ltp_periodicity_indices[flag_index] = periodicity_index;
     decoder.ltp_coefficients_valid[flag_index] = true;
+    try silk_entropy_decoder_check(decoder);
+}
+
+export fn silk_entropy_decode_ltp_scaling(decoder: &SilkEntropyDecoder, control: &SilkDecoderControl, channel: i32, frame_index: i32, conditional_coding: bool) !void {
+    const flag_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    if channel < 0 || channel >= decoder.channels {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.type_offset_valid[flag_index] || decoder.signal_types[flag_index] != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.ltp_coefficients_valid[flag_index] {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.channels != decoder.channels || channel >= control.channels {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.nb_subframes != 2 && control.nb_subframes != 4 {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.fs_khz != 8 && control.fs_khz != 12 && control.fs_khz != 16 {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.frame_length <= 0 || control.subframe_length <= 0 {
+        return error.SilkEntropyDecodeError;
+    }
+
+    var scale_index: i32 = 0;
+    if !conditional_coding {
+        var scale_icdf: [byte: 3] = [0: 3];
+        try fill_ltp_scale_icdf(&scale_icdf[0:3]);
+        scale_index = try silk_entropy_decode_icdf(decoder, &scale_icdf[0:3], 8);
+        if scale_index < 0 || scale_index > 2 {
+            return error.SilkEntropyDecodeError;
+        }
+    }
+
+    control.ltp_scale_q14 = silk_ltp_scale_q14(scale_index);
+    decoder.ltp_scale_indices[flag_index] = scale_index;
+    decoder.ltp_scaling_valid[flag_index] = true;
     try silk_entropy_decoder_check(decoder);
 }
 

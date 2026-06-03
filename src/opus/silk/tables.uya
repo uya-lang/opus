@@ -345,6 +345,24 @@ export fn silk_lbrr_flags_3_icdf_value(index: usize) byte {
     return SILK_LBRR_FLAGS_3_ICDF[index];
 }
 
+export fn silk_ltp_scale_icdf_value(index: usize) byte {
+    if index >= 3 {
+        return 0;
+    }
+    return SILK_LTP_SCALE_ICDF[index];
+}
+
+export fn silk_ltp_scale_q14(index: i32) i16 {
+    if index < 0 {
+        return 0;
+    }
+    const table_index: usize = index as usize;
+    if table_index >= 3 {
+        return 0;
+    }
+    return SILK_LTP_SCALES_Q14[table_index];
+}
+
 export fn silk_pitch_lag_icdf_value(index: usize) byte {
     if index >= 32 {
         return 0;

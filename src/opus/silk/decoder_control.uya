@@ -33,6 +33,7 @@ export struct SilkDecoderControl {
     nlsf_q15: [i16: SILK_CONTROL_NLSF_LEN],
     pred_coef_q12: [i32: SILK_CONTROL_NLSF_LEN],
     ltp_coef_q14: [i16: SILK_CONTROL_LTP_LEN],
+    ltp_scale_q14: i16,
 }
 
 fn clear_i16(values: &[i16]) void {
@@ -75,6 +76,7 @@ export fn silk_decoder_control_reset(control: &SilkDecoderControl) void {
     clear_i16(&control.nlsf_q15[0:SILK_CONTROL_NLSF_LEN]);
     clear_i32(&control.pred_coef_q12[0:SILK_CONTROL_NLSF_LEN]);
     clear_i16(&control.ltp_coef_q14[0:SILK_CONTROL_LTP_LEN]);
+    control.ltp_scale_q14 = 0;
     control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
     control.quant_offset_type = 0;
     control.seed = 0;
