@@ -258,7 +258,7 @@
 - [x] 实现 `silk/stereo.uya`。
 - [x] 测试 shell coder vectors。
 - [x] 测试 NLSF stabilization。
-- [ ] 测试 LPC synthesis golden。
+- [x] 测试 LPC synthesis golden。
 - [ ] 测试 LTP synthesis golden。
 
 验收标准：

@@ -6,6 +6,24 @@ use src.opus.silk.lpc.silk_lpc_fit_q12;
 use src.opus.silk.lpc.silk_lpc_scale_q14_to_i16;
 use src.opus.silk.lpc.silk_lpc_synthesis_q14;
 
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
+fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
 test "silk lpc module exposes decoder order limit" {
     try assert_eq_i32(SILK_LPC_MAX_ORDER as i32, 16);
 }
@@ -62,13 +80,10 @@ test "silk lpc synthesis combines q14 excitation with short-term prediction" {
     var out_q14: [i32: 8] = [0: 8];
     try silk_lpc_synthesis_q14(&out_q14[0:8], &state_q14[0:10], &excitation_q14[0:8], &a_q12[0:10], 10, 8);
 
-    try assert_eq_i32(out_q14[0], 16080);
-    try assert_eq_i32(out_q14[1], -5920);
-    try assert_eq_i32(out_q14[3], 1328);
-    try assert_eq_i32(out_q14[4], 18784);
-    try assert_eq_i32(out_q14[7], 2880);
-    try assert_eq_i32(state_q14[2], 16080);
-    try assert_eq_i32(state_q14[9], 2880);
+    var expected_out_q14: [i32: 8] = [16080, -5920, 3120, 1328, 18784, -8592, 928, 2880];
+    var expected_state_q14: [i32: 10] = [0, 0, 16080, -5920, 3120, 1328, 18784, -8592, 928, 2880];
+    try assert_i32_slice_eq(&out_q14[0:8], &expected_out_q14[0:8]);
+    try assert_i32_slice_eq(&state_q14[0:10], &expected_state_q14[0:10]);
 }
 
 test "silk lpc synthesis consumes existing history and scales q14 output" {
@@ -80,11 +95,10 @@ test "silk lpc synthesis consumes existing history and scales q14 output" {
     try silk_lpc_synthesis_q14(&out_q14[0:4], &state_q14[0:10], &excitation_q14[0:4], &a_q12[0:10], 10, 4);
     try silk_lpc_scale_q14_to_i16(&out_pcm[0:4], &out_q14[0:4], 1024, 4);
 
-    try assert_eq_i32(out_q14[0], -2176);
-    try assert_eq_i32(out_q14[1], 864);
-    try assert_eq_i32(out_q14[3], 112);
-    try assert_eq_i32(state_q14[6], -2176);
-    try assert_eq_i32(state_q14[9], 112);
-    try assert_eq_i32(out_pcm[0] as i32, 0);
-    try assert_eq_i32(out_pcm[1] as i32, 0);
+    var expected_out_q14: [i32: 4] = [-2176, 864, -224, 112];
+    var expected_state_q14: [i32: 10] = [5000, -6000, 7000, -8000, 9000, -10000, -2176, 864, -224, 112];
+    var expected_pcm: [i16: 4] = [0, 0, 0, 0];
+    try assert_i32_slice_eq(&out_q14[0:4], &expected_out_q14[0:4]);
+    try assert_i32_slice_eq(&state_q14[0:10], &expected_state_q14[0:10]);
+    try assert_i16_slice_eq(&out_pcm[0:4], &expected_pcm[0:4]);
 }
