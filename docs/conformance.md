@@ -229,13 +229,19 @@ and 196 bytes. The fix makes Opus-compatible CELT spectral shape decode respect
 `coded_bands` and avoid independently decoding the right channel after the
 allocation switches to intensity stereo.
 
-The current first blocker is now the fifth packet of `testvector01.bit`: it is
-589 bytes with TOC `0xff` and count byte `0x83`, carrying three VBR frames of
-194, 196, and 195 bytes. A full-file decode of
-`rfc8251-testvector01-8000-mono` writes 4480 bytes for the first four packets
+The fifth packet of `testvector01.bit` now decodes through the CELT core tests
+and through `build/uopus-decode-vector 8000 1 0`. It is 589 bytes with TOC
+`0xff` and count byte `0x83`, carrying three VBR frames of 194, 196, and 195
+bytes. The fix decodes Opus dual-stereo bands in band-major order below the
+intensity threshold, matching the range symbol order used by the bitstream.
+
+The current first blocker is now the thirteenth packet of `testvector01.bit`:
+it is 603 bytes with TOC `0xff` and count byte `0x83`, carrying three VBR
+frames of 200, 200, and 199 bytes. A full-file decode of
+`rfc8251-testvector01-8000-mono` writes 9920 bytes for the first twelve packets
 and then fails during the next packet. The next RFC8251 step should continue
-from that fifth packet rather than from vector plumbing or public API channel
-dispatch.
+from that thirteenth packet rather than from vector plumbing or public API
+channel dispatch.
 
 ## Acceptance Commands
 

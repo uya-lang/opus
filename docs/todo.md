@@ -362,6 +362,8 @@
     - 根据 RFC8251 试运行结果继续修复 decoder 或 vector plumbing（拆分执行）。
       - [x] 定位并修复 RFC8251 `testvector01` 第四个 packet decode failure。
         备注：尊重 Opus allocation 的 `coded_bands` 并在 intensity stereo 后停止独立读取右声道 shape 后，第四个 packet 可通过 CELT core 测试；前四个 packet 连续流通过 `uopus-decode-vector 8000 1 0` 输出 4480 字节。当前 full `testvector01` 下一阻塞点已推进到第 5 个 packet。
+      - [x] 定位并修复 RFC8251 `testvector01` 第五个 packet decode failure。
+        备注：Opus dual-stereo allocation 在 intensity 阈值前改为按 band 交错读取左右声道 shape 后，第五个 packet 可通过 CELT core 测试；full `testvector01` 现在可输出前 12 个 packet 共 9920 字节，下一阻塞点已推进到第 13 个 packet。
       - [ ] 根据后续 RFC8251 试运行结果继续修复 decoder 或 vector plumbing。
     - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
