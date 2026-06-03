@@ -1,0 +1,166 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_init;
+use src.opus.hybrid.decoder.HybridDecodeResult;
+use src.opus.hybrid.decoder.HybridDecoderScratch;
+use src.opus.hybrid.decoder.hybrid_decode_i16;
+use src.opus.hybrid.delay.hybrid_delay_apply_highband_i16_to_q14;
+use src.opus.hybrid.highband.HybridHighbandDecodeResult;
+use src.opus.hybrid.highband.hybrid_highband_decode_i16;
+use src.opus.hybrid.lowband.hybrid_lowband_decode_mono_q14;
+use src.opus.hybrid.merge.hybrid_merge_i16;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+use src.opus.hybrid.state.HybridDecoderState;
+use src.opus.hybrid.state.hybrid_state_configure_from_packet_info;
+use src.opus.silk.state.SilkDecoderState;
+use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
+
+fn hybrid_decoder_packet_info(bandwidth: OpusBandwidth, channels: u8, duration_us: u32) PacketInfo {
+    var duration_samples_48k: i32 = 480;
+    if duration_us == 20000 {
+        duration_samples_48k = 960;
+    }
+    return PacketInfo{
+        mode: OpusMode.HYBRID,
+        bandwidth: bandwidth,
+        channels: channels,
+        frame_count: 1,
+        frame_duration_us: duration_us,
+        duration_samples_48k: duration_samples_48k,
+        payload_offset: 1,
+        payload_len: 0,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "hybrid decoder supports mono SWB 10ms frame pipeline" {
+    var frame: [byte: 320] = [0: 320];
+    const encoded_bytes: usize = try hybrid_test_encode_wb_lowband_payload(&frame[0:320], 160);
+    try assert(encoded_bytes > 0, "hybrid test frame must contain encoded SILK bits");
+    const frame_bytes: usize = 255;
+    var info: PacketInfo = hybrid_decoder_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:frame_bytes]);
+    var manual_silk_state: SilkDecoderState = SilkDecoderState{};
+    var lowband_q14: [i32: 160] = [0: 160];
+    _ = try hybrid_lowband_decode_mono_q14(&manual_silk_state, &split, &lowband_q14[0:160]);
+
+    var manual_celt_state: CeltDecoderState = CeltDecoderState{};
+    var manual_scratch: HybridDecoderScratch = HybridDecoderScratch{};
+    var highband_i16: [i16: 480] = [0: 480];
+    const highband_res: HybridHighbandDecodeResult = try hybrid_highband_decode_i16(
+        &manual_celt_state,
+        &split,
+        &highband_i16[0:480],
+        &manual_scratch.celt_scratch,
+    );
+
+    var manual_hybrid_state: HybridDecoderState = HybridDecoderState{};
+    try hybrid_state_configure_from_packet_info(&manual_hybrid_state, &info);
+    var highband_q14: [i32: 480] = [0: 480];
+    _ = try hybrid_delay_apply_highband_i16_to_q14(&manual_hybrid_state, &highband_i16[0:480], &highband_q14[0:480]);
+    var expected_pcm: [i16: 480] = [0: 480];
+    _ = try hybrid_merge_i16(&manual_hybrid_state, &lowband_q14[0:160], &highband_q14[0:480], &expected_pcm[0:480]);
+
+    var hybrid_state: HybridDecoderState = HybridDecoderState{};
+    var silk_state: SilkDecoderState = SilkDecoderState{};
+    var celt_state: CeltDecoderState = CeltDecoderState{};
+    var scratch: HybridDecoderScratch = HybridDecoderScratch{};
+    var actual_pcm: [i16: 480] = [0: 480];
+    const result: HybridDecodeResult = try hybrid_decode_i16(
+        &hybrid_state,
+        &silk_state,
+        &celt_state,
+        &info,
+        &frame[0:frame_bytes],
+        &actual_pcm[0:480],
+        &scratch,
+    );
+
+    try assert_eq_i32(result.decoded_samples_48k, 480);
+    try assert_eq_i32(result.channels, 1);
+    try assert_eq_i32(result.lowband_samples_16k, 160);
+    try assert_eq_i32(result.highband_samples_48k, 480);
+    try assert_eq_i32(result.celt_start_bit, highband_res.celt_start_bit);
+    try assert_eq_i32(result.celt_end_bit, highband_res.celt_end_bit);
+    try assert_i16_slice_eq(&actual_pcm[0:480], &expected_pcm[0:480]);
+    try assert_eq_i32(hybrid_state.frame_size_48k, 480);
+    try assert_eq_i32(hybrid_state.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(hybrid_state.celt_end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(celt_state.start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(celt_state.end_band, HYBRID_CELT_SWB_END_BAND);
+}
+
+test "hybrid decoder SWB 10ms path validates active layout and buffers" {
+    var frame: [byte: 320] = [0: 320];
+    _ = try hybrid_test_encode_wb_lowband_payload(&frame[0:320], 160);
+    const frame_bytes: usize = 255;
+    var info: PacketInfo = hybrid_decoder_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+
+    var hybrid_state: HybridDecoderState = HybridDecoderState{};
+    var silk_state: SilkDecoderState = SilkDecoderState{};
+    var celt_state: CeltDecoderState = CeltDecoderState{};
+    var scratch: HybridDecoderScratch = HybridDecoderScratch{};
+    var short_pcm: [i16: 479] = [0: 479];
+    const short_out: !HybridDecodeResult = hybrid_decode_i16(
+        &hybrid_state,
+        &silk_state,
+        &celt_state,
+        &info,
+        &frame[0:frame_bytes],
+        &short_pcm[0:479],
+        &scratch,
+    );
+    match short_out {
+        error.HybridDecoderError => {}
+        else => { try assert(false, "hybrid SWB 10ms decoder must reject short output"); }
+    }
+
+    var pcm: [i16: 480] = [0: 480];
+    info.bandwidth = OpusBandwidth.FULLBAND;
+    const fb_res: !HybridDecodeResult = hybrid_decode_i16(
+        &hybrid_state,
+        &silk_state,
+        &celt_state,
+        &info,
+        &frame[0:frame_bytes],
+        &pcm[0:480],
+        &scratch,
+    );
+    match fb_res {
+        error.HybridDecoderUnsupported => {}
+        else => { try assert(false, "SWB 10ms task must not silently accept FB frames"); }
+    }
+
+    info = hybrid_decoder_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 20000);
+    const twenty_ms_res: !HybridDecodeResult = hybrid_decode_i16(
+        &hybrid_state,
+        &silk_state,
+        &celt_state,
+        &info,
+        &frame[0:frame_bytes],
+        &pcm[0:480],
+        &scratch,
+    );
+    match twenty_ms_res {
+        error.HybridDecoderUnsupported => {}
+        else => { try assert(false, "SWB 10ms task must not silently accept 20ms frames"); }
+    }
+}

@@ -1,0 +1,141 @@
+use src.opus.celt.decode.CeltMonoDecodeScratch;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_init;
+use src.opus.hybrid.delay.hybrid_delay_apply_highband_i16_to_q14;
+use src.opus.hybrid.highband.HybridHighbandDecodeResult;
+use src.opus.hybrid.highband.hybrid_highband_decode_i16;
+use src.opus.hybrid.lowband.HybridLowbandDecodeResult;
+use src.opus.hybrid.lowband.hybrid_lowband_decode_mono_q14;
+use src.opus.hybrid.merge.HybridMergeResult;
+use src.opus.hybrid.merge.hybrid_merge_i16;
+use src.opus.hybrid.state.HYBRID_MAX_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
+use src.opus.hybrid.state.HybridDecoderState;
+use src.opus.hybrid.state.hybrid_state_configure_from_packet_info;
+use src.opus.silk.state.SilkDecoderState;
+
+export error HybridDecoderError;
+export error HybridDecoderUnsupported;
+
+const HYBRID_DECODER_MAX_PCM_SAMPLES: usize = HYBRID_MAX_FRAME_SAMPLES_48K * HYBRID_STATE_MAX_CHANNELS;
+const HYBRID_DECODER_MAX_LOWBAND_SAMPLES: usize = (HYBRID_MAX_FRAME_SAMPLES_48K / 3) * HYBRID_STATE_MAX_CHANNELS;
+
+export struct HybridDecoderScratch {
+    lowband_q14: [i32: HYBRID_DECODER_MAX_LOWBAND_SAMPLES],
+    highband_i16: [i16: HYBRID_DECODER_MAX_PCM_SAMPLES],
+    highband_q14: [i32: HYBRID_DECODER_MAX_PCM_SAMPLES],
+    celt_scratch: CeltMonoDecodeScratch,
+}
+
+export struct HybridDecodeResult {
+    decoded_samples_48k: i32,
+    channels: i32,
+    lowband_samples_16k: i32,
+    highband_samples_48k: i32,
+    celt_start_bit: i32,
+    celt_end_bit: i32,
+    remaining_bits: i32,
+}
+
+fn hybrid_decoder_supports_swb_10ms(info: &const PacketInfo) bool {
+    return info.mode == OpusMode.HYBRID
+        && info.bandwidth == OpusBandwidth.SUPERWIDEBAND
+        && info.channels == 1
+        && info.frame_count == 1
+        && info.frame_duration_us == 10000
+        && info.duration_samples_48k == 480;
+}
+
+fn hybrid_decoder_state_matches(state: &const HybridDecoderState, info: &const PacketInfo) bool {
+    return state.channels == (info.channels as i32)
+        && state.bandwidth == info.bandwidth
+        && state.frame_size_48k == (info.duration_samples_48k as i32)
+        && state.frame_ms == 10
+        && state.silk_frame_size == 160;
+}
+
+fn hybrid_decoder_ensure_state(state: &HybridDecoderState, info: &const PacketInfo) !void {
+    if hybrid_decoder_state_matches(state, info) {
+        return;
+    }
+    hybrid_state_configure_from_packet_info(state, info) catch {
+        return error.HybridDecoderError;
+    };
+}
+
+export fn hybrid_decode_i16(
+    hybrid_state: &HybridDecoderState,
+    silk_state: &SilkDecoderState,
+    celt_state: &CeltDecoderState,
+    info: &const PacketInfo,
+    frame: &[byte],
+    pcm_i16: &[i16],
+    scratch: &HybridDecoderScratch,
+) !HybridDecodeResult {
+    if !hybrid_decoder_supports_swb_10ms(info) {
+        return error.HybridDecoderUnsupported;
+    }
+    if frame.len == 0 || pcm_i16.len < (info.duration_samples_48k as usize) {
+        return error.HybridDecoderError;
+    }
+
+    try hybrid_decoder_ensure_state(hybrid_state, info);
+
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    hybrid_budget_init(&split, info, frame) catch {
+        return error.HybridDecoderError;
+    };
+
+    const lowband_samples: usize = hybrid_state.silk_frame_size as usize;
+    const frame_samples: usize = hybrid_state.frame_size_48k as usize;
+    const lowband: HybridLowbandDecodeResult = hybrid_lowband_decode_mono_q14(
+        silk_state,
+        &split,
+        &scratch.lowband_q14[0:lowband_samples],
+    ) catch {
+        return error.HybridDecoderError;
+    };
+
+    const highband: HybridHighbandDecodeResult = hybrid_highband_decode_i16(
+        celt_state,
+        &split,
+        &scratch.highband_i16[0:frame_samples],
+        &scratch.celt_scratch,
+    ) catch {
+        return error.HybridDecoderError;
+    };
+
+    const delayed: usize = hybrid_delay_apply_highband_i16_to_q14(
+        hybrid_state,
+        &scratch.highband_i16[0:frame_samples],
+        &scratch.highband_q14[0:frame_samples],
+    ) catch {
+        return error.HybridDecoderError;
+    };
+    if delayed != frame_samples {
+        return error.HybridDecoderError;
+    }
+
+    const merged: HybridMergeResult = hybrid_merge_i16(
+        hybrid_state,
+        &scratch.lowband_q14[0:lowband_samples],
+        &scratch.highband_q14[0:frame_samples],
+        &pcm_i16[0:frame_samples],
+    ) catch {
+        return error.HybridDecoderError;
+    };
+
+    return HybridDecodeResult{
+        decoded_samples_48k: merged.decoded_samples_48k,
+        channels: merged.channels,
+        lowband_samples_16k: lowband.decoded_samples_16k,
+        highband_samples_48k: highband.decoded_samples_48k,
+        celt_start_bit: highband.celt_start_bit,
+        celt_end_bit: highband.celt_end_bit,
+        remaining_bits: highband.remaining_bits,
+    };
+}

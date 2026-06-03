@@ -332,7 +332,7 @@
 - [x] 实现 CELT highband decode glue。
 - [x] 实现 delay compensation。
 - [x] 实现 high/low band merge。
-- [ ] 支持 Hybrid SWB 10ms。
+- [x] 支持 Hybrid SWB 10ms。
 - [ ] 支持 Hybrid SWB 20ms。
 - [ ] 支持 Hybrid FB 10ms。
 - [ ] 支持 Hybrid FB 20ms。

@@ -1,0 +1,397 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.entropy_decode.silk_entropy_pulse_block_count;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
+use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
+use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
+use src.opus.silk.shell_coder.silk_shell_encoder;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
+use src.opus.silk.tables.silk_lsb_icdf_value;
+use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
+use src.opus.silk.tables.silk_rate_levels_icdf_value;
+use src.opus.silk.tables.silk_sign_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
+
+fn hybrid_payload_fill_type_offset_vad_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "type offset helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_gain_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "gain helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(1, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        try assert(false, "delta gain helper needs 41 entries");
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "uniform8 helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "uniform4 helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_nlsf_cb1_icdf(out: &[byte]) !void {
+    if out.len < 32 {
+        try assert(false, "NLSF CB1 helper needs 32 entries");
+    }
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_nlsf_cb1_icdf(SILK_NLSF_CODEBOOK_WB, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_nlsf_cb2_icdf(out: &[byte], ec_ix: i16) !void {
+    if out.len < 9 || ec_ix < 0 {
+        try assert(false, "NLSF CB2 helper needs one 9-entry row");
+    }
+    const base: usize = ec_ix as usize;
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_nlsf_cb2_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_nlsf_interpolation_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        try assert(false, "NLSF interpolation helper needs 5 entries");
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_nlsf_interpolation_factor_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_rate_levels_icdf(out: &[byte]) !void {
+    if out.len < 9 {
+        try assert(false, "rate levels helper needs 9 entries");
+    }
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_rate_levels_icdf_value(SILK_SIGNAL_TYPE_UNVOICED, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_pulses_per_block_icdf(out: &[byte]) !void {
+    if out.len < 18 {
+        try assert(false, "pulses-per-block helper needs 18 entries");
+    }
+    var i: usize = 0;
+    while i < 18 {
+        out.ptr[i] = silk_pulses_per_block_icdf_value(5, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_fill_lsb_icdf(out: &[byte]) !void {
+    if out.len < 2 {
+        try assert(false, "LSB helper needs 2 entries");
+    }
+    var i: usize = 0;
+    while i < 2 {
+        out.ptr[i] = silk_lsb_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_abs_i16_to_i32(value: i16) i32 {
+    if value < 0 {
+        return -(value as i32);
+    }
+    return value as i32;
+}
+
+fn hybrid_payload_shifted_abs_sum(pulses: &[i16], offset: usize, shift: i32) !i32 {
+    if pulses.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH || shift < 0 {
+        try assert(false, "pulse helper needs a full shell block");
+    }
+    var sum: i32 = 0;
+    var i: usize = 0;
+    while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+        sum = sum + (hybrid_payload_abs_i16_to_i32(pulses.ptr[offset + i]) >> shift);
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn hybrid_payload_write_shifted_magnitudes(out: &[i16], input: &[i16], offset: usize, shift: i32) !void {
+    if out.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH || input.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH {
+        try assert(false, "shifted magnitude helper needs a full shell block");
+    }
+    var i: usize = 0;
+    while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+        out.ptr[offset + i] = (hybrid_payload_abs_i16_to_i32(input.ptr[offset + i]) >> shift) as i16;
+        i = i + 1;
+    }
+}
+
+fn hybrid_payload_sign_icdf_value(signal_type: i32, quant_offset_type: i32, pulse_count: i32) byte {
+    var capped: i32 = pulse_count & 31;
+    if capped > 6 {
+        capped = 6;
+    }
+    return silk_sign_icdf_value((7 * (quant_offset_type + 2 * signal_type) + capped) as usize);
+}
+
+fn hybrid_payload_encode_pulse_signs(enc: &EcEnc, pulses: &[i16], block_totals: &[i32], signal_type: i32, quant_offset_type: i32) !void {
+    if pulses.len < block_totals.len * SILK_SHELL_CODEC_FRAME_LENGTH {
+        try assert(false, "pulse sign helper needs one 16-sample block per total");
+    }
+    var block: usize = 0;
+    while block < block_totals.len {
+        const total: i32 = block_totals.ptr[block];
+        if total > 0 {
+            var icdf: [byte: 2] = [hybrid_payload_sign_icdf_value(signal_type, quant_offset_type, total), 0];
+            var i: usize = 0;
+            while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+                const value: i16 = pulses.ptr[block * SILK_SHELL_CODEC_FRAME_LENGTH + i];
+                if value != 0 {
+                    var symbol: i32 = 1;
+                    if value < 0 {
+                        symbol = 0;
+                    }
+                    ec_enc_icdf(enc, symbol, &icdf[0:2], 8);
+                }
+                i = i + 1;
+            }
+        }
+        block = block + 1;
+    }
+}
+
+fn hybrid_payload_encode_pulse_blocks(enc: &EcEnc, signed_pulses: &[i16], frame_length: i32, rate_level: i32, quant_offset_type: i32, encoded_totals: &[i32]) !void {
+    const blocks_i32: i32 = try silk_entropy_pulse_block_count(frame_length);
+    const blocks: usize = blocks_i32 as usize;
+    const rounded_len: usize = blocks * SILK_SHELL_CODEC_FRAME_LENGTH;
+    if signed_pulses.len < rounded_len || encoded_totals.len < blocks {
+        try assert(false, "pulse block helper needs rounded frame pulse storage");
+    }
+
+    var rate_icdf: [byte: 9] = [0: 9];
+    try hybrid_payload_fill_rate_levels_icdf(&rate_icdf[0:9]);
+    ec_enc_icdf(enc, rate_level, &rate_icdf[0:9], 8);
+
+    var shell_totals: [i32: 20] = [0: 20];
+    var lshifts: [i32: 20] = [0: 20];
+    var magnitudes: [i16: SILK_CONTROL_MAX_FRAME_SAMPLES] = [0: SILK_CONTROL_MAX_FRAME_SAMPLES];
+
+    var pulse_icdf: [byte: 18] = [0: 18];
+    try hybrid_payload_fill_pulses_per_block_icdf(&pulse_icdf[0:18]);
+    var escape_icdf: [byte: 18] = [0: 18];
+    var escape_i: usize = 0;
+    while escape_i < 18 {
+        escape_icdf[escape_i] = silk_pulses_per_block_icdf_value(9, escape_i);
+        escape_i = escape_i + 1;
+    }
+
+    var block: usize = 0;
+    while block < blocks {
+        const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+        var shift: i32 = 0;
+        var shifted_sum_value: i32 = try hybrid_payload_shifted_abs_sum(signed_pulses, offset, shift);
+        while shifted_sum_value > SILK_SHELL_MAX_PULSES {
+            shift = shift + 1;
+            if shift > 10 {
+                try assert(false, "test pulse magnitudes require too many LSB shifts");
+            }
+            shifted_sum_value = try hybrid_payload_shifted_abs_sum(signed_pulses, offset, shift);
+        }
+
+        shell_totals[block] = shifted_sum_value;
+        lshifts[block] = shift;
+        encoded_totals.ptr[block] = shifted_sum_value;
+        if shift > 0 {
+            encoded_totals.ptr[block] = shifted_sum_value | (shift << 5);
+            ec_enc_icdf(enc, SILK_SHELL_MAX_PULSES + 1, &pulse_icdf[0:18], 8);
+
+            var repeat_shift: i32 = 1;
+            while repeat_shift < shift {
+                ec_enc_icdf(enc, SILK_SHELL_MAX_PULSES + 1, &escape_icdf[0:18], 8);
+                repeat_shift = repeat_shift + 1;
+            }
+
+            if shift == 10 {
+                ec_enc_icdf(enc, shifted_sum_value, &escape_icdf[1:17], 8);
+            } else {
+                ec_enc_icdf(enc, shifted_sum_value, &escape_icdf[0:18], 8);
+            }
+        } else {
+            ec_enc_icdf(enc, shifted_sum_value, &pulse_icdf[0:18], 8);
+        }
+
+        try hybrid_payload_write_shifted_magnitudes(&magnitudes[0:SILK_CONTROL_MAX_FRAME_SAMPLES], signed_pulses, offset, shift);
+        block = block + 1;
+    }
+
+    block = 0;
+    while block < blocks {
+        if shell_totals[block] > 0 {
+            const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+            const total: i32 = try silk_shell_encoder(enc, &magnitudes[offset:SILK_SHELL_CODEC_FRAME_LENGTH]);
+            try assert_eq_i32(total, shell_totals[block]);
+        }
+        block = block + 1;
+    }
+
+    var lsb_icdf: [byte: 2] = [0: 2];
+    try hybrid_payload_fill_lsb_icdf(&lsb_icdf[0:2]);
+    block = 0;
+    while block < blocks {
+        const shift: i32 = lshifts[block];
+        if shift > 0 {
+            const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+            var i: usize = 0;
+            while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+                const abs_value: i32 = hybrid_payload_abs_i16_to_i32(signed_pulses.ptr[offset + i]);
+                var bit_index: i32 = shift - 1;
+                while bit_index >= 0 {
+                    ec_enc_icdf(enc, (abs_value >> bit_index) & 1, &lsb_icdf[0:2], 8);
+                    bit_index = bit_index - 1;
+                }
+                i = i + 1;
+            }
+        }
+        block = block + 1;
+    }
+
+    try hybrid_payload_encode_pulse_signs(enc, signed_pulses, &encoded_totals[0:blocks], SILK_SIGNAL_TYPE_UNVOICED, quant_offset_type);
+}
+
+export fn hybrid_test_encode_wb_lowband_payload(payload: &[byte], frame_length: i32) !usize {
+    if frame_length != 160 && frame_length != 320 {
+        try assert(false, "hybrid lowband vector only covers WB 10ms and 20ms");
+    }
+
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, payload);
+    ec_enc_bit_logp(&enc, 1, 1);
+    ec_enc_bit_logp(&enc, 0, 1);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    try hybrid_payload_fill_type_offset_vad_icdf(&type_icdf[0:4]);
+    ec_enc_icdf(&enc, 1, &type_icdf[0:4], 8);
+
+    var gain_icdf: [byte: 8] = [0: 8];
+    try hybrid_payload_fill_gain_icdf(&gain_icdf[0:8]);
+    ec_enc_icdf(&enc, 1, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try hybrid_payload_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    ec_enc_icdf(&enc, 5, &uniform8_icdf[0:8], 8);
+
+    var delta_gain_icdf: [byte: 41] = [0: 41];
+    try hybrid_payload_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
+    var subframe: i32 = 1;
+    const nb_subframes: i32 = frame_length / 40;
+    while subframe < nb_subframes {
+        ec_enc_icdf(&enc, 4, &delta_gain_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
+    var cb1_icdf: [byte: 32] = [0: 32];
+    try hybrid_payload_fill_nlsf_cb1_icdf(&cb1_icdf[0:32]);
+    ec_enc_icdf(&enc, 0, &cb1_icdf[0:32], 8);
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], SILK_NLSF_CODEBOOK_WB, 0);
+
+    var order_index: usize = 0;
+    while order_index < 16 {
+        var cb2_icdf: [byte: 9] = [0: 9];
+        try hybrid_payload_fill_nlsf_cb2_icdf(&cb2_icdf[0:9], ec_ix[order_index]);
+        ec_enc_icdf(&enc, SILK_NLSF_QUANT_MAX_AMPLITUDE, &cb2_icdf[0:9], 8);
+        order_index = order_index + 1;
+    }
+
+    if nb_subframes == 4 {
+        var interpolation_icdf: [byte: 5] = [0: 5];
+        try hybrid_payload_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
+        ec_enc_icdf(&enc, 4, &interpolation_icdf[0:5], 8);
+    }
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try hybrid_payload_fill_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(&enc, 2, &seed_icdf[0:4], 8);
+
+    var pulses: [i16: SILK_CONTROL_MAX_FRAME_SAMPLES] = [0: SILK_CONTROL_MAX_FRAME_SAMPLES];
+    pulses[0] = -3;
+    pulses[2] = 1;
+    pulses[5] = -2;
+    pulses[8] = 4;
+    pulses[11] = -1;
+    pulses[15] = 5;
+    pulses[32] = 2;
+    pulses[33] = -1;
+    pulses[47] = 4;
+    pulses[80] = 3;
+    pulses[96] = -2;
+    pulses[127] = 1;
+    pulses[151] = -4;
+    pulses[191] = 2;
+    pulses[240] = 3;
+    pulses[319] = -2;
+    var encoded_totals: [i32: 20] = [0: 20];
+    try hybrid_payload_encode_pulse_blocks(&enc, &pulses[0:SILK_CONTROL_MAX_FRAME_SAMPLES], frame_length, 5, 1, &encoded_totals[0:20]);
+
+    const used: usize = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+    return used;
+}
