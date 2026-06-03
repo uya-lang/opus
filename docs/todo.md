@@ -283,7 +283,7 @@
 - [x] 解码 pulse blocks。
 - [x] 实现 excitation reconstruction。
 - [x] 集成 LTP/LPC synthesis。
-- [ ] 实现 mono decode。
+- [x] 实现 mono decode。
 - [ ] 实现 stereo mid/side reconstruction。
 - [ ] 支持 NB。
 - [ ] 支持 MB。

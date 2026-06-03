@@ -1,0 +1,191 @@
+use src.opus.core.types.OpusMode;
+use src.opus.packet.toc.PacketParseResult;
+use src.opus.packet.toc.parse_packet;
+use src.opus.silk.decoder_control.SILK_CONTROL_NLSF_LEN;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
+use src.opus.silk.decoder_control.silk_decoder_control_lpc_index;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_gains;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_ltp_coefficients;
+use src.opus.silk.entropy_decode.silk_entropy_decode_ltp_scaling;
+use src.opus.silk.entropy_decode.silk_entropy_decode_nlsf_indices;
+use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_contour;
+use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_lag;
+use src.opus.silk.entropy_decode.silk_entropy_decode_pulse_blocks;
+use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
+use src.opus.silk.entropy_decode.silk_entropy_decode_random_seed;
+use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
+use src.opus.silk.frame_params.SilkFrameParams;
+use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
+use src.opus.silk.nlsf.silk_nlsf2a_q12;
+use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+use src.opus.silk.synthesis.silk_synthesis_decode_frame_q14;
+
+export error SilkDecoderError;
+
+fn silk_decoder_state_matches_params(state: &const SilkDecoderState, params: &const SilkFrameParams) bool {
+    return state.channels == params.channels
+        && state.sample_rate_hz == params.sample_rate_hz
+        && state.fs_khz == params.fs_khz
+        && state.frame_ms == params.frame_ms
+        && state.frame_length == params.frame_length
+        && state.subframe_length == params.subframe_length
+        && state.nb_subframes == params.nb_subframes
+        && state.lpc_order == params.lpc_order;
+}
+
+fn silk_decoder_configure_state(state: &SilkDecoderState, params: &const SilkFrameParams) !void {
+    if params.channels != 1 || params.frames_per_packet != 1 {
+        return error.SilkDecoderError;
+    }
+    if silk_decoder_state_matches_params(state, params) {
+        return;
+    }
+    silk_state_init(state, params.channels, params.sample_rate_hz, params.frame_ms) catch {
+        return error.SilkDecoderError;
+    };
+}
+
+fn silk_decoder_fill_lpc_prediction_q12(control: &SilkDecoderControl, channel: i32) !void {
+    if channel < 0 || channel >= control.channels || control.lpc_order <= 0 || control.lpc_order > (SILK_MAX_LPC_ORDER as i32) {
+        return error.SilkDecoderError;
+    }
+
+    var nlsf_q15: [i16: SILK_MAX_LPC_ORDER] = [0: SILK_MAX_LPC_ORDER];
+    var coeff_q12: [i16: SILK_MAX_LPC_ORDER] = [0: SILK_MAX_LPC_ORDER];
+    var order_index: i32 = 0;
+    while order_index < control.lpc_order {
+        const index: usize = silk_decoder_control_lpc_index(control, channel, order_index) catch {
+            return error.SilkDecoderError;
+        };
+        if index >= SILK_CONTROL_NLSF_LEN {
+            return error.SilkDecoderError;
+        }
+        nlsf_q15[order_index as usize] = control.nlsf_q15[index];
+        order_index = order_index + 1;
+    }
+
+    silk_nlsf2a_q12(&coeff_q12[0:(control.lpc_order as usize)], &nlsf_q15[0:(control.lpc_order as usize)], control.lpc_order) catch {
+        return error.SilkDecoderError;
+    };
+
+    order_index = 0;
+    while order_index < control.lpc_order {
+        const index: usize = silk_decoder_control_lpc_index(control, channel, order_index) catch {
+            return error.SilkDecoderError;
+        };
+        if index >= SILK_CONTROL_NLSF_LEN {
+            return error.SilkDecoderError;
+        }
+        control.pred_coef_q12[index] = coeff_q12[order_index as usize] as i32;
+        order_index = order_index + 1;
+    }
+}
+
+fn silk_decoder_decode_side_info(decoder: &SilkEntropyDecoder, control: &SilkDecoderControl, channel: i32, frame_index: i32, conditional_coding: bool) !void {
+    const signal_type: i32 = silk_entropy_decode_signal_type(decoder, channel, frame_index) catch {
+        return error.SilkDecoderError;
+    };
+    _ = silk_entropy_decode_quantization_offset(decoder, channel, frame_index) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decode_gains(decoder, control, channel, frame_index, conditional_coding) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decode_nlsf_indices(decoder, control, channel, frame_index) catch {
+        return error.SilkDecoderError;
+    };
+    silk_decoder_fill_lpc_prediction_q12(control, channel) catch {
+        return error.SilkDecoderError;
+    };
+
+    if signal_type == SILK_SIGNAL_TYPE_VOICED {
+        silk_entropy_decode_pitch_lag(decoder, control, channel, frame_index, conditional_coding) catch {
+            return error.SilkDecoderError;
+        };
+        silk_entropy_decode_pitch_contour(decoder, control, channel, frame_index) catch {
+            return error.SilkDecoderError;
+        };
+        silk_entropy_decode_ltp_coefficients(decoder, control, channel, frame_index) catch {
+            return error.SilkDecoderError;
+        };
+        silk_entropy_decode_ltp_scaling(decoder, control, channel, frame_index, conditional_coding) catch {
+            return error.SilkDecoderError;
+        };
+    }
+
+    silk_entropy_decode_random_seed(decoder, control, channel, frame_index) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decode_pulse_blocks(decoder, control, channel, frame_index) catch {
+        return error.SilkDecoderError;
+    };
+}
+
+export fn silk_decode_mono_payload_q14(state: &SilkDecoderState, payload: &[byte], out_q14: &[i32]) !usize {
+    if state.channels != 1 || state.frame_length <= 0 || payload.len == 0 {
+        return error.SilkDecoderError;
+    }
+    const frame_len: usize = state.frame_length as usize;
+    if out_q14.len < frame_len {
+        return error.SilkDecoderError;
+    }
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    silk_decoder_control_init_from_state(&control, state) catch {
+        return error.SilkDecoderError;
+    };
+
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    silk_entropy_decoder_init(&entropy, payload, 1, 1) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decode_vad_flags(&entropy) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decode_lbrr_flags(&entropy) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decoder_set_frame(&entropy, 0) catch {
+        return error.SilkDecoderError;
+    };
+
+    silk_decoder_decode_side_info(&entropy, &control, 0, 0, false) catch {
+        return error.SilkDecoderError;
+    };
+    _ = silk_synthesis_decode_frame_q14(state, &control, 0, &out_q14[0:frame_len]) catch {
+        return error.SilkDecoderError;
+    };
+    silk_entropy_decoder_check(&entropy) catch {
+        return error.SilkDecoderError;
+    };
+    return frame_len;
+}
+
+export fn silk_decode_mono_packet_q14(state: &SilkDecoderState, packet: &[byte], out_q14: &[i32]) !usize {
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.SilkDecoderError;
+    };
+    if parsed.info.mode != OpusMode.SILK || parsed.info.channels != 1 || parsed.info.frame_count != 1 {
+        return error.SilkDecoderError;
+    }
+
+    var params: SilkFrameParams = SilkFrameParams{};
+    silk_frame_params_from_packet_info(&parsed.info, &params) catch {
+        return error.SilkDecoderError;
+    };
+    try silk_decoder_configure_state(state, &params);
+
+    const payload: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
+    return silk_decode_mono_payload_q14(state, payload, out_q14);
+}
