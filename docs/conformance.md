@@ -132,8 +132,7 @@ make test
 After decoder corpus tooling exists, the release conformance gate becomes:
 
 ```sh
-make test
-tools/diff_decode.sh tests/vectors
+make conformance
 ```
 
 The release gate is not satisfied until all required corpus failures are either

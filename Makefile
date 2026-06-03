@@ -21,7 +21,7 @@ SILK_TEST_SRCS := tests/silk_state.uya tests/silk_decoder_control.uya tests/silk
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 
-.PHONY: all bench check clean debug-cwrs debug-mdct require-uya smoke test test-silk
+.PHONY: all bench check clean conformance debug-cwrs debug-mdct require-uya smoke test test-silk
 
 all: smoke
 
@@ -56,6 +56,10 @@ test: check
 		$(UYA) test "$$test_src" --project-root .; \
 	done
 	@python3 tools/check_tables.py
+
+conformance:
+	@$(MAKE) test
+	@tools/diff_decode.sh tests/vectors
 
 test-silk: require-uya
 	@for test_src in $(SILK_TEST_SRCS); do \
