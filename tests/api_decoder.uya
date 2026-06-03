@@ -17,6 +17,21 @@ use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
 use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
 use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
 
+fn fill_celt_stereo_3x20ms_packet(packet: &[byte]) void {
+    packet.ptr[0] = (255 as! byte).value;
+    packet.ptr[1] = (131 as! byte).value;
+    packet.ptr[2] = (252 as! byte).value;
+    packet.ptr[3] = (97 as! byte).value;
+    packet.ptr[4] = (252 as! byte).value;
+    packet.ptr[5] = (97 as! byte).value;
+
+    var i: usize = 6;
+    while i < packet.len {
+        packet.ptr[i] = (((i * 17 + 3) % 251) as! byte).value;
+        i = i + 1;
+    }
+}
+
 test "decoder init validates config and initializes 48k state" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
@@ -269,7 +284,7 @@ test "decoder api decodes silk-only through native-rate output resampler" {
     try assert(pcm[0] != 0 || pcm[1] != 0 || pcm[159] != 0, "SILK-only decode must synthesize output samples");
 }
 
-test "decoder api validates mono and stereo output channel layout" {
+test "decoder api maps mono and stereo packet channels to configured output" {
     var stereo_decoder: OpusDecoder = OpusDecoder{};
     const stereo_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
     try decoder_init(&stereo_decoder, &stereo_config);
@@ -293,11 +308,9 @@ test "decoder api validates mono and stereo output channel layout" {
     try decoder_init(&mono_decoder, &mono_config);
 
     var mono_pcm: [i16: 120] = [0: 120];
-    const stereo_to_mono: !i32 = decoder_decode_i16(&mono_decoder, &stereo_packet[0:65], &mono_pcm[0:120], 120, false);
-    match stereo_to_mono {
-        error.DecoderApiError => {}
-        else => { try assert(false, "stereo packet must not decode into a mono-configured decoder"); }
-    }
+    const stereo_to_mono: i32 = try decoder_decode_i16(&mono_decoder, &stereo_packet[0:65], &mono_pcm[0:120], 120, false);
+    try assert_eq_i32(stereo_to_mono, 120);
+    try assert_eq_i32(mono_decoder.history.celt.channels, 2);
 
     var mono_packet: [byte: 65] = [0: 65];
     mono_packet[0] = (128 as! byte).value;
@@ -307,11 +320,41 @@ test "decoder api validates mono and stereo output channel layout" {
         i = i + 1;
     }
 
-    const mono_to_stereo: !i32 = decoder_decode_i16(&stereo_decoder, &mono_packet[0:65], &stereo_pcm[0:240], 120, false);
-    match mono_to_stereo {
-        error.DecoderApiError => {}
-        else => { try assert(false, "mono packet must not decode into a stereo-configured decoder"); }
-    }
+    const mono_to_stereo: i32 = try decoder_decode_i16(&stereo_decoder, &mono_packet[0:65], &stereo_pcm[0:240], 120, false);
+    try assert_eq_i32(mono_to_stereo, 120);
+    try assert_eq_i32(stereo_decoder.history.celt.channels, 1);
+}
+
+test "decoder api decodes CELT multi-frame packet and maps output channels" {
+    var packet: [byte: 1926] = [0: 1926];
+    fill_celt_stereo_3x20ms_packet(&packet[0:1926]);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:1926], &info);
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 3);
+    try assert_eq_i32(info.duration_samples_48k as i32, 2880);
+
+    var mono_decoder: OpusDecoder = OpusDecoder{};
+    const mono_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&mono_decoder, &mono_config);
+
+    var mono_pcm: [i16: 480] = [777: 480];
+    const mono_decoded: i32 = try decoder_decode_i16(&mono_decoder, &packet[0:1926], &mono_pcm[0:480], 480, false);
+    try assert_eq_i32(mono_decoded, 480);
+    try assert_eq_i32(mono_decoder.history.celt.channels, 2);
+    try assert(mono_decoder.history.active_mode == OpusMode.CELT, "multi-frame CELT packet must keep CELT mode active");
+    try assert(mono_pcm[479] != 777, "downmixed/resampled CELT decode must write the requested mono PCM");
+
+    var stereo_decoder: OpusDecoder = OpusDecoder{};
+    const stereo_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try decoder_init(&stereo_decoder, &stereo_config);
+
+    var stereo_pcm: [i16: 5760] = [555: 5760];
+    const stereo_decoded: i32 = try decoder_decode_i16(&stereo_decoder, &packet[0:1926], &stereo_pcm[0:5760], 2880, false);
+    try assert_eq_i32(stereo_decoded, 2880);
+    try assert_eq_i32(stereo_decoder.history.celt.channels, 2);
+    try assert(stereo_pcm[5759] != 555, "multi-frame CELT decode must write the requested stereo PCM");
 }
 
 test "decoder api validates CELT output buffer size" {

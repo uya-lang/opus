@@ -10,6 +10,7 @@ use src.opus.celt.state.celt_state_init;
 use src.opus.core.errors.validate_decoder_config;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.MAX_PACKET_SAMPLES_48K;
 use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.qformat.Q8_ONE;
 use src.opus.core.saturate.sat16;
@@ -40,7 +41,7 @@ use src.opus.silk.state.silk_state_reset;
 export error DecoderApiError;
 export error DecoderApiUnsupported;
 
-const DECODER_OUTPUT_SCRATCH_SAMPLES: usize = 5760;
+const DECODER_OUTPUT_SCRATCH_SAMPLES: usize = 5760 * 2;
 const DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3;
 const DECODER_GAIN_Q8_MAX: i32 = 65536;
 
@@ -197,7 +198,7 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     };
 
     decoder.config = *config;
-    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, config.sample_rate_hz, config.channels as u32, MAX_FRAME_SAMPLES_48K as usize) catch {
+    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, config.sample_rate_hz, config.channels as u32, MAX_PACKET_SAMPLES_48K as usize) catch {
         return error.DecoderApiError;
     };
     decoder.silk_resampler = resampler_config_init(SILK_MAX_INTERNAL_RATE_HZ as u32, config.sample_rate_hz, config.channels as u32, DECODER_SILK_PACKET_SCRATCH_SAMPLES) catch {
@@ -232,7 +233,7 @@ export fn decoder_reset(decoder: &OpusDecoder) !void {
         return error.DecoderApiError;
     };
 
-    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, decoder.config.sample_rate_hz, decoder.config.channels as u32, MAX_FRAME_SAMPLES_48K as usize) catch {
+    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, decoder.config.sample_rate_hz, decoder.config.channels as u32, MAX_PACKET_SAMPLES_48K as usize) catch {
         return error.DecoderApiError;
     };
     decoder.silk_resampler = resampler_config_init(SILK_MAX_INTERNAL_RATE_HZ as u32, decoder.config.sample_rate_hz, decoder.config.channels as u32, DECODER_SILK_PACKET_SCRATCH_SAMPLES) catch {
@@ -310,70 +311,198 @@ fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_siz
     return output_frame_size;
 }
 
-fn decoder_decode_celt_parsed_48k_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16]) !i32 {
-    if parsed.info.mode != OpusMode.CELT || parsed.info.frame_count != 1 {
-        return error.DecoderApiUnsupported;
-    }
-    if parsed.info.channels != decoder.config.channels {
+fn decoder_ensure_celt_packet_channels(decoder: &OpusDecoder, channels: i32) !void {
+    if channels < 1 || channels > 2 {
         return error.DecoderApiError;
     }
+    if decoder.history.celt.channels == channels {
+        return;
+    }
+    celt_state_init(&decoder.history.celt, channels) catch {
+        return error.DecoderApiError;
+    };
+}
 
+fn decoder_celt_frame_size_48k(parsed: &const PacketParseResult) !i32 {
+    if parsed.info.mode != OpusMode.CELT || parsed.info.frame_count < 1 {
+        return error.DecoderApiUnsupported;
+    }
+    const frame_size: i32 = parsed.toc.config.frame_samples_48k as i32;
+    validate_frame_size_48k(frame_size as u32) catch {
+        return error.DecoderApiError;
+    };
+    if parsed.info.duration_samples_48k != parsed.toc.config.frame_samples_48k * (parsed.info.frame_count as u32) {
+        return error.DecoderApiError;
+    }
+    return frame_size;
+}
+
+fn decoder_map_channels_i16(input: &[i16], input_channels: i32, output: &[i16], output_channels: i32, frame_size: i32) !void {
+    if frame_size < 0 {
+        return error.DecoderApiError;
+    }
+    const samples: usize = frame_size as usize;
+    if input_channels == output_channels {
+        const required: usize = samples * (output_channels as usize);
+        if input.len < required || output.len < required {
+            return error.DecoderApiError;
+        }
+        var i: usize = 0;
+        while i < required {
+            output.ptr[i] = input.ptr[i];
+            i = i + 1;
+        }
+        return;
+    }
+
+    if input_channels == 2 && output_channels == 1 {
+        if input.len < samples * 2 || output.len < samples {
+            return error.DecoderApiError;
+        }
+        var sample: usize = 0;
+        while sample < samples {
+            const left: i32 = input.ptr[sample * 2] as i32;
+            const right: i32 = input.ptr[(sample * 2) + 1] as i32;
+            output.ptr[sample] = sat16((left + right) >> 1);
+            sample = sample + 1;
+        }
+        return;
+    }
+
+    if input_channels == 1 && output_channels == 2 {
+        if input.len < samples || output.len < samples * 2 {
+            return error.DecoderApiError;
+        }
+        var remaining: usize = samples;
+        while remaining > 0 {
+            remaining = remaining - 1;
+            const value: i16 = input.ptr[remaining];
+            output.ptr[remaining * 2] = value;
+            output.ptr[(remaining * 2) + 1] = value;
+        }
+        return;
+    }
+
+    return error.DecoderApiError;
+}
+
+fn decoder_decode_celt_parsed_48k_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16]) !i32 {
+    const frame_size_48k: i32 = try decoder_celt_frame_size_48k(parsed);
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
-    _ = try decoder_validate_frame_request(decoder, pcm, decoded_frame_size);
+    const packet_channels: i32 = parsed.info.channels as i32;
+    try decoder_ensure_celt_packet_channels(decoder, packet_channels);
+
+    const required: usize = (decoded_frame_size as usize) * (packet_channels as usize);
+    if required > pcm.len {
+        return error.DecoderApiError;
+    }
 
     const end_band: i32 = celt_mode_end_band_for_bandwidth(&decoder.history.celt.mode, parsed.info.bandwidth) catch {
         return error.DecoderApiError;
     };
-    celt_state_configure_frame(&decoder.history.celt, decoded_frame_size, 0, end_band) catch {
-        return error.DecoderApiError;
-    };
 
-    const frame: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
-    const sample_count: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
-    var decoded: usize = 0;
-    if decoder.config.channels == 1 {
-        decoded = celt_decode_mono_i16(&decoder.history.celt, frame, &pcm[0:sample_count], &decoder.scratch.celt_decode) catch {
+    var frame_index: usize = 0;
+    var decoded_total: usize = 0;
+    while frame_index < parsed.info.frame_count as usize {
+        celt_state_configure_frame(&decoder.history.celt, frame_size_48k, 0, end_band) catch {
             return error.DecoderApiError;
         };
-    } else {
-        decoded = celt_decode_stereo_i16(&decoder.history.celt, frame, &pcm[0:sample_count], &decoder.scratch.celt_decode) catch {
+        const frame: &[byte] = &packet[parsed.frames[frame_index].offset:parsed.frames[frame_index].len];
+        const sample_offset: usize = decoded_total * (packet_channels as usize);
+        const sample_count: usize = (frame_size_48k as usize) * (packet_channels as usize);
+        var decoded: usize = 0;
+        if packet_channels == 1 {
+            decoded = celt_decode_mono_i16(
+                &decoder.history.celt,
+                frame,
+                &pcm[sample_offset:sample_count],
+                &decoder.scratch.celt_decode,
+            ) catch {
+                return error.DecoderApiError;
+            };
+        } else {
+            decoded = celt_decode_stereo_i16(
+                &decoder.history.celt,
+                frame,
+                &pcm[sample_offset:sample_count],
+                &decoder.scratch.celt_decode,
+            ) catch {
+                return error.DecoderApiError;
+            };
+        }
+        if decoded != frame_size_48k as usize {
             return error.DecoderApiError;
-        };
+        }
+        decoded_total = decoded_total + decoded;
+        frame_index = frame_index + 1;
     }
 
     if decoder.history.active_mode == OpusMode.HYBRID {
         decoder_clear_hybrid_transition_state(decoder);
     }
     decoder.history.active_mode = OpusMode.CELT;
-    decoder.history.last_frame_size_48k = decoded as i32;
-    return decoded as i32;
+    decoder.history.last_frame_size_48k = decoded_total as i32;
+    return decoded_total as i32;
 }
 
 fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
-    _ = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
+    const output_frame_size: i32 = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
+    const packet_channels: i32 = parsed.info.channels as i32;
+    const output_channels: i32 = decoder.config.channels as i32;
     if resampler_is_identity(&decoder.resampler) {
-        const decoded_48k: i32 = try decoder_decode_celt_parsed_48k_i16(decoder, packet, parsed, pcm);
+        if packet_channels == output_channels {
+            const decoded_48k: i32 = try decoder_decode_celt_parsed_48k_i16(decoder, packet, parsed, pcm);
+            try decoder_apply_output_gain_q8(decoder, pcm, decoded_48k);
+            return decoded_48k;
+        }
+
+        const internal_required: usize = (decoded_frame_size as usize) * (packet_channels as usize);
+        const decoded_48k: i32 = try decoder_decode_celt_parsed_48k_i16(
+            decoder,
+            packet,
+            parsed,
+            &decoder.scratch.output_i16[0:internal_required],
+        );
+        const output_required: usize = (output_frame_size as usize) * (output_channels as usize);
+        try decoder_map_channels_i16(
+            &decoder.scratch.output_i16[0:internal_required],
+            packet_channels,
+            &pcm[0:output_required],
+            output_channels,
+            decoded_48k,
+        );
         try decoder_apply_output_gain_q8(decoder, pcm, decoded_48k);
         return decoded_48k;
     }
 
-    const input_required: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
+    const input_required: usize = (decoded_frame_size as usize) * (packet_channels as usize);
     const decoded: i32 = try decoder_decode_celt_parsed_48k_i16(
         decoder,
         packet,
         parsed,
         &decoder.scratch.output_i16[0:input_required],
     );
-    const output_frame_size: i32 = try decoder_resample_output_i16(
+    var mapped_required: usize = input_required;
+    if packet_channels != output_channels {
+        mapped_required = (decoded as usize) * (output_channels as usize);
+        try decoder_map_channels_i16(
+            &decoder.scratch.output_i16[0:input_required],
+            packet_channels,
+            &decoder.scratch.output_i16[0:mapped_required],
+            output_channels,
+            decoded,
+        );
+    }
+    const resampled_frame_size: i32 = try decoder_resample_output_i16(
         decoder,
         decoded,
-        &decoder.scratch.output_i16[0:input_required],
+        &decoder.scratch.output_i16[0:mapped_required],
         pcm,
         frame_size,
     );
-    try decoder_apply_output_gain_q8(decoder, pcm, output_frame_size);
-    return output_frame_size;
+    try decoder_apply_output_gain_q8(decoder, pcm, resampled_frame_size);
+    return resampled_frame_size;
 }
 
 fn decoder_supports_hybrid_packet_info(info: &const PacketInfo) bool {

@@ -284,22 +284,37 @@ export fn parse_packet(packet: &[byte], result: &PacketParseResult) !void {
 
     if is_vbr {
         var i: usize = 0;
-        var data_cursor: usize = cursor3;
-        var bytes_remaining: usize = data_len;
         while i + 1 < frame_count as usize {
-            const frame_len: usize = try read_vbr_length(packet, &data_cursor, payload_end);
-            if frame_len > payload_end - data_cursor {
-                return error.TruncatedPacket;
-            }
+            const frame_len: usize = try read_vbr_length(packet, &cursor3, payload_end);
             try check_frame_len(frame_len);
-            result.frames[i] = FrameSpan{ offset: data_cursor, len: frame_len };
-            data_cursor = data_cursor + frame_len;
-            bytes_remaining = payload_end - data_cursor;
+            result.frames[i] = FrameSpan{ offset: 0, len: frame_len };
             i = i + 1;
         }
+
+        var explicit_bytes: usize = 0;
+        i = 0;
+        while i + 1 < frame_count as usize {
+            explicit_bytes = explicit_bytes + result.frames[i].len;
+            i = i + 1;
+        }
+
+        const frame_data_start: usize = cursor3;
+        const bytes_available: usize = payload_end - frame_data_start;
+        if explicit_bytes > bytes_available {
+            return error.TruncatedPacket;
+        }
+        const bytes_remaining: usize = bytes_available - explicit_bytes;
         try check_frame_len(bytes_remaining);
-        result.frames[i] = FrameSpan{ offset: data_cursor, len: bytes_remaining };
-        set_common_info(result, &toc, frame_count, cursor3, data_len, has_padding);
+        result.frames[i] = FrameSpan{ offset: 0, len: bytes_remaining };
+
+        var data_cursor: usize = frame_data_start;
+        var j: usize = 0;
+        while j < frame_count as usize {
+            result.frames[j].offset = data_cursor;
+            data_cursor = data_cursor + result.frames[j].len;
+            j = j + 1;
+        }
+        set_common_info(result, &toc, frame_count, frame_data_start, bytes_available, has_padding);
         return;
     }
 

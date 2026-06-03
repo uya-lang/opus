@@ -203,12 +203,18 @@ error: actual decode failed for rfc8251-testvector01-8000-mono: exit 1: uopus-de
 
 `tests/vectors/rfc8251/testvector01.bit` validates as an opus_demo stream with
 2147 packets. Its first packet is 731 bytes with TOC `0xff` and count byte
-`0x83`, which is a CELT fullband stereo code-3 packet with three VBR frames.
-The current public decoder CELT path accepts only single-frame CELT packets and
-requires the packet channel count to match the configured output channel count.
-The next RFC8251 step should therefore start by supporting multi-frame CELT
-packets and the official mono/stereo output cases before enabling manifest
-cases permanently.
+`0x83`, which is a CELT fullband stereo code-3 packet with three VBR frames of
+346, 189, and 191 bytes. The packet parser now places code-3 VBR frame spans
+after the complete length table, and the public decoder CELT path can decode
+multi-frame packets while mapping encoded mono/stereo packets to the configured
+mono/stereo output channel count.
+
+The current first blocker is inside the CELT core for this real RFC8251 frame:
+synthetic multi-frame CELT packets decode through the public API, but
+`rfc8251-testvector01-8000-mono` still fails during actual PCM generation with
+`uopus-decode-vector: decode failed`. The next RFC8251 step should continue
+from the first frame of `testvector01.bit` rather than from vector plumbing or
+public API channel dispatch.
 
 ## Acceptance Commands
 

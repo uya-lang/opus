@@ -10,7 +10,7 @@ use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.celt.state.celt_state_init;
-use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.MAX_PACKET_SAMPLES_48K;
 use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.qformat.Q8_ONE;
 use src.opus.core.types.OpusDecoderConfig;
@@ -89,7 +89,7 @@ fn init_decoder_storage(sample_rate_hz: u32, channels: u8) !void {
         SAMPLE_RATE_48K,
         sample_rate_hz,
         channels as u32,
-        MAX_FRAME_SAMPLES_48K as usize,
+        MAX_PACKET_SAMPLES_48K as usize,
     ) catch {
         return error.DecodeVectorError;
     };
