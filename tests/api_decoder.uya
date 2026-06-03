@@ -4,10 +4,12 @@ use src.opus.api.decoder.DecoderApiError;
 use src.opus.api.decoder.DecoderApiUnsupported;
 use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
+use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.api.decoder.decoder_init;
 use src.opus.celt.state.CELT_DECODE_MEM;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
 use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
 use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
 use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
@@ -37,6 +39,24 @@ test "decoder init validates config and initializes 48k state" {
     match unsupported_rate_result {
         error.DecoderApiUnsupported => {}
         else => { try assert(false, "decoder init must reject non-48k output until resampling is implemented"); }
+    }
+}
+
+test "decoder api packet info exposes parser metadata" {
+    const packet: [byte: 3] = [252, 1, 2];
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:3], &info);
+
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+
+    var empty_packet: [byte: 1] = [0];
+    const empty_info: !void = decoder_get_packet_info(&empty_packet[0:0], &info);
+    match empty_info {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder api packet info must map parser errors to API errors"); }
     }
 }
 

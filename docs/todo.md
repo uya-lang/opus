@@ -348,7 +348,7 @@
 
 - [x] 实现 `api/decoder.uya`。
 - [x] 实现 `decoder_init`。
-- [ ] 实现 `decoder_get_packet_info`。
+- [x] 实现 `decoder_get_packet_info`。
 - [ ] 实现 `decoder_decode_i16`。
 - [ ] 实现 output sample rate 转换。
 - [ ] 实现 48 kHz output fast path。

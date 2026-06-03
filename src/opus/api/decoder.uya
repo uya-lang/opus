@@ -76,6 +76,14 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     decoder.last_frame_size_48k = decoder.celt.frame_size;
 }
 
+export fn decoder_get_packet_info(packet: &[byte], info: &PacketInfo) !void {
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.DecoderApiError;
+    };
+    *info = parsed.info;
+}
+
 fn decoder_clear_hybrid_transition_state(decoder: &OpusDecoder) void {
     hybrid_state_reset(&decoder.hybrid);
     silk_state_reset(&decoder.hybrid_silk);
