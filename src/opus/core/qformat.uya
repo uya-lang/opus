@@ -8,17 +8,17 @@ export const Q12_ONE: i32 = 4096;
 export const Q14_ONE: i32 = 16384;
 export const Q15_ONE: i32 = 32768;
 export const Q16_ONE: i32 = 65536;
-const I32_MIN_I64: i64 = -2147483647L - 1L;
-const I32_MAX_I64: i64 = 2147483647L;
+const QFORMAT_I32_MIN_I64: i64 = -2147483647L - 1L;
+const QFORMAT_I32_MAX_I64: i64 = 2147483647L;
 const I64_MIN: i64 = -9223372036854775807L - 1L;
 const I64_MAX: i64 = 9223372036854775807L;
 
 fn clamp_i64_to_i32(value: i64) i32 {
-    if value > I32_MAX_I64 {
-        return I32_MAX_I64 as i32;
+    if value > QFORMAT_I32_MAX_I64 {
+        return QFORMAT_I32_MAX_I64 as i32;
     }
-    if value < I32_MIN_I64 {
-        return I32_MIN_I64 as i32;
+    if value < QFORMAT_I32_MIN_I64 {
+        return QFORMAT_I32_MIN_I64 as i32;
     }
     return value as i32;
 }
@@ -127,7 +127,7 @@ export fn round_shift_i64_to_i32(value: i64, shift: u32) i32 {
     }
     const half: i64 = 1L << ((shift - 1) as i32);
     if value > I64_MAX - half {
-        return I32_MAX_I64 as i32;
+        return QFORMAT_I32_MAX_I64 as i32;
     }
     return clamp_i64_to_i32((value + half) >> (shift as i32));
 }

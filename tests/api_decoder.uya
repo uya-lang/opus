@@ -1,0 +1,69 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.api.decoder.DecoderApiError;
+use src.opus.api.decoder.OpusDecoder;
+use src.opus.api.decoder.decoder_decode_i16;
+use src.opus.api.decoder.decoder_init;
+use src.opus.celt.state.CELT_DECODE_MEM;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusMode;
+
+test "decoder api empty packet invokes celt plc" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+    const tail: usize = CELT_DECODE_MEM - 120;
+    decoder.celt.decode_mem[tail] = 5000;
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 120] = [0: 120];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:120], 120, false);
+
+    try assert_eq_i32(decoded, 120);
+    try assert_eq_i32(pcm[0] as i32, 5000);
+    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert(decoder.active_mode == OpusMode.CELT, "empty-packet PLC must keep CELT mode active");
+}
+
+test "decoder api uses celt frequency history on packet loss after a decoded packet" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 65] = [0: 65];
+    packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    var rng: u32 = 0x31415926;
+    while i < 65 {
+        rng = rng * 1664525 + 1013904223;
+        packet[i] = ((rng >> 24) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 120] = [0: 120];
+    const normal_decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:120], 120, false);
+    try assert_eq_i32(normal_decoded, 120);
+    try assert(decoder.celt.freq_history_ready, "normal decode must prepare frequency PLC history");
+
+    var empty_packet: [byte: 1] = [0];
+    var lost_pcm: [i16: 120] = [0: 120];
+    const lost_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &lost_pcm[0:120], 120, false);
+
+    try assert_eq_i32(lost_decoded, 120);
+    try assert(decoder.celt_plc_scratch.used_frequency_history, "empty packet after CELT decode must use frequency-domain PLC");
+    try assert_eq_i32(decoder.celt.loss_count, 1);
+}
+
+test "decoder api empty packet validates pcm bounds" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 120] = [0: 120];
+    const short_output: !i32 = decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:119], 120, false);
+    match short_output {
+        error.DecoderApiError => {}
+        else => { try assert(false, "empty packet PLC must reject short PCM output"); }
+    }
+}

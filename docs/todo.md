@@ -311,7 +311,7 @@
 - [x] 实现 delayed FEC decode。
 - [x] 实现 `celt/plc.uya`。
 - [x] 实现 CELT frequency-domain PLC 初版。
-- [ ] 实现 decoder API 中的 empty packet PLC。
+- [x] 实现 decoder API 中的 empty packet PLC。
 - [ ] 实现 `decode_fec` 参数语义。
 - [ ] 测试单包丢失。
 - [ ] 测试连续丢包。
