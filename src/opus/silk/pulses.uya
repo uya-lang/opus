@@ -1,0 +1,88 @@
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_pulse_index;
+use src.opus.silk.tables.silk_quantization_offset_q10;
+
+export error SilkPulsesError;
+
+export const SILK_PULSES_MAX_FRAME_SAMPLES: usize = SILK_CONTROL_MAX_FRAME_SAMPLES;
+export const SILK_PULSES_QUANT_LEVEL_ADJUST_Q10: i32 = 80;
+
+const SILK_RAND_MULTIPLIER: i64 = 196314165L;
+const SILK_RAND_INCREMENT: i64 = 907633515L;
+const SILK_U32_MODULUS: i64 = 4294967296L;
+const SILK_I32_SIGN_BIT: i64 = 2147483648L;
+
+fn wrap_i32(value: i64) i32 {
+    var remainder: i64 = value % SILK_U32_MODULUS;
+    if remainder < 0L {
+        remainder = remainder + SILK_U32_MODULUS;
+    }
+    if remainder >= SILK_I32_SIGN_BIT {
+        remainder = remainder - SILK_U32_MODULUS;
+    }
+    return remainder as i32;
+}
+
+fn silk_pulses_rand(seed: i32) i32 {
+    return wrap_i32((seed as i64) * SILK_RAND_MULTIPLIER + SILK_RAND_INCREMENT);
+}
+
+fn validate_signal(signal_type: i32, quant_offset_type: i32) !void {
+    if signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkPulsesError;
+    }
+    if quant_offset_type < 0 || quant_offset_type > 1 {
+        return error.SilkPulsesError;
+    }
+}
+
+fn reconstruct_sample_q14(pulse: i16, offset_q10: i32, rand_seed: i32) i32 {
+    var excitation_q14: i32 = (pulse as i32) << 14;
+    if excitation_q14 > 0 {
+        excitation_q14 = excitation_q14 - (SILK_PULSES_QUANT_LEVEL_ADJUST_Q10 << 4);
+    } else if excitation_q14 < 0 {
+        excitation_q14 = excitation_q14 + (SILK_PULSES_QUANT_LEVEL_ADJUST_Q10 << 4);
+    }
+    excitation_q14 = excitation_q14 + (offset_q10 << 4);
+    if rand_seed < 0 {
+        excitation_q14 = -excitation_q14;
+    }
+    return excitation_q14;
+}
+
+export fn silk_pulses_reconstruct_excitation_q14(control: &const SilkDecoderControl, channel: i32, excitation_q14: &[i32]) !i32 {
+    try validate_signal(control.signal_type, control.quant_offset_type);
+    if channel < 0 || channel >= control.channels {
+        return error.SilkPulsesError;
+    }
+    if control.frame_length <= 0 || control.frame_length > (SILK_PULSES_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkPulsesError;
+    }
+    const frame_len: usize = control.frame_length as usize;
+    if excitation_q14.len < frame_len {
+        return error.SilkPulsesError;
+    }
+
+    const pulse_offset: usize = silk_decoder_control_pulse_index(control, channel, 0) catch {
+        return error.SilkPulsesError;
+    };
+    const offset_q10: i32 = silk_quantization_offset_q10(control.signal_type, control.quant_offset_type) as i32;
+    if offset_q10 == 0 {
+        return error.SilkPulsesError;
+    }
+
+    var rand_seed: i32 = control.seed;
+    var i: usize = 0;
+    while i < frame_len {
+        const pulse: i16 = control.pulses[pulse_offset + i];
+        rand_seed = silk_pulses_rand(rand_seed);
+        excitation_q14.ptr[i] = reconstruct_sample_q14(pulse, offset_q10, rand_seed);
+        rand_seed = wrap_i32((rand_seed as i64) + (pulse as i64));
+        i = i + 1;
+    }
+
+    return rand_seed;
+}

@@ -1,0 +1,139 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
+use src.opus.silk.pulses.SILK_PULSES_QUANT_LEVEL_ADJUST_Q10;
+use src.opus.silk.pulses.silk_pulses_reconstruct_excitation_q14;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+use src.opus.silk.tables.silk_quantization_offset_q10;
+
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
+fn init_test_control(control: &SilkDecoderControl, channels: i32, frame_length: i32) !void {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, channels, 8000, 10);
+    try silk_decoder_control_init_from_state(control, &state);
+    control.frame_length = frame_length;
+    control.subframe_length = frame_length;
+    control.nb_subframes = 1;
+}
+
+test "silk pulses expose excitation reconstruction constants and offsets" {
+    try assert_eq_i32(SILK_PULSES_QUANT_LEVEL_ADJUST_Q10, 80);
+    try assert_eq_i32(silk_quantization_offset_q10(SILK_SIGNAL_TYPE_UNVOICED, 0) as i32, 100);
+    try assert_eq_i32(silk_quantization_offset_q10(SILK_SIGNAL_TYPE_UNVOICED, 1) as i32, 240);
+    try assert_eq_i32(silk_quantization_offset_q10(SILK_SIGNAL_TYPE_VOICED, 0) as i32, 32);
+    try assert_eq_i32(silk_quantization_offset_q10(SILK_SIGNAL_TYPE_VOICED, 1) as i32, 100);
+}
+
+test "silk pulses reconstruct unvoiced q14 excitation with dithered signs" {
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_test_control(&control, 1, 4);
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 0;
+    control.seed = 0;
+    control.pulses[0] = 1;
+    control.pulses[1] = -1;
+    control.pulses[2] = 0;
+    control.pulses[3] = 2;
+
+    var excitation_q14: [i32: 4] = [0: 4];
+    const final_seed: i32 = try silk_pulses_reconstruct_excitation_q14(&control, 0, &excitation_q14[0:4]);
+
+    var expected_q14: [i32: 4] = [16704, 13504, -1600, 33088];
+    try assert_i32_slice_eq(&excitation_q14[0:4], &expected_q14[0:4]);
+    try assert_eq_i32(final_seed, 1591146794);
+}
+
+test "silk pulses apply voiced and high quantization offsets" {
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_test_control(&control, 1, 1);
+    control.seed = 0;
+    control.pulses[0] = 1;
+
+    var excitation_q14: [i32: 1] = [0: 1];
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 1;
+    _ = try silk_pulses_reconstruct_excitation_q14(&control, 0, &excitation_q14[0:1]);
+    try assert_eq_i32(excitation_q14[0], 18944);
+
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+    control.quant_offset_type = 0;
+    _ = try silk_pulses_reconstruct_excitation_q14(&control, 0, &excitation_q14[0:1]);
+    try assert_eq_i32(excitation_q14[0], 15616);
+
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+    control.quant_offset_type = 1;
+    _ = try silk_pulses_reconstruct_excitation_q14(&control, 0, &excitation_q14[0:1]);
+    try assert_eq_i32(excitation_q14[0], 16704);
+}
+
+test "silk pulses read channel-local pulse indices" {
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_test_control(&control, 2, 3);
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+    control.quant_offset_type = 0;
+    control.seed = 2;
+    control.pulses[0] = 9;
+    control.pulses[1] = 9;
+    control.pulses[2] = 9;
+    const right: usize = SILK_CONTROL_MAX_FRAME_SAMPLES;
+    control.pulses[right] = 1;
+    control.pulses[right + 1] = 0;
+    control.pulses[right + 2] = -1;
+
+    var excitation_q14: [i32: 3] = [0: 3];
+    const final_seed: i32 = try silk_pulses_reconstruct_excitation_q14(&control, 1, &excitation_q14[0:3]);
+
+    var expected_q14: [i32: 3] = [15616, 512, 14592];
+    try assert_i32_slice_eq(&excitation_q14[0:3], &expected_q14[0:3]);
+    try assert_eq_i32(final_seed, -504704073);
+}
+
+test "silk pulses reject invalid reconstruction inputs" {
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_test_control(&control, 1, 2);
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 0;
+
+    var one_sample_q14: [i32: 1] = [0: 1];
+    const short_output: !i32 = silk_pulses_reconstruct_excitation_q14(&control, 0, &one_sample_q14[0:1]);
+    match short_output {
+        error.SilkPulsesError => {}
+        else => { try assert(false, "excitation reconstruction must reject short output buffers"); }
+    }
+
+    var two_samples_q14: [i32: 2] = [0: 2];
+    control.signal_type = 2;
+    const bad_signal: !i32 = silk_pulses_reconstruct_excitation_q14(&control, 0, &two_samples_q14[0:2]);
+    match bad_signal {
+        error.SilkPulsesError => {}
+        else => { try assert(false, "excitation reconstruction must reject unknown signal types"); }
+    }
+
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 2;
+    const bad_offset: !i32 = silk_pulses_reconstruct_excitation_q14(&control, 0, &two_samples_q14[0:2]);
+    match bad_offset {
+        error.SilkPulsesError => {}
+        else => { try assert(false, "excitation reconstruction must reject bad quantization offsets"); }
+    }
+
+    control.quant_offset_type = 0;
+    const bad_channel: !i32 = silk_pulses_reconstruct_excitation_q14(&control, 1, &two_samples_q14[0:2]);
+    match bad_channel {
+        error.SilkPulsesError => {}
+        else => { try assert(false, "excitation reconstruction must reject inactive channels"); }
+    }
+}

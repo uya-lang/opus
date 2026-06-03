@@ -387,6 +387,13 @@ export fn silk_rate_levels_icdf_value(signal_type: i32, index: usize) byte {
     return SILK_RATE_LEVELS_ICDF[(signal_type as usize) * 9 + index];
 }
 
+export fn silk_quantization_offset_q10(signal_type: i32, quant_offset_type: i32) i16 {
+    if signal_type < 0 || signal_type > 1 || quant_offset_type < 0 || quant_offset_type > 1 {
+        return 0;
+    }
+    return SILK_QUANTIZATION_OFFSETS_Q10[(signal_type as usize) * 2 + (quant_offset_type as usize)];
+}
+
 export fn silk_stereo_pred_quant_q13(index: usize) i16 {
     if index >= 16 {
         return 0;

@@ -35,6 +35,7 @@ use src.opus.silk.tables.silk_pitch_delta_icdf_value;
 use src.opus.silk.tables.silk_pitch_lag_icdf_value;
 use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
 use src.opus.silk.tables.silk_pulses_per_block_table_hash;
+use src.opus.silk.tables.silk_quantization_offset_q10;
 use src.opus.silk.tables.silk_rate_levels_icdf_value;
 use src.opus.silk.tables.silk_rate_levels_table_hash;
 use src.opus.silk.tables.silk_shell_table_hash;
@@ -76,6 +77,10 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(silk_table_len(15) as i32, 7);
     try assert_eq_i32(silk_table_len(16) as i32, 4);
     try assert_eq_i32(silk_table_len(17) as i32, 2);
+    try assert_eq_i32(silk_quantization_offset_q10(0, 0) as i32, 100);
+    try assert_eq_i32(silk_quantization_offset_q10(0, 1) as i32, 240);
+    try assert_eq_i32(silk_quantization_offset_q10(1, 0) as i32, 32);
+    try assert_eq_i32(silk_quantization_offset_q10(1, 1) as i32, 100);
     try assert_eq_i32(silk_table_len(18) as i32, 24);
     try assert_eq_i32(silk_table_len(19) as i32, 41);
     try assert_eq_i32(silk_table_len(20) as i32, 5);
