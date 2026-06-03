@@ -27,7 +27,7 @@ use src.opus.silk.state.silk_state_lpc_index;
 
 export error SilkSynthesisError;
 
-export const SILK_SYNTHESIS_HISTORY_WRITE_INDEX: usize = SILK_MAX_PITCH_LAG + SILK_MAX_LPC_ORDER;
+export const SILK_SYNTHESIS_HISTORY_WRITE_INDEX: usize = 304;
 
 fn validate_layout(state: &const SilkDecoderState, control: &const SilkDecoderControl, channel: i32, input_len: usize, output_len: usize) !void {
     if channel < 0 || channel >= state.channels || channel >= control.channels {

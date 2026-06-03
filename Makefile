@@ -10,6 +10,8 @@ MDCT_SCALAR_BENCH_SRC := bench/mdct_scalar.uya
 MDCT_SCALAR_BENCH_BIN := $(BUILD_DIR)/mdct-scalar-bench
 CELT_DECODE_FB_20MS_BENCH_SRC := bench/celt_decode_fb_20ms.uya
 CELT_DECODE_FB_20MS_BENCH_BIN := $(BUILD_DIR)/celt-decode-fb-20ms-bench
+SILK_DECODE_WB_20MS_BENCH_SRC := bench/silk_decode_wb_20ms.uya
+SILK_DECODE_WB_20MS_BENCH_BIN := $(BUILD_DIR)/silk-decode-wb-20ms-bench
 CWRS_DEBUG_SRC := tools/debug_cwrs.uya
 CWRS_DEBUG_BIN := $(BUILD_DIR)/debug-cwrs
 MDCT_DEBUG_SRC := tools/debug_mdct.uya
@@ -69,6 +71,8 @@ bench: require-uya
 	@$(MDCT_SCALAR_BENCH_BIN)
 	@$(UYA) build $(CELT_DECODE_FB_20MS_BENCH_SRC) --project-root . -o $(CELT_DECODE_FB_20MS_BENCH_BIN)
 	@$(CELT_DECODE_FB_20MS_BENCH_BIN)
+	@$(UYA) build $(SILK_DECODE_WB_20MS_BENCH_SRC) --project-root . -o $(SILK_DECODE_WB_20MS_BENCH_BIN)
+	@$(SILK_DECODE_WB_20MS_BENCH_BIN)
 
 debug-cwrs: require-uya
 	@mkdir -p $(BUILD_DIR)

@@ -74,15 +74,15 @@ export fn silk_pulses_reconstruct_excitation_q14(control: &const SilkDecoderCont
         return error.SilkPulsesError;
     }
 
-    var rand_seed: i32 = control.seed;
+    var silk_rand_seed: i32 = control.seed;
     var i: usize = 0;
     while i < frame_len {
         const pulse: i16 = control.pulses[pulse_offset + i];
-        rand_seed = silk_pulses_rand(rand_seed);
-        excitation_q14.ptr[i] = reconstruct_sample_q14(pulse, offset_q10, rand_seed);
-        rand_seed = wrap_i32((rand_seed as i64) + (pulse as i64));
+        silk_rand_seed = silk_pulses_rand(silk_rand_seed);
+        excitation_q14.ptr[i] = reconstruct_sample_q14(pulse, offset_q10, silk_rand_seed);
+        silk_rand_seed = wrap_i32((silk_rand_seed as i64) + (pulse as i64));
         i = i + 1;
     }
 
-    return rand_seed;
+    return silk_rand_seed;
 }

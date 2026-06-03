@@ -1,0 +1,87 @@
+use libc.clock;
+use libc.printf;
+use src.opus.silk.decoder.silk_decode_mono_packet_q14;
+use src.opus.silk.state.SilkDecoderState;
+
+const FRAME_SAMPLES_WB_20MS: usize = 320;
+const PACKET_BYTES: usize = 384;
+const PACKET_PREFIX_BYTES: usize = 38;
+const ITERATIONS: usize = 128;
+
+const SILK_WB_20MS_PACKET_PREFIX: [byte: PACKET_PREFIX_BYTES] = [
+    72, 134, 250, 58, 53, 186, 95, 41, 101, 183, 242, 203, 211, 13, 7, 186,
+    19, 158, 95, 203, 46, 97, 93, 218, 243, 98, 226, 104, 52, 106, 192, 232,
+    242, 19, 250, 41, 175, 0
+];
+
+fn fill_packet(packet: &[byte]) void {
+    var i: usize = 0;
+    while i < PACKET_PREFIX_BYTES {
+        packet.ptr[i] = SILK_WB_20MS_PACKET_PREFIX[i];
+        i = i + 1;
+    }
+}
+
+fn checksum_q14(samples_q14: &[i32]) !u64 {
+    var checksum: u64 = 1469598103934665603;
+    var i: usize = 0;
+    while i < samples_q14.len {
+        const sample_value: u64 = try (((samples_q14.ptr[i] as i64) + 2147483648L) as! u64);
+        checksum = checksum * 1099511628211 + sample_value + (i as u64);
+        i = i + 1;
+    }
+    return checksum;
+}
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    var packet: [byte: PACKET_BYTES] = [0: PACKET_BYTES];
+    fill_packet(&packet[0:PACKET_BYTES]);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: FRAME_SAMPLES_WB_20MS] = [0: FRAME_SAMPLES_WB_20MS];
+
+    const warmup_decoded: usize = silk_decode_mono_packet_q14(&state, &packet[0:PACKET_BYTES], &out_q14[0:FRAME_SAMPLES_WB_20MS]) catch {
+        _ = printf("silk_decode_wb_20ms_bench: warmup decode failed\n" as *byte);
+        return 1;
+    };
+    if warmup_decoded != FRAME_SAMPLES_WB_20MS {
+        _ = printf("silk_decode_wb_20ms_bench: unexpected warmup frame size\n" as *byte);
+        return 1;
+    }
+
+    const start: u64 = clock();
+    var checksum: u64 = 0;
+    var i: usize = 0;
+    while i < ITERATIONS {
+        const decoded: usize = silk_decode_mono_packet_q14(&state, &packet[0:PACKET_BYTES], &out_q14[0:FRAME_SAMPLES_WB_20MS]) catch {
+            _ = printf("silk_decode_wb_20ms_bench: decode failed\n" as *byte);
+            return 1;
+        };
+        if decoded != FRAME_SAMPLES_WB_20MS {
+            _ = printf("silk_decode_wb_20ms_bench: unexpected frame size\n" as *byte);
+            return 1;
+        }
+        checksum = checksum + (checksum_q14(&out_q14[0:FRAME_SAMPLES_WB_20MS]) catch {
+            _ = printf("silk_decode_wb_20ms_bench: checksum failed\n" as *byte);
+            return 1;
+        });
+        i = i + 1;
+    }
+    const end: u64 = clock();
+
+    const frames: u64 = ITERATIONS as u64;
+    const samples: u64 = (FRAME_SAMPLES_WB_20MS * ITERATIONS) as u64;
+    var elapsed_ns: u64 = (end - start) * 1000;
+    if elapsed_ns == 0 {
+        elapsed_ns = 1;
+    }
+    const ns_per_frame: u64 = elapsed_ns / frames;
+    const ns_per_sample: u64 = elapsed_ns / samples;
+
+    _ = printf("silk_decode_wb_20ms_mono, frames=%lu, samples=%lu, time_ns=%lu, ns_per_frame=%lu, ns_per_sample=%lu, allocations=0, checksum=%lu, packet_bytes=%lu\n" as *byte,
+        frames, samples, elapsed_ns, ns_per_frame, ns_per_sample, checksum, PACKET_BYTES as u64);
+    return 0;
+}

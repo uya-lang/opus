@@ -293,7 +293,7 @@
 - [x] 支持 40ms。
 - [x] 支持 60ms。
 - [x] 测试 SILK-only conformance vectors。
-- [ ] benchmark SILK WB/20ms mono decode。
+- [x] benchmark SILK WB/20ms mono decode。
 
 验收标准：
 
