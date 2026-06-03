@@ -74,6 +74,32 @@ const SILK_PITCH_CONTOUR_10_MS_ICDF: [byte: 12] = [
 
 const SILK_PITCH_CONTOUR_10_MS_NB_ICDF: [byte: 3] = [113, 63, 0];
 
+// Imported from Xiph.Org Opus v1.5.2 silk/pitch_est_tables.c.
+const SILK_PITCH_CONTOUR_OFFSETS: [i16: 136] = [
+    0, 0, 1, -1, 0, 1, -1, 0, -1, 1, -2, 2, -2, -2, 2, -3, 2,
+    3, -3, -4, 3, -4, 4, 4, -5, 5, -6, -5, 6, -7, 6, 5, 8, -9,
+    0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 1, 0, 0, 1, -1, 0,
+    1, -1, -1, 1, -1, 2, 1, -1, 2, -2, -2, 2, -2, 2, 2, 3, -3,
+    0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, -1, 1, 0,
+    0, 2, 1, -1, 2, -1, -1, 2, -1, 2, 2, -1, 3, -2, -2, -2, 3,
+    0, 1, 0, 0, 1, 0, 1, -1, 2, -1, 2, -1, 2, 3, -2, 3, -2,
+    -2, 4, 4, -3, 5, -3, -4, 6, -4, 6, 5, -5, 8, -6, -5, -7, 9,
+];
+const SILK_PITCH_CONTOUR_NB_OFFSETS: [i16: 44] = [
+    0, 2, -1, -1, -1, 0, 0, 1, 1, 0, 1,
+    0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+    0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0,
+    0, -1, 2, 1, 0, 1, 1, 0, 0, -1, -1,
+];
+const SILK_PITCH_CONTOUR_10_MS_OFFSETS: [i16: 24] = [
+    0, 0, 1, -1, 1, -1, 2, -2, 2, -2, 3, -3,
+    0, 1, 0, 1, -1, 2, -1, 2, -2, 3, -2, 3,
+];
+const SILK_PITCH_CONTOUR_10_MS_NB_OFFSETS: [i16: 6] = [
+    0, 1, 0,
+    0, 0, 1,
+];
+
 // Flattened [5][3], Q28.
 const SILK_TRANSITION_LP_B_Q28: [i32: 15] = [
     250767114, 501534038, 250767114,
@@ -333,6 +359,53 @@ export fn silk_pitch_delta_icdf_value(index: usize) byte {
     return SILK_PITCH_DELTA_ICDF[index];
 }
 
+export fn silk_pitch_contour_icdf_value(index: usize) byte {
+    if index >= 34 {
+        return 0;
+    }
+    return SILK_PITCH_CONTOUR_ICDF[index];
+}
+
+export fn silk_pitch_contour_nb_icdf_value(index: usize) byte {
+    if index >= 11 {
+        return 0;
+    }
+    return SILK_PITCH_CONTOUR_NB_ICDF[index];
+}
+
+export fn silk_pitch_contour_10_ms_icdf_value(index: usize) byte {
+    if index >= 12 {
+        return 0;
+    }
+    return SILK_PITCH_CONTOUR_10_MS_ICDF[index];
+}
+
+export fn silk_pitch_contour_10_ms_nb_icdf_value(index: usize) byte {
+    if index >= 3 {
+        return 0;
+    }
+    return SILK_PITCH_CONTOUR_10_MS_NB_ICDF[index];
+}
+
+export fn silk_pitch_contour_offset(fs_khz: i32, nb_subframes: i32, subframe: i32, contour_index: i32) i16 {
+    if subframe < 0 || contour_index < 0 {
+        return 0;
+    }
+    if fs_khz == 8 && nb_subframes == 4 && subframe < 4 && contour_index < 11 {
+        return SILK_PITCH_CONTOUR_NB_OFFSETS[(subframe as usize) * 11 + (contour_index as usize)];
+    }
+    if fs_khz == 8 && nb_subframes == 2 && subframe < 2 && contour_index < 3 {
+        return SILK_PITCH_CONTOUR_10_MS_NB_OFFSETS[(subframe as usize) * 3 + (contour_index as usize)];
+    }
+    if nb_subframes == 4 && subframe < 4 && contour_index < 34 {
+        return SILK_PITCH_CONTOUR_OFFSETS[(subframe as usize) * 34 + (contour_index as usize)];
+    }
+    if nb_subframes == 2 && subframe < 2 && contour_index < 12 {
+        return SILK_PITCH_CONTOUR_10_MS_OFFSETS[(subframe as usize) * 12 + (contour_index as usize)];
+    }
+    return 0;
+}
+
 export fn silk_type_offset_vad_icdf_value(index: usize) byte {
     if index >= 4 {
         return 0;
@@ -455,5 +528,8 @@ export fn silk_table_len(table: i32) usize {
     if table == 19 { return 41; }
     if table == 20 { return 5; }
     if table == 21 { return 7; }
+    if table == 22 { return 11; }
+    if table == 23 { return 12; }
+    if table == 24 { return 3; }
     return 0 as usize;
 }

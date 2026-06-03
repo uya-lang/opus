@@ -276,7 +276,7 @@
 - [x] 解码 gains。
 - [x] 解码 NLSF indices。
 - [x] 解码 pitch lag。
-- [ ] 解码 pitch contour。
+- [x] 解码 pitch contour。
 - [ ] 解码 LTP coefficients。
 - [ ] 解码 LTP scaling。
 - [ ] 解码 random seed。

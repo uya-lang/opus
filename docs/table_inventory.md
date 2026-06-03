@@ -45,6 +45,7 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_PITCH_CONTOUR_NB_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 11 | checked by shape | 0 |
 | `SILK_PITCH_CONTOUR_10_MS_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 12 | checked by shape | 0 |
 | `SILK_PITCH_CONTOUR_10_MS_NB_ICDF` | `silk/tables_pitch_lag.c` | `byte` | iCDF, `ftb=8` | 3 | checked by shape | 0 |
+| `SILK_PITCH_CONTOUR_OFFSETS` | `silk/pitch_est_tables.c` | `i16` | decoder contour offsets, flattened by subframe | 210 | checked by boundary decode tests | 32768 |
 | `SILK_TRANSITION_LP_B_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][3]` | 15 | 258613290 | 2147483648 |
 | `SILK_TRANSITION_LP_A_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][2]` | 10 | 268602790 | 2147483648 |
 | `SILK_SHELL_CODE_TABLE0` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 635112220 | 0 |
