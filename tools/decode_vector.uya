@@ -1,0 +1,218 @@
+use libc.FILE;
+use libc.atoi;
+use libc.fclose;
+use libc.fopen;
+use libc.fread;
+use libc.fprintf;
+use libc.fwrite;
+use libc.stderr;
+use src.opus.api.decoder.OpusDecoder;
+use src.opus.api.decoder.decoder_decode_i16;
+use src.opus.api.decoder.decoder_get_packet_info;
+use src.opus.celt.state.celt_state_init;
+use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.SAMPLE_RATE_48K;
+use src.opus.core.qformat.Q8_ONE;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.dsp.resampler.resampler_config_init;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
+use src.opus.silk.state.SILK_MAX_INTERNAL_RATE_HZ;
+
+error DecodeVectorError;
+
+const MAX_PACKET_BYTES: usize = 1500;
+const MAX_PCM_SAMPLES: usize = 5760 * 2;
+const VECTOR_DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3;
+
+// Keep decoder storage static; the C backend emits very large stack temporaries for decoder scratch.
+var decoder_storage: OpusDecoder = OpusDecoder{};
+
+fn usage() void {
+    _ = fprintf(
+        stderr,
+        "usage: uopus-decode-vector <sample_rate_hz> <channels> <decode_fec:0|1> <input.bit> <output.s16le>\n" as *byte,
+    );
+}
+
+fn valid_sample_rate(sample_rate_hz: i32) bool {
+    if sample_rate_hz == 8000 { return true; }
+    if sample_rate_hz == 12000 { return true; }
+    if sample_rate_hz == 16000 { return true; }
+    if sample_rate_hz == 24000 { return true; }
+    if sample_rate_hz == 48000 { return true; }
+    return false;
+}
+
+fn read_u32_be(stream: &FILE, value: &u32) !bool {
+    var bytes: [byte: 4] = [0: 4];
+    const read: usize = fread(&bytes[0], 1, 4, stream);
+    if read == 0 {
+        return false;
+    }
+    if read != 4 {
+        return error.DecodeVectorError;
+    }
+
+    *value = ((bytes[0] as u32) << 24)
+        | ((bytes[1] as u32) << 16)
+        | ((bytes[2] as u32) << 8)
+        | (bytes[3] as u32);
+    return true;
+}
+
+fn read_required_u32_be(stream: &FILE, value: &u32) !void {
+    const ok: bool = try read_u32_be(stream, value);
+    if !ok {
+        return error.DecodeVectorError;
+    }
+}
+
+fn output_frame_size(sample_rate_hz: u32, duration_samples_48k: u32) !i32 {
+    const numerator: u64 = (duration_samples_48k as u64) * (sample_rate_hz as u64);
+    const denominator: u64 = 48000;
+    if (numerator % denominator) != 0 {
+        return error.DecodeVectorError;
+    }
+    const frame_size: u64 = numerator / denominator;
+    if frame_size == 0 || frame_size > 5760 {
+        return error.DecodeVectorError;
+    }
+    return frame_size as i32;
+}
+
+fn init_decoder_storage(sample_rate_hz: u32, channels: u8) !void {
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: sample_rate_hz, channels: channels };
+    decoder_storage.config = config;
+    decoder_storage.resampler = resampler_config_init(
+        SAMPLE_RATE_48K,
+        sample_rate_hz,
+        channels as u32,
+        MAX_FRAME_SAMPLES_48K as usize,
+    ) catch {
+        return error.DecodeVectorError;
+    };
+    decoder_storage.silk_resampler = resampler_config_init(
+        SILK_MAX_INTERNAL_RATE_HZ as u32,
+        sample_rate_hz,
+        channels as u32,
+        VECTOR_DECODER_SILK_PACKET_SCRATCH_SAMPLES,
+    ) catch {
+        return error.DecodeVectorError;
+    };
+    decoder_storage.gain_q8 = Q8_ONE;
+    decoder_storage.history.active_mode = OpusMode.CELT;
+    celt_state_init(&decoder_storage.history.celt, channels as i32) catch {
+        return error.DecodeVectorError;
+    };
+    decoder_storage.history.last_frame_size_48k = decoder_storage.history.celt.frame_size;
+}
+
+fn decode_stream(input: &FILE, output: &FILE, sample_rate_hz: u32, channels: u8, decode_fec: bool) !u32 {
+    try init_decoder_storage(sample_rate_hz, channels);
+
+    var packet_count: u32 = 0;
+    var packet: [byte: MAX_PACKET_BYTES] = [0: MAX_PACKET_BYTES];
+    var pcm: [i16: MAX_PCM_SAMPLES] = [0: MAX_PCM_SAMPLES];
+
+    while true {
+        var packet_len_u32: u32 = 0;
+        const has_packet: bool = try read_u32_be(input, &packet_len_u32);
+        if !has_packet {
+            break;
+        }
+        if packet_len_u32 == 0 || packet_len_u32 > (MAX_PACKET_BYTES as u32) {
+            return error.DecodeVectorError;
+        }
+
+        var final_range: u32 = 0;
+        try read_required_u32_be(input, &final_range);
+        _ = final_range;
+
+        const packet_len: usize = packet_len_u32 as usize;
+        const payload_read: usize = fread(&packet[0], 1, packet_len, input);
+        if payload_read != packet_len {
+            return error.DecodeVectorError;
+        }
+
+        var info: PacketInfo = PacketInfo{};
+        decoder_get_packet_info(&packet[0:packet_len], &info) catch {
+            return error.DecodeVectorError;
+        };
+
+        const frame_size: i32 = try output_frame_size(sample_rate_hz, info.duration_samples_48k);
+        const decoded: i32 = decoder_decode_i16(
+            &decoder_storage,
+            &packet[0:packet_len],
+            &pcm[0:MAX_PCM_SAMPLES],
+            frame_size,
+            decode_fec,
+        ) catch {
+            return error.DecodeVectorError;
+        };
+        if decoded != frame_size {
+            return error.DecodeVectorError;
+        }
+
+        const sample_count: usize = (decoded as usize) * (channels as usize);
+        const written: usize = fwrite(&pcm[0] as &const byte, 2, sample_count, output);
+        if written != sample_count {
+            return error.DecodeVectorError;
+        }
+        packet_count = packet_count + 1;
+    }
+
+    if packet_count == 0 {
+        return error.DecodeVectorError;
+    }
+    return packet_count;
+}
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    if argc != 6 || argv == null {
+        usage();
+        return 2;
+    }
+
+    const sample_rate_i32: i32 = atoi(argv[1] as &const byte);
+    const channels_i32: i32 = atoi(argv[2] as &const byte);
+    const decode_fec_i32: i32 = atoi(argv[3] as &const byte);
+
+    if !valid_sample_rate(sample_rate_i32) || (channels_i32 != 1 && channels_i32 != 2) {
+        usage();
+        return 2;
+    }
+    if decode_fec_i32 != 0 && decode_fec_i32 != 1 {
+        usage();
+        return 2;
+    }
+
+    const input: &FILE = fopen(argv[4] as &const byte, "rb\0" as &byte);
+    if input == null {
+        _ = fprintf(stderr, "uopus-decode-vector: cannot open input\n" as *byte);
+        return 2;
+    }
+    const output: &FILE = fopen(argv[5] as &const byte, "wb\0" as &byte);
+    if output == null {
+        _ = fclose(input);
+        _ = fprintf(stderr, "uopus-decode-vector: cannot open output\n" as *byte);
+        return 2;
+    }
+
+    const decode_fec: bool = decode_fec_i32 == 1;
+    const decoded: !u32 = decode_stream(input, output, sample_rate_i32 as u32, channels_i32 as u8, decode_fec);
+    _ = fclose(output);
+    _ = fclose(input);
+
+    match decoded {
+        count => {
+            _ = count;
+            return 0;
+        }
+        error.DecodeVectorError => {
+            _ = fprintf(stderr, "uopus-decode-vector: decode failed\n" as *byte);
+            return 1;
+        }
+    }
+}

@@ -158,6 +158,7 @@ responsibility of `tools/diff_decode.sh`.
 `tools/generate_actual_decode.py` produces actual PCM files from manifest cases:
 
 ```sh
+make decode-vector
 python3 tools/generate_actual_decode.py tests/vectors/manifest.json \
   --actual-dir build/vectors/actual \
   --decoder build/uopus-decode-vector
