@@ -24,10 +24,10 @@ test "decoder init validates config and initializes 48k state" {
 
     try assert_eq_i32(decoder.config.sample_rate_hz as i32, 48000);
     try assert_eq_i32(decoder.config.channels as i32, 2);
-    try assert(decoder.active_mode == OpusMode.CELT, "decoder init must start in CELT mode");
-    try assert_eq_i32(decoder.celt.channels, 2);
-    try assert_eq_i32(decoder.last_frame_size_48k, decoder.celt.frame_size);
-    try assert_eq_i32(decoder.hybrid.frame_size_48k, 0);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "decoder init must start in CELT mode");
+    try assert_eq_i32(decoder.history.celt.channels, 2);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, decoder.history.celt.frame_size);
+    try assert_eq_i32(decoder.history.hybrid.frame_size_48k, 0);
 
     const bad_channels: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 0 };
     const bad_channels_result: !void = decoder_init(&decoder, &bad_channels);
@@ -73,7 +73,7 @@ test "decoder api empty packet invokes celt plc" {
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
     try decoder_init(&decoder, &config);
     const tail: usize = CELT_DECODE_MEM - 120;
-    decoder.celt.decode_mem[tail] = 5000;
+    decoder.history.celt.decode_mem[tail] = 5000;
 
     var empty_packet: [byte: 1] = [0];
     var pcm: [i16: 120] = [0: 120];
@@ -81,8 +81,8 @@ test "decoder api empty packet invokes celt plc" {
 
     try assert_eq_i32(decoded, 120);
     try assert_eq_i32(pcm[0] as i32, 5000);
-    try assert_eq_i32(decoder.celt.loss_count, 1);
-    try assert(decoder.active_mode == OpusMode.CELT, "empty-packet PLC must keep CELT mode active");
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "empty-packet PLC must keep CELT mode active");
 }
 
 test "decoder api converts empty-packet plc to configured output rate" {
@@ -93,7 +93,7 @@ test "decoder api converts empty-packet plc to configured output rate" {
     const tail: usize = CELT_DECODE_MEM - 120;
     var i: usize = 0;
     while i < 120 {
-        decoder.celt.decode_mem[tail + i] = (i as i32) * 3;
+        decoder.history.celt.decode_mem[tail + i] = (i as i32) * 3;
         i = i + 1;
     }
 
@@ -102,12 +102,12 @@ test "decoder api converts empty-packet plc to configured output rate" {
     const decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:40], 40, false);
 
     try assert_eq_i32(decoded, 40);
-    try assert_eq_i32(decoder.last_frame_size_48k, 120);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 120);
     try assert_eq_i32(pcm[0] as i32, 3);
     try assert_eq_i32(pcm[1] as i32, 12);
     try assert_eq_i32(pcm[39] as i32, 354);
-    try assert_eq_i32(decoder.celt.loss_count, 1);
-    try assert(decoder.active_mode == OpusMode.CELT, "sample-rate conversion must preserve active CELT mode");
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "sample-rate conversion must preserve active CELT mode");
 }
 
 test "decoder api 48k output fast path writes directly to caller pcm" {
@@ -118,8 +118,8 @@ test "decoder api 48k output fast path writes directly to caller pcm" {
     const tail: usize = CELT_DECODE_MEM - 120;
     var i: usize = 0;
     while i < 120 {
-        decoder.celt.decode_mem[tail + i] = 2000 + (i as i32);
-        decoder.output_scratch_i16[i] = -2222;
+        decoder.history.celt.decode_mem[tail + i] = 2000 + (i as i32);
+        decoder.scratch.output_i16[i] = -2222;
         i = i + 1;
     }
 
@@ -130,8 +130,38 @@ test "decoder api 48k output fast path writes directly to caller pcm" {
     try assert_eq_i32(decoded, 120);
     try assert_eq_i32(pcm[0] as i32, 2000);
     try assert_eq_i32(pcm[119] as i32, 2119);
-    try assert_eq_i32(decoder.output_scratch_i16[0] as i32, -2222);
-    try assert_eq_i32(decoder.output_scratch_i16[119] as i32, -2222);
+    try assert_eq_i32(decoder.scratch.output_i16[0] as i32, -2222);
+    try assert_eq_i32(decoder.scratch.output_i16[119] as i32, -2222);
+}
+
+test "decoder separates persistent history from reusable scratch buffers" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    decoder.history.active_mode = OpusMode.HYBRID;
+    decoder.history.celt.decode_mem[0] = 1234;
+    decoder.history.celt.freq_history_ready = true;
+    decoder.history.silk.history_q14[0] = 2345;
+    decoder.history.hybrid.delay_q14[0] = 3456;
+    decoder.history.hybrid_silk.history_q14[0] = 4567;
+    decoder.history.last_frame_size_48k = 960;
+    decoder.scratch.celt_plc.used_frequency_history = true;
+    decoder.scratch.output_i16[0] = -2222;
+    decoder.scratch.silk_q14[0] = 7654321;
+
+    try decoder_reset(&decoder);
+
+    try assert(decoder.history.active_mode == OpusMode.CELT, "decoder reset must reset persistent mode history");
+    try assert_eq_i32(decoder.history.celt.decode_mem[0], 0);
+    try assert(!decoder.history.celt.freq_history_ready, "decoder reset must clear persistent CELT PLC history");
+    try assert_eq_i32(decoder.history.silk.history_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid.delay_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid_silk.history_q14[0], 0);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, decoder.history.celt.frame_size);
+    try assert(!decoder.scratch.celt_plc.used_frequency_history, "decoder reset must clear only live PLC scratch markers");
+    try assert_eq_i32(decoder.scratch.output_i16[0] as i32, -2222);
+    try assert_eq_i32(decoder.scratch.silk_q14[0], 7654321);
 }
 
 test "decoder api decodes silk-only through native-rate output resampler" {
@@ -147,11 +177,11 @@ test "decoder api decodes silk-only through native-rate output resampler" {
     const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:384], &pcm[0:160], 160, false);
 
     try assert_eq_i32(decoded, 160);
-    try assert(decoder.active_mode == OpusMode.SILK, "SILK-only packet must switch the public decoder into SILK mode");
-    try assert_eq_i32(decoder.silk.sample_rate_hz, 16000);
+    try assert(decoder.history.active_mode == OpusMode.SILK, "SILK-only packet must switch the public decoder into SILK mode");
+    try assert_eq_i32(decoder.history.silk.sample_rate_hz, 16000);
     try assert_eq_i32(decoder.silk_resampler.input_rate_hz as i32, 16000);
     try assert_eq_i32(decoder.silk_resampler.output_rate_hz as i32, 8000);
-    try assert_eq_i32(decoder.last_frame_size_48k, 960);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 960);
     try assert(pcm[0] != 0 || pcm[1] != 0 || pcm[159] != 0, "SILK-only decode must synthesize output samples");
 }
 
@@ -171,8 +201,8 @@ test "decoder api validates mono and stereo output channel layout" {
     var stereo_pcm: [i16: 240] = [0: 240];
     const stereo_decoded: i32 = try decoder_decode_i16(&stereo_decoder, &stereo_packet[0:65], &stereo_pcm[0:240], 120, false);
     try assert_eq_i32(stereo_decoded, 120);
-    try assert_eq_i32(stereo_decoder.celt.channels, 2);
-    try assert(stereo_decoder.active_mode == OpusMode.CELT, "stereo CELT packet must keep CELT mode active");
+    try assert_eq_i32(stereo_decoder.history.celt.channels, 2);
+    try assert(stereo_decoder.history.active_mode == OpusMode.CELT, "stereo CELT packet must keep CELT mode active");
 
     var mono_decoder: OpusDecoder = OpusDecoder{};
     const mono_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
@@ -278,7 +308,7 @@ test "decoder reset clears state while preserving output config" {
     var silk_pcm: [i16: 320] = [0: 320];
     const silk_decoded: i32 = try decoder_decode_i16(&decoder, &silk_packet[0:384], &silk_pcm[0:320], 320, false);
     try assert_eq_i32(silk_decoded, 320);
-    try assert(decoder.active_mode == OpusMode.SILK, "SILK-only packet must move decoder before reset");
+    try assert(decoder.history.active_mode == OpusMode.SILK, "SILK-only packet must move decoder before reset");
 
     var hybrid_packet: [byte: 256] = [0: 256];
     hybrid_packet[0] = (96 as! byte).value;
@@ -286,17 +316,17 @@ test "decoder reset clears state while preserving output config" {
     var hybrid_pcm: [i16: 160] = [0: 160];
     const hybrid_decoded: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &hybrid_pcm[0:160], 160, false);
     try assert_eq_i32(hybrid_decoded, 160);
-    try assert(decoder.active_mode == OpusMode.HYBRID, "Hybrid packet must move decoder before reset");
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "Hybrid packet must move decoder before reset");
 
-    decoder.celt.decode_mem[0] = 1234;
-    decoder.celt.freq_history_ready = true;
-    decoder.celt.loss_count = 7;
-    decoder.celt_plc_scratch.used_frequency_history = true;
-    decoder.silk.history_q14[0] = 2345;
-    decoder.silk.loss_count = 5;
-    decoder.hybrid.delay_q14[0] = 3456;
-    decoder.hybrid.merge_mem_q14[0] = 4567;
-    decoder.hybrid_silk.history_q14[0] = 5678;
+    decoder.history.celt.decode_mem[0] = 1234;
+    decoder.history.celt.freq_history_ready = true;
+    decoder.history.celt.loss_count = 7;
+    decoder.scratch.celt_plc.used_frequency_history = true;
+    decoder.history.silk.history_q14[0] = 2345;
+    decoder.history.silk.loss_count = 5;
+    decoder.history.hybrid.delay_q14[0] = 3456;
+    decoder.history.hybrid.merge_mem_q14[0] = 4567;
+    decoder.history.hybrid_silk.history_q14[0] = 5678;
 
     try decoder_reset(&decoder);
 
@@ -306,26 +336,26 @@ test "decoder reset clears state while preserving output config" {
     try assert_eq_i32(decoder.resampler.input_rate_hz as i32, 48000);
     try assert_eq_i32(decoder.silk_resampler.input_rate_hz as i32, HYBRID_SILK_SAMPLE_RATE_HZ);
     try assert_eq_i32(decoder.silk_resampler.output_rate_hz as i32, 16000);
-    try assert(decoder.active_mode == OpusMode.CELT, "decoder reset must return to CELT mode");
-    try assert_eq_i32(decoder.last_frame_size_48k, decoder.celt.frame_size);
-    try assert_eq_i32(decoder.celt.start_band, 0);
-    try assert_eq_i32(decoder.celt.decode_mem[0], 0);
-    try assert(!decoder.celt.freq_history_ready, "decoder reset must clear CELT frequency history");
-    try assert_eq_i32(decoder.celt.loss_count, 0);
-    try assert(!decoder.celt_plc_scratch.used_frequency_history, "decoder reset must clear public PLC scratch markers");
-    try assert_eq_i32(decoder.silk.sample_rate_hz, 0);
-    try assert_eq_i32(decoder.silk.history_q14[0], 0);
-    try assert_eq_i32(decoder.silk.loss_count, 0);
-    try assert_eq_i32(decoder.hybrid.frame_size_48k, 0);
-    try assert_eq_i32(decoder.hybrid.delay_q14[0], 0);
-    try assert_eq_i32(decoder.hybrid.merge_mem_q14[0], 0);
-    try assert_eq_i32(decoder.hybrid_silk.history_q14[0], 0);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "decoder reset must return to CELT mode");
+    try assert_eq_i32(decoder.history.last_frame_size_48k, decoder.history.celt.frame_size);
+    try assert_eq_i32(decoder.history.celt.start_band, 0);
+    try assert_eq_i32(decoder.history.celt.decode_mem[0], 0);
+    try assert(!decoder.history.celt.freq_history_ready, "decoder reset must clear CELT frequency history");
+    try assert_eq_i32(decoder.history.celt.loss_count, 0);
+    try assert(!decoder.scratch.celt_plc.used_frequency_history, "decoder reset must clear public PLC scratch markers");
+    try assert_eq_i32(decoder.history.silk.sample_rate_hz, 0);
+    try assert_eq_i32(decoder.history.silk.history_q14[0], 0);
+    try assert_eq_i32(decoder.history.silk.loss_count, 0);
+    try assert_eq_i32(decoder.history.hybrid.frame_size_48k, 0);
+    try assert_eq_i32(decoder.history.hybrid.delay_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid.merge_mem_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid_silk.history_q14[0], 0);
 
     var empty_packet: [byte: 1] = [0];
     var pcm_after_reset: [i16: 40] = [0: 40];
     const decoded_after_reset: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm_after_reset[0:40], 40, false);
     try assert_eq_i32(decoded_after_reset, 40);
-    try assert(decoder.active_mode == OpusMode.CELT, "decoder must remain usable after reset");
+    try assert(decoder.history.active_mode == OpusMode.CELT, "decoder must remain usable after reset");
 }
 
 test "decoder api applies linear gain q8 to output pcm" {
@@ -348,7 +378,7 @@ test "decoder api applies linear gain q8 to output pcm" {
     const half_gain_q8: i32 = 128;
     try decoder_set_gain_q8(&decoder, half_gain_q8);
     const tail: usize = CELT_DECODE_MEM - 120;
-    decoder.celt.decode_mem[tail] = 1000;
+    decoder.history.celt.decode_mem[tail] = 1000;
 
     var empty_packet: [byte: 1] = [0];
     var half_pcm: [i16: 120] = [0: 120];
@@ -359,8 +389,8 @@ test "decoder api applies linear gain q8 to output pcm" {
     const double_gain_q8: i32 = 512;
     try decoder_set_gain_q8(&decoder, double_gain_q8);
     try decoder_reset(&decoder);
-    decoder.celt.decode_mem[tail] = 20000;
-    decoder.celt.decode_mem[tail + 1] = -20000;
+    decoder.history.celt.decode_mem[tail] = 20000;
+    decoder.history.celt.decode_mem[tail + 1] = -20000;
 
     var saturated_pcm: [i16: 120] = [0: 120];
     const saturated_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &saturated_pcm[0:120], 120, false);
@@ -376,9 +406,9 @@ test "decoder api applies gain after output resampling" {
     try decoder_set_gain_q8(&decoder, 512);
 
     const tail: usize = CELT_DECODE_MEM - 120;
-    decoder.celt.decode_mem[tail] = 30000;
-    decoder.celt.decode_mem[tail + 1] = 30000;
-    decoder.celt.decode_mem[tail + 2] = -30000;
+    decoder.history.celt.decode_mem[tail] = 30000;
+    decoder.history.celt.decode_mem[tail + 1] = 30000;
+    decoder.history.celt.decode_mem[tail + 2] = -30000;
 
     var empty_packet: [byte: 1] = [0];
     var pcm: [i16: 40] = [0: 40];
@@ -406,15 +436,15 @@ test "decoder api uses celt frequency history on packet loss after a decoded pac
     var pcm: [i16: 120] = [0: 120];
     const normal_decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:120], 120, false);
     try assert_eq_i32(normal_decoded, 120);
-    try assert(decoder.celt.freq_history_ready, "normal decode must prepare frequency PLC history");
+    try assert(decoder.history.celt.freq_history_ready, "normal decode must prepare frequency PLC history");
 
     var empty_packet: [byte: 1] = [0];
     var lost_pcm: [i16: 120] = [0: 120];
     const lost_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &lost_pcm[0:120], 120, false);
 
     try assert_eq_i32(lost_decoded, 120);
-    try assert(decoder.celt_plc_scratch.used_frequency_history, "empty packet after CELT decode must use frequency-domain PLC");
-    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert(decoder.scratch.celt_plc.used_frequency_history, "empty packet after CELT decode must use frequency-domain PLC");
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
 }
 
 test "decoder api conceals one lost packet after a normal celt packet" {
@@ -433,16 +463,16 @@ test "decoder api conceals one lost packet after a normal celt packet" {
     var pcm: [i16: 120] = [0: 120];
     const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:120], 120, false);
     try assert_eq_i32(decoded, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 0);
+    try assert_eq_i32(decoder.history.celt.loss_count, 0);
 
     var empty_packet: [byte: 1] = [0];
     var lost_pcm: [i16: 120] = [0: 120];
     const concealed: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &lost_pcm[0:120], 120, false);
 
     try assert_eq_i32(concealed, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 1);
-    try assert(decoder.celt_plc_scratch.used_frequency_history, "single lost CELT packet must use frequency-domain PLC when history is ready");
-    try assert(decoder.active_mode == OpusMode.CELT, "single packet loss must preserve the active CELT decoder mode");
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
+    try assert(decoder.scratch.celt_plc.used_frequency_history, "single lost CELT packet must use frequency-domain PLC when history is ready");
+    try assert(decoder.history.active_mode == OpusMode.CELT, "single packet loss must preserve the active CELT decoder mode");
 }
 
 test "decoder api conceals consecutive lost celt packets" {
@@ -466,13 +496,13 @@ test "decoder api conceals consecutive lost celt packets" {
     var first_loss_pcm: [i16: 120] = [0: 120];
     const first_loss: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &first_loss_pcm[0:120], 120, false);
     try assert_eq_i32(first_loss, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
 
     var second_loss_pcm: [i16: 120] = [0: 120];
     const second_loss: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &second_loss_pcm[0:120], 120, false);
     try assert_eq_i32(second_loss, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 2);
-    try assert(decoder.celt_plc_scratch.used_frequency_history, "consecutive CELT losses must keep using bounded PLC history");
+    try assert_eq_i32(decoder.history.celt.loss_count, 2);
+    try assert(decoder.scratch.celt_plc.used_frequency_history, "consecutive CELT losses must keep using bounded PLC history");
 }
 
 test "decoder api decodes a normal celt packet after packet loss" {
@@ -496,7 +526,7 @@ test "decoder api decodes a normal celt packet after packet loss" {
     var lost_pcm: [i16: 120] = [0: 120];
     const lost_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &lost_pcm[0:120], 120, false);
     try assert_eq_i32(lost_decoded, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
 
     var second_packet: [byte: 65] = [0: 65];
     second_packet[0] = (128 as! byte).value;
@@ -509,9 +539,9 @@ test "decoder api decodes a normal celt packet after packet loss" {
     var second_pcm: [i16: 120] = [0: 120];
     const second_decoded: i32 = try decoder_decode_i16(&decoder, &second_packet[0:65], &second_pcm[0:120], 120, false);
     try assert_eq_i32(second_decoded, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 0);
-    try assert(decoder.active_mode == OpusMode.CELT, "normal packet decode after PLC must keep CELT mode active");
-    try assert(decoder.celt.freq_history_ready, "normal packet decode after PLC must refresh frequency PLC history");
+    try assert_eq_i32(decoder.history.celt.loss_count, 0);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "normal packet decode after PLC must keep CELT mode active");
+    try assert(decoder.history.celt.freq_history_ready, "normal packet decode after PLC must refresh frequency PLC history");
 }
 
 test "decoder api switches into and out of hybrid mode" {
@@ -530,8 +560,8 @@ test "decoder api switches into and out of hybrid mode" {
     var celt_pcm: [i16: 120] = [0: 120];
     const celt_decoded: i32 = try decoder_decode_i16(&decoder, &celt_packet[0:65], &celt_pcm[0:120], 120, false);
     try assert_eq_i32(celt_decoded, 120);
-    try assert(decoder.active_mode == OpusMode.CELT, "first CELT packet must leave decoder in CELT mode");
-    try assert_eq_i32(decoder.celt.start_band, 0);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "first CELT packet must leave decoder in CELT mode");
+    try assert_eq_i32(decoder.history.celt.start_band, 0);
 
     var hybrid_packet: [byte: 256] = [0: 256];
     hybrid_packet[0] = (96 as! byte).value;
@@ -540,31 +570,31 @@ test "decoder api switches into and out of hybrid mode" {
     var hybrid_pcm: [i16: 480] = [0: 480];
     const hybrid_decoded: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &hybrid_pcm[0:480], 480, false);
     try assert_eq_i32(hybrid_decoded, 480);
-    try assert(decoder.active_mode == OpusMode.HYBRID, "hybrid packet must switch the public decoder into Hybrid mode");
-    try assert_eq_i32(decoder.hybrid.frame_size_48k, 480);
-    try assert_eq_i32(decoder.hybrid.celt_start_band, HYBRID_CELT_START_BAND);
-    try assert_eq_i32(decoder.hybrid.celt_end_band, HYBRID_CELT_SWB_END_BAND);
-    try assert_eq_i32(decoder.hybrid_silk.sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
-    try assert_eq_i32(decoder.celt.start_band, HYBRID_CELT_START_BAND);
-    try assert_eq_i32(decoder.celt.end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "hybrid packet must switch the public decoder into Hybrid mode");
+    try assert_eq_i32(decoder.history.hybrid.frame_size_48k, 480);
+    try assert_eq_i32(decoder.history.hybrid.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(decoder.history.hybrid.celt_end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(decoder.history.hybrid_silk.sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(decoder.history.celt.start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(decoder.history.celt.end_band, HYBRID_CELT_SWB_END_BAND);
 
-    decoder.hybrid.merge_mem_q14[0] = 123456;
-    decoder.hybrid.delay_q14[0] = 654321;
-    decoder.hybrid_silk.history_q14[0] = 345678;
+    decoder.history.hybrid.merge_mem_q14[0] = 123456;
+    decoder.history.hybrid.delay_q14[0] = 654321;
+    decoder.history.hybrid_silk.history_q14[0] = 345678;
 
     var after_hybrid_celt_pcm: [i16: 120] = [0: 120];
     const after_hybrid_celt: i32 = try decoder_decode_i16(&decoder, &celt_packet[0:65], &after_hybrid_celt_pcm[0:120], 120, false);
     try assert_eq_i32(after_hybrid_celt, 120);
-    try assert(decoder.active_mode == OpusMode.CELT, "CELT packet after Hybrid must switch back to CELT mode");
-    try assert_eq_i32(decoder.celt.start_band, 0);
-    try assert_eq_i32(decoder.hybrid.merge_mem_q14[0], 0);
-    try assert_eq_i32(decoder.hybrid.delay_q14[0], 0);
-    try assert_eq_i32(decoder.hybrid_silk.history_q14[0], 0);
+    try assert(decoder.history.active_mode == OpusMode.CELT, "CELT packet after Hybrid must switch back to CELT mode");
+    try assert_eq_i32(decoder.history.celt.start_band, 0);
+    try assert_eq_i32(decoder.history.hybrid.merge_mem_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid.delay_q14[0], 0);
+    try assert_eq_i32(decoder.history.hybrid_silk.history_q14[0], 0);
 
     var second_hybrid_pcm: [i16: 480] = [0: 480];
     const second_hybrid: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &second_hybrid_pcm[0:480], 480, false);
     try assert_eq_i32(second_hybrid, 480);
-    try assert(decoder.active_mode == OpusMode.HYBRID, "Hybrid packet after CELT must switch back into Hybrid mode");
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "Hybrid packet after CELT must switch back into Hybrid mode");
 }
 
 test "decoder api decode_fec falls back to plc without consuming celt packet" {
@@ -594,13 +624,13 @@ test "decoder api decode_fec falls back to plc without consuming celt packet" {
     var recovered_pcm: [i16: 120] = [0: 120];
     const recovered: i32 = try decoder_decode_i16(&decoder, &next_packet[0:65], &recovered_pcm[0:120], 120, true);
     try assert_eq_i32(recovered, 120);
-    try assert(decoder.celt_plc_scratch.used_frequency_history, "CELT packets do not carry FEC and must use PLC fallback");
-    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert(decoder.scratch.celt_plc.used_frequency_history, "CELT packets do not carry FEC and must use PLC fallback");
+    try assert_eq_i32(decoder.history.celt.loss_count, 1);
 
     var decoded_pcm: [i16: 120] = [0: 120];
     const decoded: i32 = try decoder_decode_i16(&decoder, &next_packet[0:65], &decoded_pcm[0:120], 120, false);
     try assert_eq_i32(decoded, 120);
-    try assert_eq_i32(decoder.celt.loss_count, 0);
+    try assert_eq_i32(decoder.history.celt.loss_count, 0);
 }
 
 test "decoder api plc and fec fallback only write requested pcm slice" {
@@ -608,7 +638,7 @@ test "decoder api plc and fec fallback only write requested pcm slice" {
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
     try decoder_init(&decoder, &config);
     const tail: usize = CELT_DECODE_MEM - 120;
-    decoder.celt.decode_mem[tail] = 3210;
+    decoder.history.celt.decode_mem[tail] = 3210;
 
     var empty_packet: [byte: 1] = [0];
     var plc_guarded: [i16: 128] = [0: 128];
