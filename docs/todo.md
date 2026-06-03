@@ -298,7 +298,7 @@
 验收标准：
 
 - [x] SILK-only decoder 通过目标 vectors。
-- [ ] 连续 frame 解码 state 与单帧测试一致。
+- [x] 连续 frame 解码 state 与单帧测试一致。
 
 ## 11. PLC 和 FEC
 

@@ -59,7 +59,7 @@ fn silk_decoder_configure_state(state: &SilkDecoderState, params: &const SilkFra
     };
 }
 
-fn silk_decoder_decode_mono_frame_q14(state: &SilkDecoderState, entropy: &SilkEntropyDecoder, frame_index: i32, out_q14: &[i32]) !usize {
+export fn silk_decoder_decode_mono_frame_q14(state: &SilkDecoderState, entropy: &SilkEntropyDecoder, frame_index: i32, out_q14: &[i32]) !usize {
     if state.channels != 1 || state.frame_length <= 0 {
         return error.SilkDecoderError;
     }

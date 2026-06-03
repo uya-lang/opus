@@ -8,10 +8,16 @@ use src.opus.entropy.range_enc.ec_enc_done;
 use src.opus.entropy.range_enc.ec_enc_icdf;
 use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.decoder.silk_decode_mono_packet_q14;
+use src.opus.silk.decoder.silk_decoder_decode_mono_frame_q14;
 use src.opus.silk.decoder.silk_decoder_reconstruct_stereo_i16;
 use src.opus.silk.decoder.SilkDecoderError;
 use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
 use src.opus.silk.entropy_decode.silk_entropy_pulse_block_count;
 use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
@@ -24,7 +30,12 @@ use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
 use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
 use src.opus.silk.shell_coder.silk_shell_encoder;
 use src.opus.silk.stereo.SilkStereoState;
+use src.opus.silk.state.SILK_CHANNEL_HISTORY_LEN;
+use src.opus.silk.state.SILK_CHANNEL_LPC_STATE_LEN;
+use src.opus.silk.state.SILK_CHANNEL_NLSF_LEN;
 use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.state.silk_state_init;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lsb_icdf_value;
@@ -36,6 +47,46 @@ use src.opus.silk.tables.silk_sign_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 use src.opus.silk.tables.silk_uniform4_icdf_value;
 use src.opus.silk.tables.silk_uniform8_icdf_value;
+
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
+fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
+fn assert_silk_decoder_state_eq(actual: &SilkDecoderState, expected: &SilkDecoderState) !void {
+    try assert_eq_i32(actual.channels, expected.channels);
+    try assert_eq_i32(actual.sample_rate_hz, expected.sample_rate_hz);
+    try assert_eq_i32(actual.fs_khz, expected.fs_khz);
+    try assert_eq_i32(actual.frame_ms, expected.frame_ms);
+    try assert_eq_i32(actual.frame_length, expected.frame_length);
+    try assert_eq_i32(actual.subframe_length, expected.subframe_length);
+    try assert_eq_i32(actual.nb_subframes, expected.nb_subframes);
+    try assert_eq_i32(actual.lpc_order, expected.lpc_order);
+    try assert_eq_i32(actual.min_pitch_lag, expected.min_pitch_lag);
+    try assert_eq_i32(actual.max_pitch_lag, expected.max_pitch_lag);
+    try assert(actual.first_frame_after_reset == expected.first_frame_after_reset, "SILK reset marker must match");
+    try assert_eq_i32(actual.loss_count, expected.loss_count);
+    try assert_eq_i32(actual.prev_signal_type, expected.prev_signal_type);
+    try assert_eq_i32(actual.prev_lag, expected.prev_lag);
+    try assert_eq_i32(actual.rng as i32, expected.rng as i32);
+    try assert_i32_slice_eq(&actual.prev_gain_q16[0:SILK_STATE_MAX_CHANNELS], &expected.prev_gain_q16[0:SILK_STATE_MAX_CHANNELS]);
+    try assert_i32_slice_eq(&actual.lpc_state_q14[0:SILK_CHANNEL_LPC_STATE_LEN], &expected.lpc_state_q14[0:SILK_CHANNEL_LPC_STATE_LEN]);
+    try assert_i32_slice_eq(&actual.history_q14[0:SILK_CHANNEL_HISTORY_LEN], &expected.history_q14[0:SILK_CHANNEL_HISTORY_LEN]);
+    try assert_i16_slice_eq(&actual.old_nlsf_q15[0:SILK_CHANNEL_NLSF_LEN], &expected.old_nlsf_q15[0:SILK_CHANNEL_NLSF_LEN]);
+}
 
 fn test_decoder_fill_type_offset_vad_icdf(out: &[byte]) !void {
     if out.len < 4 {
@@ -844,6 +895,36 @@ test "silk mono packet decoder supports wideband 60ms packets" {
     try assert(test_decoder_checksum_i32(&out_q14[0:320]) != 0, "WB 60ms first frame must produce synthesized output");
     try assert(test_decoder_checksum_i32(&out_q14[320:320]) != 0, "WB 60ms second frame must produce synthesized output");
     try assert(test_decoder_checksum_i32(&out_q14[640:320]) != 0, "WB 60ms third frame must produce synthesized output");
+}
+
+test "silk mono packet decoder keeps continuous packet state aligned with frame-by-frame decode" {
+    var continuous_packet: [byte: 1024] = [0: 1024];
+    continuous_packet[0] = 88;
+    _ = try encode_simple_wb_60ms_unvoiced_payload(&continuous_packet[1:1023]);
+
+    var continuous_state: SilkDecoderState = SilkDecoderState{};
+    var continuous_out_q14: [i32: 960] = [0: 960];
+    const continuous_decoded: usize = try silk_decode_mono_packet_q14(&continuous_state, &continuous_packet[0:1024], &continuous_out_q14[0:960]);
+    try assert_eq_i32(continuous_decoded as i32, 960);
+
+    var stepped_state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&stepped_state, 1, 16000, 20);
+    var stepped_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&stepped_entropy, &continuous_packet[1:1023], 1, 3);
+    try silk_entropy_decode_vad_flags(&stepped_entropy);
+    try silk_entropy_decode_lbrr_flags(&stepped_entropy);
+
+    var stepped_out_q14: [i32: 960] = [0: 960];
+    const first_decoded: usize = try silk_decoder_decode_mono_frame_q14(&stepped_state, &stepped_entropy, 0, &stepped_out_q14[0:320]);
+    const second_decoded: usize = try silk_decoder_decode_mono_frame_q14(&stepped_state, &stepped_entropy, 1, &stepped_out_q14[320:320]);
+    const third_decoded: usize = try silk_decoder_decode_mono_frame_q14(&stepped_state, &stepped_entropy, 2, &stepped_out_q14[640:320]);
+    try silk_entropy_decoder_check(&stepped_entropy);
+    try assert_eq_i32(first_decoded as i32, 320);
+    try assert_eq_i32(second_decoded as i32, 320);
+    try assert_eq_i32(third_decoded as i32, 320);
+
+    try assert_i32_slice_eq(&continuous_out_q14[0:960], &stepped_out_q14[0:960]);
+    try assert_silk_decoder_state_eq(&continuous_state, &stepped_state);
 }
 
 test "silk mono packet decoder rejects stereo packets and short output" {
