@@ -5,6 +5,8 @@ use src.opus.entropy.range_dec.ec_dec_check;
 use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_dec_init;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
+use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 
 export error SilkEntropyDecodeError;
 
@@ -19,6 +21,8 @@ export struct SilkEntropyDecoder {
     frames_per_packet: i32,
     current_frame: i32,
     vad_flags: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    lbrr_channel_flags: [bool: SILK_ENTROPY_MAX_CHANNELS],
+    lbrr_flags: [bool: SILK_ENTROPY_FLAG_CAPACITY],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -38,6 +42,32 @@ fn silk_entropy_validate_layout(channels: i32, frames_per_packet: i32) !void {
     }
 }
 
+fn fill_lbrr_flags_icdf(out: &[byte], frames_per_packet: i32) !usize {
+    if frames_per_packet == 2 {
+        if out.len < 3 {
+            return error.SilkEntropyDecodeError;
+        }
+        var i: usize = 0;
+        while i < 3 {
+            out.ptr[i] = silk_lbrr_flags_2_icdf_value(i);
+            i = i + 1;
+        }
+        return 3 as usize;
+    }
+    if frames_per_packet == 3 {
+        if out.len < 7 {
+            return error.SilkEntropyDecodeError;
+        }
+        var j: usize = 0;
+        while j < 7 {
+            out.ptr[j] = silk_lbrr_flags_3_icdf_value(j);
+            j = j + 1;
+        }
+        return 7 as usize;
+    }
+    return error.SilkEntropyDecodeError;
+}
+
 export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byte], channels: i32, frames_per_packet: i32) !void {
     try silk_entropy_validate_layout(channels, frames_per_packet);
     if payload.len == 0 {
@@ -49,6 +79,8 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     decoder.frames_per_packet = frames_per_packet;
     decoder.current_frame = 0;
     clear_bool(&decoder.vad_flags[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.lbrr_channel_flags[0:SILK_ENTROPY_MAX_CHANNELS]);
+    clear_bool(&decoder.lbrr_flags[0:SILK_ENTROPY_FLAG_CAPACITY]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -92,6 +124,37 @@ export fn silk_entropy_decode_vad_flags(decoder: &SilkEntropyDecoder) !void {
             const index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame);
             decoder.vad_flags[index] = (try silk_entropy_decode_bit_logp(decoder, 1)) != 0;
             frame = frame + 1;
+        }
+        channel = channel + 1;
+    }
+    try silk_entropy_decoder_check(decoder);
+}
+
+export fn silk_entropy_decode_lbrr_flags(decoder: &SilkEntropyDecoder) !void {
+    try silk_entropy_validate_layout(decoder.channels, decoder.frames_per_packet);
+    clear_bool(&decoder.lbrr_channel_flags[0:SILK_ENTROPY_MAX_CHANNELS]);
+    clear_bool(&decoder.lbrr_flags[0:SILK_ENTROPY_FLAG_CAPACITY]);
+
+    var channel: i32 = 0;
+    while channel < decoder.channels {
+        const has_lbrr: bool = (try silk_entropy_decode_bit_logp(decoder, 1)) != 0;
+        decoder.lbrr_channel_flags[channel as usize] = has_lbrr;
+        if has_lbrr {
+            if decoder.frames_per_packet == 1 {
+                const single_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, 0);
+                decoder.lbrr_flags[single_index] = true;
+            } else {
+                var icdf: [byte: 7] = [0: 7];
+                const icdf_len: usize = try fill_lbrr_flags_icdf(&icdf[0:7], decoder.frames_per_packet);
+                var mask: i32 = (try silk_entropy_decode_icdf(decoder, &icdf[0:icdf_len], 8)) + 1;
+                var frame: i32 = 0;
+                while frame < decoder.frames_per_packet {
+                    const index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame);
+                    decoder.lbrr_flags[index] = (mask & 1) != 0;
+                    mask = mask >> 1;
+                    frame = frame + 1;
+                }
+            }
         }
         channel = channel + 1;
     }

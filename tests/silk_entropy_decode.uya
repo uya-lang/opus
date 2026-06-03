@@ -10,11 +10,15 @@ use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
+use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
+use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+use src.opus.silk.tables.silk_table_len;
 
 fn encode_test_payload(packet: &[byte]) !void {
     const icdf: [byte: 4] = [200, 100, 40, 0];
@@ -40,6 +44,47 @@ fn encode_vad_payload(packet: &[byte], flags: &[bool], channels: i32, frames_per
             }
             ec_enc_bit_logp(&enc, bit, 1);
             frame = frame + 1;
+        }
+        channel = channel + 1;
+    }
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fill_lbrr_icdf(out: &[byte], frames_per_packet: i32) !void {
+    if frames_per_packet == 2 {
+        var i: usize = 0;
+        while i < 3 {
+            out.ptr[i] = silk_lbrr_flags_2_icdf_value(i);
+            i = i + 1;
+        }
+        return;
+    }
+    if frames_per_packet == 3 {
+        var j: usize = 0;
+        while j < 7 {
+            out.ptr[j] = silk_lbrr_flags_3_icdf_value(j);
+            j = j + 1;
+        }
+        return;
+    }
+    try assert(false, "test LBRR iCDF helper only supports 2 or 3 frames");
+}
+
+fn encode_lbrr_payload(packet: &[byte], channel_flags: &[bool], frame_symbols: &[i32], channels: i32, frames_per_packet: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    var channel: i32 = 0;
+    while channel < channels {
+        var bit: i32 = 0;
+        if channel_flags.ptr[channel as usize] {
+            bit = 1;
+        }
+        ec_enc_bit_logp(&enc, bit, 1);
+        if bit != 0 && frames_per_packet > 1 {
+            var icdf: [byte: 7] = [0: 7];
+            try fill_lbrr_icdf(&icdf[0:7], frames_per_packet);
+            ec_enc_icdf(&enc, frame_symbols.ptr[channel as usize] - 1, &icdf[0:(((1 << frames_per_packet) - 1) as usize)], 8);
         }
         channel = channel + 1;
     }
@@ -138,4 +183,80 @@ test "silk entropy decoder decodes VAD flags in channel-major order" {
     try assert(!dec.vad_flags[12], "channel 1 frame 0 no VAD");
     try assert(dec.vad_flags[13], "channel 1 frame 1 VAD");
     try assert(dec.vad_flags[14], "channel 1 frame 2 VAD");
+}
+
+test "silk entropy decoder exposes LBRR flag tables" {
+    try assert_eq_i32(silk_table_len(14) as i32, 3);
+    try assert_eq_i32(silk_table_len(15) as i32, 7);
+    try assert_eq_i32(silk_lbrr_flags_2_icdf_value(0) as i32, 203);
+    try assert_eq_i32(silk_lbrr_flags_2_icdf_value(2) as i32, 0);
+    try assert_eq_i32(silk_lbrr_flags_3_icdf_value(0) as i32, 215);
+    try assert_eq_i32(silk_lbrr_flags_3_icdf_value(6) as i32, 0);
+}
+
+test "silk entropy decoder decodes LBRR frame masks" {
+    var channel_flags: [bool: 2] = [false: 2];
+    var frame_symbols: [i32: 2] = [0: 2];
+    channel_flags[0] = true;
+    frame_symbols[0] = 5;
+
+    var packet: [byte: 32] = [0: 32];
+    try encode_lbrr_payload(&packet[0:32], &channel_flags[0:2], &frame_symbols[0:2], 2, 3);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 2, 3);
+    dec.lbrr_flags[1] = true;
+    dec.lbrr_channel_flags[1] = true;
+    try silk_entropy_decode_lbrr_flags(&dec);
+    try silk_entropy_decoder_check(&dec);
+
+    try assert(dec.lbrr_channel_flags[0], "channel 0 has LBRR");
+    try assert(!dec.lbrr_channel_flags[1], "channel 1 has no LBRR");
+    try assert(dec.lbrr_flags[0], "channel 0 frame 0 LBRR");
+    try assert(!dec.lbrr_flags[1], "channel 0 frame 1 no LBRR");
+    try assert(dec.lbrr_flags[2], "channel 0 frame 2 LBRR");
+    try assert(!dec.lbrr_flags[12], "channel 1 frame 0 no LBRR");
+    try assert(!dec.lbrr_flags[13], "channel 1 frame 1 no LBRR");
+    try assert(!dec.lbrr_flags[14], "channel 1 frame 2 no LBRR");
+}
+
+test "silk entropy decoder handles one and two frame LBRR masks" {
+    var channel_flags: [bool: 2] = [false: 2];
+    var frame_symbols: [i32: 2] = [0: 2];
+    channel_flags[0] = true;
+    frame_symbols[0] = 2;
+
+    var two_frame_packet: [byte: 32] = [0: 32];
+    try encode_lbrr_payload(&two_frame_packet[0:32], &channel_flags[0:2], &frame_symbols[0:2], 1, 2);
+
+    var two_frame_dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&two_frame_dec, &two_frame_packet[0:32], 1, 2);
+    try silk_entropy_decode_lbrr_flags(&two_frame_dec);
+    try assert(!two_frame_dec.lbrr_flags[0], "two-frame symbol clears frame 0");
+    try assert(two_frame_dec.lbrr_flags[1], "two-frame symbol sets frame 1");
+
+    var one_frame_packet: [byte: 32] = [0: 32];
+    try encode_lbrr_payload(&one_frame_packet[0:32], &channel_flags[0:2], &frame_symbols[0:2], 1, 1);
+
+    var one_frame_dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&one_frame_dec, &one_frame_packet[0:32], 1, 1);
+    try silk_entropy_decode_lbrr_flags(&one_frame_dec);
+    try assert(one_frame_dec.lbrr_channel_flags[0], "one-frame packet has channel LBRR");
+    try assert(one_frame_dec.lbrr_flags[0], "one-frame channel LBRR implies frame LBRR");
+}
+
+test "silk entropy decoder rejects LBRR masks without a supported table" {
+    var packet: [byte: 8] = [0: 8];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:8]);
+    ec_enc_bit_logp(&enc, 1, 1);
+    _ = try ec_enc_done(&enc);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:8], 1, 4);
+    const result: !void = silk_entropy_decode_lbrr_flags(&dec);
+    match result {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "LBRR masks above 3 frames need an explicit table"); }
+    }
 }

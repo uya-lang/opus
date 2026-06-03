@@ -292,6 +292,20 @@ export fn silk_stereo_only_code_mid_icdf_value(index: usize) byte {
     return SILK_STEREO_ONLY_CODE_MID_ICDF[index];
 }
 
+export fn silk_lbrr_flags_2_icdf_value(index: usize) byte {
+    if index >= 3 {
+        return 0;
+    }
+    return SILK_LBRR_FLAGS_2_ICDF[index];
+}
+
+export fn silk_lbrr_flags_3_icdf_value(index: usize) byte {
+    if index >= 7 {
+        return 0;
+    }
+    return SILK_LBRR_FLAGS_3_ICDF[index];
+}
+
 export fn silk_uniform3_icdf_value(index: usize) byte {
     if index >= 3 {
         return 0;
@@ -343,5 +357,7 @@ export fn silk_table_len(table: i32) usize {
     if table == 11 { return 17; }
     if table == 12 { return 42; }
     if table == 13 { return 129; }
+    if table == 14 { return 3; }
+    if table == 15 { return 7; }
     return 0 as usize;
 }
