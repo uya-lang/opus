@@ -1,0 +1,189 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.decode.CeltMonoDecodeScratch;
+use src.opus.celt.decode.celt_decode_mono_i16_from_ec;
+use src.opus.celt.decode.celt_decode_stereo_i16_from_ec;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_init;
+use src.opus.hybrid.budget.hybrid_budget_refresh_after_silk;
+use src.opus.hybrid.highband.HybridHighbandDecodeResult;
+use src.opus.hybrid.highband.hybrid_highband_decode_i16;
+use src.opus.hybrid.state.HYBRID_CELT_FB_END_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+
+fn hybrid_highband_packet_info(bandwidth: OpusBandwidth, channels: u8, duration_us: u32) PacketInfo {
+    var duration_samples_48k: i32 = 480;
+    if duration_us == 20000 {
+        duration_samples_48k = 960;
+    }
+    return PacketInfo{
+        mode: OpusMode.HYBRID,
+        bandwidth: bandwidth,
+        channels: channels,
+        frame_count: 1,
+        frame_duration_us: duration_us,
+        duration_samples_48k: duration_samples_48k,
+        payload_offset: 1,
+        payload_len: 0,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+fn hybrid_highband_fill_payload(payload: &[byte], seed_in: u32) void {
+    var seed: u32 = seed_in;
+    var i: usize = 0;
+    while i < payload.len {
+        seed = seed * 1664525 + 1013904223;
+        payload.ptr[i] = ((seed >> 24) as! byte).value;
+        i = i + 1;
+    }
+}
+
+fn hybrid_highband_consume_silk_prefix(dec: &EcDec) void {
+    _ = ec_dec_bit_logp(dec, 1);
+    _ = ec_dec_bit_logp(dec, 2);
+    _ = ec_dec_bit_logp(dec, 3);
+}
+
+fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
+test "hybrid highband glue decodes mono SWB CELT from shared range decoder" {
+    var frame: [byte: 320] = [0: 320];
+    hybrid_highband_fill_payload(&frame[0:320], 0x49706f75);
+    var info: PacketInfo = hybrid_highband_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:320]);
+    hybrid_highband_consume_silk_prefix(&split.dec);
+    try hybrid_budget_refresh_after_silk(&split);
+    const celt_start: i32 = split.celt_start_bit;
+
+    var reference_dec: EcDec = EcDec{};
+    ec_dec_init(&reference_dec, &frame[0:320]);
+    hybrid_highband_consume_silk_prefix(&reference_dec);
+    var reference_state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&reference_state, 1);
+    try celt_state_configure_frame(&reference_state, 480, HYBRID_CELT_START_BAND, HYBRID_CELT_SWB_END_BAND);
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    var reference_pcm: [i16: 480] = [0: 480];
+    const reference_decoded: usize = try celt_decode_mono_i16_from_ec(
+        &reference_state,
+        &reference_dec,
+        split.active_bits,
+        &reference_pcm[0:480],
+        &scratch,
+    );
+
+    var highband_state: CeltDecoderState = CeltDecoderState{};
+    var highband_pcm: [i16: 480] = [0: 480];
+    const result: HybridHighbandDecodeResult = try hybrid_highband_decode_i16(
+        &highband_state,
+        &split,
+        &highband_pcm[0:480],
+        &scratch,
+    );
+
+    try assert_eq_i32(reference_decoded as i32, 480);
+    try assert_eq_i32(result.decoded_samples_48k, 480);
+    try assert_i16_slice_eq(&highband_pcm[0:480], &reference_pcm[0:480]);
+    try assert_eq_i32(highband_state.frame_size, 480);
+    try assert_eq_i32(highband_state.start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(highband_state.end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(result.celt_start_bit, celt_start);
+    try assert_eq_i32(split.celt_start_bit, celt_start);
+    try assert_eq_i32(result.celt_end_bit, ec_tell(&split.dec) as i32);
+    try assert_eq_i32(result.celt_end_bit, ec_tell(&reference_dec) as i32);
+    try assert_eq_i32(result.remaining_bits, split.active_bits - result.celt_end_bit);
+    try assert_eq_i32(split.celt_budget_bits, result.remaining_bits);
+}
+
+test "hybrid highband glue supports stereo FB 20ms CELT band layout" {
+    var frame: [byte: 768] = [0: 768];
+    hybrid_highband_fill_payload(&frame[0:768], 0x9e3779b9);
+    var info: PacketInfo = hybrid_highband_packet_info(OpusBandwidth.FULLBAND, 2, 20000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:768]);
+    hybrid_highband_consume_silk_prefix(&split.dec);
+    try hybrid_budget_refresh_after_silk(&split);
+
+    var reference_dec: EcDec = EcDec{};
+    ec_dec_init(&reference_dec, &frame[0:768]);
+    hybrid_highband_consume_silk_prefix(&reference_dec);
+    var reference_state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&reference_state, 2);
+    try celt_state_configure_frame(&reference_state, 960, HYBRID_CELT_START_BAND, HYBRID_CELT_FB_END_BAND);
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    var reference_pcm: [i16: 1920] = [0: 1920];
+    const reference_decoded: usize = try celt_decode_stereo_i16_from_ec(
+        &reference_state,
+        &reference_dec,
+        split.active_bits,
+        &reference_pcm[0:1920],
+        &scratch,
+    );
+
+    var highband_state: CeltDecoderState = CeltDecoderState{};
+    var highband_pcm: [i16: 1920] = [0: 1920];
+    const result: HybridHighbandDecodeResult = try hybrid_highband_decode_i16(
+        &highband_state,
+        &split,
+        &highband_pcm[0:1920],
+        &scratch,
+    );
+
+    try assert_eq_i32(reference_decoded as i32, 960);
+    try assert_eq_i32(result.decoded_samples_48k, 960);
+    try assert_i16_slice_eq(&highband_pcm[0:1920], &reference_pcm[0:1920]);
+    try assert_eq_i32(highband_state.channels, 2);
+    try assert_eq_i32(highband_state.frame_size, 960);
+    try assert_eq_i32(highband_state.start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(highband_state.end_band, HYBRID_CELT_FB_END_BAND);
+    try assert_eq_i32(result.celt_end_bit, ec_tell(&reference_dec) as i32);
+}
+
+test "hybrid highband glue validates shared decoder state and output buffers" {
+    var frame: [byte: 320] = [0: 320];
+    hybrid_highband_fill_payload(&frame[0:320], 0x12345678);
+    var info: PacketInfo = hybrid_highband_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:320]);
+    hybrid_highband_consume_silk_prefix(&split.dec);
+    try hybrid_budget_refresh_after_silk(&split);
+    var stale_split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&stale_split, &info, &frame[0:320]);
+    hybrid_highband_consume_silk_prefix(&stale_split.dec);
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    var short_pcm: [i16: 479] = [0: 479];
+    const short_res: !HybridHighbandDecodeResult = hybrid_highband_decode_i16(&state, &split, &short_pcm[0:479], &scratch);
+    match short_res {
+        error.HybridHighbandError => {}
+        else => { try assert(false, "highband glue must reject short output buffers"); }
+    }
+
+    var pcm: [i16: 480] = [0: 480];
+    const stale_res: !HybridHighbandDecodeResult = hybrid_highband_decode_i16(&state, &stale_split, &pcm[0:480], &scratch);
+    match stale_res {
+        error.HybridHighbandError => {}
+        else => { try assert(false, "highband glue must reject stale CELT budget metadata"); }
+    }
+}

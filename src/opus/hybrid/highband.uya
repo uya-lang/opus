@@ -1,0 +1,93 @@
+use src.opus.celt.decode.CeltMonoDecodeScratch;
+use src.opus.celt.decode.celt_decode_mono_i16_from_ec;
+use src.opus.celt.decode.celt_decode_stereo_i16_from_ec;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+
+export error HybridHighbandError;
+
+export struct HybridHighbandDecodeResult {
+    decoded_samples_48k: i32,
+    celt_start_bit: i32,
+    celt_end_bit: i32,
+    remaining_bits: i32,
+}
+
+fn hybrid_highband_frame_samples_48k(duration_us: u32) !i32 {
+    if duration_us == 10000 {
+        return 480;
+    }
+    if duration_us == 20000 {
+        return 960;
+    }
+    return error.HybridHighbandError;
+}
+
+fn hybrid_highband_configure_state(state: &CeltDecoderState, split: &const HybridBudgetSplit, frame_size: i32) !void {
+    if state.channels != split.channels || state.mode.nb_ebands <= 0 {
+        celt_state_init(state, split.channels) catch {
+            return error.HybridHighbandError;
+        };
+    }
+    celt_state_configure_frame(state, frame_size, split.celt_start_band, split.celt_end_band) catch {
+        return error.HybridHighbandError;
+    };
+}
+
+export fn hybrid_highband_decode_i16(
+    state: &CeltDecoderState,
+    split: &HybridBudgetSplit,
+    pcm_i16: &[i16],
+    scratch: &CeltMonoDecodeScratch,
+) !HybridHighbandDecodeResult {
+    if split.channels < 1 || split.channels > 2 || split.active_frame_bytes == 0 || split.active_bits <= 0 {
+        return error.HybridHighbandError;
+    }
+    if split.celt_end_band <= split.celt_start_band {
+        return error.HybridHighbandError;
+    }
+
+    const frame_size: i32 = try hybrid_highband_frame_samples_48k(split.frame_duration_us);
+    const required_samples: usize = (frame_size * split.channels) as usize;
+    if pcm_i16.len < required_samples {
+        return error.HybridHighbandError;
+    }
+
+    const celt_start: i32 = split.celt_start_bit;
+    const current_tell: i32 = ec_tell(&split.dec) as i32;
+    if current_tell != celt_start || split.celt_budget_bits <= 0 || split.celt_budget_bits != split.active_bits - celt_start {
+        return error.HybridHighbandError;
+    }
+
+    try hybrid_highband_configure_state(state, split, frame_size);
+
+    var decoded: usize = 0;
+    if split.channels == 1 {
+        decoded = celt_decode_mono_i16_from_ec(state, &split.dec, split.active_bits, &pcm_i16[0:required_samples], scratch) catch {
+            return error.HybridHighbandError;
+        };
+    } else {
+        decoded = celt_decode_stereo_i16_from_ec(state, &split.dec, split.active_bits, &pcm_i16[0:required_samples], scratch) catch {
+            return error.HybridHighbandError;
+        };
+    }
+    if decoded != (frame_size as usize) {
+        return error.HybridHighbandError;
+    }
+
+    const celt_end: i32 = ec_tell(&split.dec) as i32;
+    if celt_end < celt_start || celt_end > split.active_bits {
+        return error.HybridHighbandError;
+    }
+    split.celt_budget_bits = split.active_bits - celt_end;
+
+    return HybridHighbandDecodeResult{
+        decoded_samples_48k: decoded as i32,
+        celt_start_bit: celt_start,
+        celt_end_bit: celt_end,
+        remaining_bits: split.celt_budget_bits,
+    };
+}
