@@ -17,6 +17,7 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
 use src.opus.silk.entropy_decode.silk_entropy_decode_gains;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_ltp_coefficients;
 use src.opus.silk.entropy_decode.silk_entropy_decode_nlsf_indices;
 use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_contour;
 use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_lag;
@@ -36,6 +37,8 @@ use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_NB_MB;
 use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
 use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
 use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
+use src.opus.silk.ltp.silk_ltp_gain_icdf_value;
+use src.opus.silk.ltp.silk_ltp_per_index_icdf_value;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
@@ -516,6 +519,85 @@ fn encode_pitch_contour_payload(packet: &[byte], type_offset_symbol: i32, fs_khz
     var contour_icdf: [byte: 34] = [0: 34];
     const contour_len: usize = try fill_pitch_contour_icdf(&contour_icdf[0:34], fs_khz, nb_subframes);
     ec_enc_icdf(&enc, contour_index, &contour_icdf[0:contour_len], 8);
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fill_test_ltp_periodicity_icdf(out: &[byte]) !void {
+    if out.len < 3 {
+        try assert(false, "LTP periodicity helper needs 3 entries");
+    }
+    var i: usize = 0;
+    while i < 3 {
+        out.ptr[i] = silk_ltp_per_index_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_test_ltp_gain_icdf(out: &[byte], periodicity_index: i32) !usize {
+    if periodicity_index == 0 {
+        if out.len < 8 {
+            try assert(false, "LTP gain helper needs 8 entries");
+        }
+        var i: usize = 0;
+        while i < 8 {
+            out.ptr[i] = silk_ltp_gain_icdf_value(periodicity_index, i);
+            i = i + 1;
+        }
+        return 8 as usize;
+    }
+    if periodicity_index == 1 {
+        if out.len < 16 {
+            try assert(false, "LTP gain helper needs 16 entries");
+        }
+        var j: usize = 0;
+        while j < 16 {
+            out.ptr[j] = silk_ltp_gain_icdf_value(periodicity_index, j);
+            j = j + 1;
+        }
+        return 16 as usize;
+    }
+    if periodicity_index == 2 {
+        if out.len < 32 {
+            try assert(false, "LTP gain helper needs 32 entries");
+        }
+        var k: usize = 0;
+        while k < 32 {
+            out.ptr[k] = silk_ltp_gain_icdf_value(periodicity_index, k);
+            k = k + 1;
+        }
+        return 32 as usize;
+    }
+    try assert(false, "test LTP helper supports periodicity indexes 0..2");
+    return 0 as usize;
+}
+
+fn encode_ltp_coefficients_payload(packet: &[byte], type_offset_symbol: i32, fs_khz: i32, nb_subframes: i32, lag_index: i32, contour_index: i32, periodicity_index: i32, cb0: i32, cb1: i32, cb2: i32, cb3: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], true);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+    try encode_pitch_lag_absolute(&enc, fs_khz, lag_index);
+
+    var contour_icdf: [byte: 34] = [0: 34];
+    const contour_len: usize = try fill_pitch_contour_icdf(&contour_icdf[0:34], fs_khz, nb_subframes);
+    ec_enc_icdf(&enc, contour_index, &contour_icdf[0:contour_len], 8);
+
+    var per_icdf: [byte: 3] = [0: 3];
+    try fill_test_ltp_periodicity_icdf(&per_icdf[0:3]);
+    ec_enc_icdf(&enc, periodicity_index, &per_icdf[0:3], 8);
+
+    var gain_icdf: [byte: 32] = [0: 32];
+    const gain_len: usize = try fill_test_ltp_gain_icdf(&gain_icdf[0:32], periodicity_index);
+    ec_enc_icdf(&enc, cb0, &gain_icdf[0:gain_len], 8);
+    ec_enc_icdf(&enc, cb1, &gain_icdf[0:gain_len], 8);
+    if nb_subframes > 2 {
+        ec_enc_icdf(&enc, cb2, &gain_icdf[0:gain_len], 8);
+        ec_enc_icdf(&enc, cb3, &gain_icdf[0:gain_len], 8);
+    }
 
     _ = try ec_enc_done(&enc);
     try ec_enc_check(&enc);
@@ -1127,5 +1209,61 @@ test "silk entropy decoder rejects pitch contour without pitch lag" {
     match result {
         error.SilkEntropyDecodeError => {}
         else => { try assert(false, "pitch contour decode must require decoded pitch lag"); }
+    }
+}
+
+test "silk entropy decoder decodes LTP coefficients into control" {
+    var packet: [byte: 64] = [0: 64];
+    try encode_ltp_coefficients_payload(&packet[0:64], 2, 16, 4, 101, 10, 2, 0, 7, 18, 31);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:64], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_pitch_lag(&dec, &control, 0, 0, false);
+    try silk_entropy_decode_pitch_contour(&dec, &control, 0, 0);
+    try silk_entropy_decode_ltp_coefficients(&dec, &control, 0, 0);
+
+    try assert(dec.ltp_coefficients_valid[0], "LTP coefficients for frame 0 are cached");
+    try assert_eq_i32(dec.ltp_periodicity_indices[0], 2);
+    try assert_eq_i32(control.signal_type, SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(control.ltp_coef_q14[0] as i32, -768);
+    try assert_eq_i32(control.ltp_coef_q14[2] as i32, 7808);
+    try assert_eq_i32(control.ltp_coef_q14[5] as i32, 384);
+    try assert_eq_i32(control.ltp_coef_q14[7] as i32, 1664);
+    try assert_eq_i32(control.ltp_coef_q14[12] as i32, 5376);
+    try assert_eq_i32(control.ltp_coef_q14[19] as i32, 11264);
+}
+
+test "silk entropy decoder rejects LTP coefficients before pitch contour" {
+    var packet: [byte: 64] = [0: 64];
+    try encode_ltp_coefficients_payload(&packet[0:64], 2, 16, 4, 101, 10, 2, 0, 7, 18, 31);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:64], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_pitch_lag(&dec, &control, 0, 0, false);
+
+    const result: !void = silk_entropy_decode_ltp_coefficients(&dec, &control, 0, 0);
+    match result {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "LTP coefficient decode must require decoded pitch contour"); }
     }
 }
