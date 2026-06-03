@@ -128,6 +128,10 @@ test "hybrid decoder supports mono FB 10ms frame pipeline" {
     try expect_hybrid_decoder_matches_manual_pipeline(OpusBandwidth.FULLBAND, 10000, 160, 480, 255, HYBRID_CELT_FB_END_BAND);
 }
 
+test "hybrid decoder supports mono FB 20ms frame pipeline" {
+    try expect_hybrid_decoder_matches_manual_pipeline(OpusBandwidth.FULLBAND, 20000, 320, 960, 511, HYBRID_CELT_FB_END_BAND);
+}
+
 test "hybrid decoder SWB 10ms path validates active layout and buffers" {
     var frame: [byte: 320] = [0: 320];
     _ = try hybrid_test_encode_wb_lowband_payload(&frame[0:320], 160);
