@@ -333,7 +333,7 @@
 - [x] 实现 delay compensation。
 - [x] 实现 high/low band merge。
 - [x] 支持 Hybrid SWB 10ms。
-- [ ] 支持 Hybrid SWB 20ms。
+- [x] 支持 Hybrid SWB 20ms。
 - [ ] 支持 Hybrid FB 10ms。
 - [ ] 支持 Hybrid FB 20ms。
 - [ ] 测试 hybrid conformance vectors。
