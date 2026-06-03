@@ -22,6 +22,24 @@ def api_smoke_packet() -> bytes:
     return bytes(packet)
 
 
+def first_packet_records(path: Path, count: int) -> bytes:
+    data = path.read_bytes()
+    pos = 0
+    records = bytearray()
+    for _ in range(count):
+        if pos + 8 > len(data):
+            raise AssertionError("truncated opus_demo packet header")
+        size = int.from_bytes(data[pos:pos + 4], "big")
+        final_range = data[pos + 4:pos + 8]
+        pos += 8
+        payload = data[pos:pos + size]
+        if len(payload) != size:
+            raise AssertionError("truncated opus_demo packet payload")
+        pos += size
+        records += size.to_bytes(4, "big") + final_range + payload
+    return bytes(records)
+
+
 class DecodeVectorCliTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -53,6 +71,24 @@ class DecodeVectorCliTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             pcm = output_path.read_bytes()
             self.assertEqual(len(pcm), 120 * 2)
+
+    def test_decodes_rfc8251_testvector01_first_two_packets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "testvector01-first-two.bit"
+            output_path = root / "out.s16le"
+            input_path.write_bytes(first_packet_records(ROOT / "tests/vectors/rfc8251/testvector01.bit", 2))
+
+            completed = subprocess.run(
+                [str(BIN), "8000", "1", "0", str(input_path), str(output_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(len(output_path.read_bytes()), 2560)
 
     def test_rejects_truncated_opus_demo_bitstream(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

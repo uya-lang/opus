@@ -4,6 +4,9 @@ use src.opus.celt.tables.CELT_BAND_ALLOCATION_COLS;
 use src.opus.celt.tables.CELT_BAND_ALLOCATION_ROWS;
 use src.opus.celt.tables.celt_eband_5ms_boundary;
 use src.opus.celt.tables.celt_energy_prob_model_q8_hash;
+use src.opus.celt.tables.celt_pulse_cache_bits50_value;
+use src.opus.celt.tables.celt_pulse_cache_caps50_value;
+use src.opus.celt.tables.celt_pulse_cache_index50_value;
 use src.opus.celt.tables.celt_table_len;
 use src.opus.celt.tables.celt_tf_select_hash;
 use src.opus.dsp.window.celt_window_120_q15_boundary;
@@ -56,6 +59,9 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(celt_table_len(2) as i32, 21);
     try assert_eq_i32(celt_table_len(6) as i32, 336);
     try assert_eq_i32(celt_table_len(7) as i32, 32);
+    try assert_eq_i32(celt_table_len(8) as i32, 105);
+    try assert_eq_i32(celt_table_len(9) as i32, 392);
+    try assert_eq_i32(celt_table_len(10) as i32, 168);
     try assert_eq_i32(celt_window_120_q15_len() as i32, 120);
     try assert_eq_i32(entropy_cdf_table_len(0) as i32, 8);
 
@@ -186,6 +192,12 @@ test "imported critical-band and window tables keep expected boundaries" {
     try assert_eq_i32(silk_uniform8_icdf_value(7) as i32, 0);
     try assert_eq_i32(celt_eband_5ms_boundary(0) as i32, 0);
     try assert_eq_i32(celt_eband_5ms_boundary(21) as i32, 100);
+    try assert_eq_i32(celt_pulse_cache_index50_value(0) as i32, -1);
+    try assert_eq_i32(celt_pulse_cache_index50_value(104) as i32, 387);
+    try assert_eq_i32(celt_pulse_cache_bits50_value(0) as i32, 40);
+    try assert_eq_i32(celt_pulse_cache_bits50_value(391) as i32, 234);
+    try assert_eq_i32(celt_pulse_cache_caps50_value(0) as i32, 224);
+    try assert_eq_i32(celt_pulse_cache_caps50_value(167) as i32, 40);
     try assert_eq_i32(celt_window_120_q15_boundary(0) as i32, 2);
     try assert_eq_i32(celt_window_120_q15_boundary(119) as i32, 32767);
 }

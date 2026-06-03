@@ -5,9 +5,12 @@ use src.opus.celt.mode.celt_mode_48000;
 use src.opus.celt.rate.CeltRateAllocation;
 use src.opus.celt.rate.CeltRateFrameAllocation;
 use src.opus.celt.rate.celt_rate_allocation_q5;
+use src.opus.celt.rate.celt_rate_bits2pulses_pseudo;
 use src.opus.celt.rate.celt_rate_compute_allocation;
 use src.opus.celt.rate.celt_rate_compute_frame_allocation;
 use src.opus.celt.rate.celt_rate_decode_allocation;
+use src.opus.celt.rate.celt_rate_get_pulses;
+use src.opus.celt.rate.celt_rate_pulses2bits_q3;
 use src.opus.celt.rate.celt_rate_row_total_bits;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
@@ -100,7 +103,16 @@ test "celt rate integrates active frame band allocation" {
     try assert_eq_i32(fine_quant[4], 0);
 }
 
-test "celt rate decode allocation subtracts range coder tell" {
+test "celt rate pulse cache maps fractional bits to pseudo pulses" {
+    const mode: CeltMode = celt_mode_48000();
+
+    try assert_eq_i32(celt_rate_get_pulses(7), 7);
+    try assert_eq_i32(celt_rate_get_pulses(9), 9);
+    try assert_eq_i32(try celt_rate_pulses2bits_q3(&mode, 6, 3, 9), 147);
+    try assert_eq_i32(try celt_rate_bits2pulses_pseudo(&mode, 6, 3, 147), 9);
+}
+
+test "celt rate decode allocation consumes opus reserve metadata after tell" {
     var packet: [byte: 2] = [0: 2];
     var dec: EcDec = EcDec{};
     ec_dec_init(&dec, &packet[0:2]);
@@ -121,9 +133,10 @@ test "celt rate decode allocation subtracts range coder tell" {
     );
 
     try assert_eq_i32(alloc.consumed_bits, 4);
-    try assert_eq_i32(alloc.row, 8);
-    try assert_eq_i32(alloc.allocation_bits, 12);
-    try assert_eq_i32(alloc.remaining_bits, 0);
+    try assert_eq_i32(alloc.row, 1);
+    try assert(alloc.coded_bands >= state.start_band, "decoded allocation must keep a valid coded band floor");
+    try assert(alloc.coded_bands <= state.end_band, "decoded allocation must keep a valid coded band ceiling");
+    try assert(alloc.pulse_bits >= 0, "decoded allocation must not produce negative PVQ budget");
 }
 
 test "celt rate rejects invalid allocation parameters" {

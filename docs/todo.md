@@ -357,7 +357,8 @@
     - [x] 支持 CELT 多帧 packet 和 RFC8251 mono/stereo 输出通道映射。
     - [x] 定位并修复 RFC8251 `testvector01` 首帧 CELT core decode failure。
       备注：实际失败点为首个 packet 的第 2 个 CELT frame；修复 stereo PVQ shape decode 对总 pulse budget 的逐声道拆分后，首个 packet 可通过 `uopus-decode-vector 8000 1 0` 输出 960 字节 PCM。
-    - [ ] 定位并修复 RFC8251 `testvector01` 第二个 packet decode failure。
+    - [x] 定位并修复 RFC8251 `testvector01` 第二个 packet decode failure。
+      备注：导入 CELT pulse cache 并在 CELT spectral shape decode 中对 range-coder 失效的 legacy allocation 路径回退到 Opus-compatible allocation 后，第二个 packet 可单独通过 `uopus-decode-vector 8000 1 0` 输出 1600 字节 PCM；前两个 packet 连续流输出 2560 字节，前三个 packet 连续流输出 2880 字节。当前 full `testvector01` 下一阻塞点已推进到第 4 个 packet。
     - [ ] 根据 RFC8251 试运行结果继续修复 decoder 或 vector plumbing。
     - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。

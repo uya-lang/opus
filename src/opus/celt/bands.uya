@@ -453,6 +453,22 @@ export fn celt_decode_band_shape(
     pulses: &[i32],
     shape_q15: &[i16],
 ) !i32 {
+    return celt_decode_band_shape_with_pulse_count(
+        dec,
+        dim,
+        celt_band_shape_pulses_from_bits(pulse_bits),
+        pulses,
+        shape_q15,
+    );
+}
+
+export fn celt_decode_band_shape_with_pulse_count(
+    dec: &EcDec,
+    dim: i32,
+    pulse_count: i32,
+    pulses: &[i32],
+    shape_q15: &[i16],
+) !i32 {
     if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DIM {
         return error.CeltBandsError;
     }
@@ -464,9 +480,11 @@ export fn celt_decode_band_shape(
     celt_band_shape_clear_i32(&pulses[0:dim_usize]);
     celt_band_shape_clear_i16(&shape_q15[0:dim_usize]);
 
-    const pulse_count: i32 = celt_band_shape_pulses_from_bits(pulse_bits);
     if pulse_count == 0 {
         return 0;
+    }
+    if pulse_count < 0 || pulse_count > CELT_BAND_SHAPE_MAX_PULSES {
+        return error.CeltBandsError;
     }
 
     const combinations: u32 = celt_cwrs_count(dim, pulse_count) catch {
@@ -482,6 +500,55 @@ export fn celt_decode_band_shape(
     };
     try celt_band_shape_normalize_q15(&pulses[0:dim_usize], &shape_q15[0:dim_usize]);
     return pulse_count;
+}
+
+fn celt_decode_band_shape_partitioned_with_pulse_count(
+    dec: &EcDec,
+    dim: i32,
+    pulse_count: i32,
+    pulses: &[i32],
+    shape_q15: &[i16],
+) !i32 {
+    if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DECODE_DIM || pulse_count < 0 {
+        return error.CeltBandsError;
+    }
+    if dim <= CELT_BAND_SHAPE_MAX_DIM {
+        return celt_decode_band_shape_with_pulse_count(dec, dim, pulse_count, pulses, shape_q15);
+    }
+
+    var offset: usize = 0;
+    var remaining_dim: i32 = dim;
+    var remaining_pulses: i32 = pulse_count;
+    var decoded_pulses: i32 = 0;
+    while remaining_dim > 0 {
+        var chunk_dim: i32 = CELT_BAND_SHAPE_MAX_DIM;
+        if remaining_dim < chunk_dim {
+            chunk_dim = remaining_dim;
+        }
+
+        var chunk_pulses: i32 = remaining_pulses;
+        if remaining_dim != chunk_dim {
+            chunk_pulses = (remaining_pulses * chunk_dim + (remaining_dim / 2)) / remaining_dim;
+        }
+        if chunk_pulses > CELT_BAND_SHAPE_MAX_PULSES {
+            chunk_pulses = CELT_BAND_SHAPE_MAX_PULSES;
+        }
+        const chunk_len: usize = chunk_dim as usize;
+        decoded_pulses = decoded_pulses + (try celt_decode_band_shape_with_pulse_count(
+            dec,
+            chunk_dim,
+            chunk_pulses,
+            &pulses[offset:chunk_len],
+            &shape_q15[offset:chunk_len],
+        ));
+        offset = offset + chunk_len;
+        remaining_dim = remaining_dim - chunk_dim;
+        remaining_pulses = remaining_pulses - chunk_pulses;
+        if remaining_pulses < 0 {
+            remaining_pulses = 0;
+        }
+    }
+    return decoded_pulses;
 }
 
 fn celt_decode_band_shape_partitioned(
@@ -530,6 +597,48 @@ fn celt_decode_band_shape_partitioned(
         if remaining_bits < 0 {
             remaining_bits = 0;
         }
+    }
+    return decoded_pulses;
+}
+
+export fn celt_decode_band_shapes_with_pulse_counts(
+    dec: &EcDec,
+    start_band: i32,
+    end_band: i32,
+    band_dims: &[i32],
+    pulse_counts: &[i32],
+    pulses: &[i32],
+    shape_q15: &[i16],
+) !i32 {
+    if start_band < 0 || end_band < start_band {
+        return error.CeltBandsError;
+    }
+    if band_dims.len < (end_band as usize) || pulse_counts.len < (end_band as usize) {
+        return error.CeltBandsError;
+    }
+
+    var offset: usize = 0;
+    var decoded_pulses: i32 = 0;
+    var band: i32 = start_band;
+    while band < end_band {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DECODE_DIM {
+            return error.CeltBandsError;
+        }
+        const dim_usize: usize = dim as usize;
+        if pulses.len < offset + dim_usize || shape_q15.len < offset + dim_usize {
+            return error.CeltBandsError;
+        }
+
+        decoded_pulses = decoded_pulses + (try celt_decode_band_shape_partitioned_with_pulse_count(
+            dec,
+            dim,
+            pulse_counts.ptr[band as usize],
+            &pulses[offset:offset + dim_usize],
+            &shape_q15[offset:offset + dim_usize],
+        ));
+        offset = offset + dim_usize;
+        band = band + 1;
     }
     return decoded_pulses;
 }

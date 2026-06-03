@@ -68,6 +68,22 @@ const RFC8251_TESTVECTOR01_FRAME2: [byte: 191] = [
     85, 43, 200, 20, 124, 247, 233, 144, 149, 154, 20, 161, 4, 181, 76
 ];
 
+const RFC8251_TESTVECTOR01_PACKET1_FRAME1: [byte: 194] = [
+    97, 214, 165, 130, 80, 185, 211, 64, 188, 199, 79, 82, 211, 249, 197, 6,
+    234, 53, 76, 222, 90, 165, 64, 11, 185, 165, 219, 226, 19, 3, 105, 65,
+    200, 160, 129, 112, 37, 155, 67, 118, 9, 12, 162, 51, 229, 33, 47, 224,
+    131, 119, 46, 230, 137, 194, 31, 212, 1, 209, 1, 29, 1, 15, 198, 71,
+    250, 1, 179, 182, 58, 124, 125, 58, 76, 64, 191, 225, 227, 13, 134, 159,
+    126, 243, 53, 133, 35, 172, 113, 136, 176, 201, 16, 24, 32, 37, 165, 107,
+    112, 21, 232, 79, 188, 51, 178, 94, 177, 52, 219, 87, 107, 173, 214, 63,
+    183, 63, 57, 245, 34, 59, 129, 245, 224, 89, 14, 213, 117, 42, 183, 110,
+    197, 14, 80, 155, 11, 213, 190, 126, 150, 142, 147, 250, 222, 134, 221, 195,
+    138, 107, 152, 180, 17, 215, 193, 121, 221, 154, 237, 138, 187, 46, 163, 96,
+    19, 91, 98, 174, 75, 59, 57, 205, 29, 193, 150, 64, 66, 37, 106, 80,
+    96, 150, 110, 193, 49, 130, 207, 251, 61, 60, 65, 43, 154, 188, 180, 58,
+    57, 98
+];
+
 fn celt_conformance_checksum_i16(pcm: &[i16]) !u64 {
     var checksum: u64 = 1469598103934665603;
     var i: usize = 0;
@@ -206,6 +222,20 @@ test "celt stereo decode accepts RFC8251 testvector01 third CELT frame" {
     var pcm: [i16: 1920] = [0: 1920];
     var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
     const decoded: usize = try celt_decode_stereo_i16(&state, &payload[0:191], &pcm[0:1920], &scratch);
+
+    try assert_eq_i32(decoded as i32, 960);
+    try assert(state.freq_history_ready, "real RFC8251 frame must update CELT frequency history");
+}
+
+test "celt stereo decode accepts RFC8251 testvector01 second packet second CELT frame" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 960, 0, 21);
+
+    var payload: [byte: 194] = RFC8251_TESTVECTOR01_PACKET1_FRAME1;
+    var pcm: [i16: 1920] = [0: 1920];
+    var scratch: CeltMonoDecodeScratch = CeltMonoDecodeScratch{};
+    const decoded: usize = try celt_decode_stereo_i16(&state, &payload[0:194], &pcm[0:1920], &scratch);
 
     try assert_eq_i32(decoded as i32, 960);
     try assert(state.freq_history_ready, "real RFC8251 frame must update CELT frequency history");

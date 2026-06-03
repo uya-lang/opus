@@ -1,13 +1,18 @@
 use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_DECODE_DIM;
 use src.opus.celt.bands.celt_apply_anti_collapse_q15;
 use src.opus.celt.bands.celt_decode_anti_collapse_flag;
+use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_PULSES;
 use src.opus.celt.bands.celt_decode_band_shapes;
+use src.opus.celt.bands.celt_decode_band_shapes_with_pulse_counts;
 use src.opus.celt.bands.celt_denormalize_bands_q15;
 use src.opus.celt.mdct_bridge.celt_imdct_overlap_q15;
 use src.opus.celt.mode.celt_mode_eband_width_5ms;
 use src.opus.celt.quant_bands.celt_decode_coarse_energy;
 use src.opus.celt.quant_bands.celt_decode_fine_energy;
 use src.opus.celt.rate.celt_rate_decode_allocation;
+use src.opus.celt.rate.celt_rate_decode_legacy_allocation;
+use src.opus.celt.rate.celt_rate_bits2pulses_pseudo;
+use src.opus.celt.rate.celt_rate_get_pulses;
 use src.opus.celt.spread.celt_decode_spread_decision;
 use src.opus.celt.state.CELT_MAX_BANDS;
 use src.opus.celt.state.CELT_MAX_OVERLAP;
@@ -80,6 +85,33 @@ fn clear_u32(values: &[u32]) void {
         values.ptr[i] = 0;
         i = i + 1;
     }
+}
+
+fn copy_i16_values(dst: &[i16], src: &[i16]) !void {
+    if dst.len < src.len {
+        return error.CeltDecodeError;
+    }
+
+    var i: usize = 0;
+    while i < src.len {
+        dst.ptr[i] = src.ptr[i];
+        i = i + 1;
+    }
+}
+
+fn celt_copy_ec_dec(dst: &EcDec, src: &const EcDec) void {
+    dst.buf = src.buf;
+    dst.storage = src.storage;
+    dst.end_offs = src.end_offs;
+    dst.end_window = src.end_window;
+    dst.nend_bits = src.nend_bits;
+    dst.nbits_total = src.nbits_total;
+    dst.offs = src.offs;
+    dst.rng = src.rng;
+    dst.val = src.val;
+    dst.ext = src.ext;
+    dst.rem = src.rem;
+    dst.err = src.err;
 }
 
 fn round_shift_i64_to_i32(value: i64, shift: i32) i32 {
@@ -242,7 +274,42 @@ fn celt_mono_build_collapse_masks(state: &const CeltDecoderState, total_dim: usi
     }
 }
 
-fn celt_prepare_channel_pulse_bits(state: &const CeltDecoderState, channel: i32, scratch: &CeltMonoDecodeScratch) !void {
+fn celt_prepare_channel_pulse_bits_from_legacy_allocation(state: &const CeltDecoderState, channel: i32, scratch: &CeltMonoDecodeScratch) !void {
+    if state.channels < 1 || state.channels > 2 || channel < 0 || channel >= state.channels {
+        return error.CeltDecodeError;
+    }
+    if state.start_band < 0 || state.end_band <= state.start_band || state.end_band > (CELT_MAX_BANDS as i32) {
+        return error.CeltDecodeError;
+    }
+
+    clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        if band < 0 || band >= (CELT_MAX_BANDS as i32) {
+            return error.CeltDecodeError;
+        }
+        const band_index: usize = band as usize;
+        if band_index >= CELT_MAX_BANDS {
+            return error.CeltDecodeError;
+        }
+        const total_bits: i32 = scratch.pulse_bits[band_index];
+        if total_bits < 0 {
+            return error.CeltDecodeError;
+        }
+        var channel_bits: i32 = total_bits;
+        if state.channels > 1 {
+            channel_bits = total_bits / state.channels;
+            const extra: i32 = total_bits - (channel_bits * state.channels);
+            if channel < extra {
+                channel_bits = channel_bits + 1;
+            }
+        }
+        scratch.channel_pulse_bits[band_index] = channel_bits;
+        band = band + 1;
+    }
+}
+
+fn celt_prepare_channel_pulse_counts_from_q3(state: &const CeltDecoderState, channel: i32, scratch: &CeltMonoDecodeScratch) !void {
     if state.channels < 1 || state.channels > 2 || channel < 0 || channel >= state.channels {
         return error.CeltDecodeError;
     }
@@ -259,21 +326,113 @@ fn celt_prepare_channel_pulse_bits(state: &const CeltDecoderState, channel: i32,
     clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
     var band: i32 = state.start_band;
     while band < state.end_band {
-        const total_bits: i32 = scratch.pulse_bits[band as usize];
-        if total_bits < 0 {
+        if band < 0 || band >= (CELT_MAX_BANDS as i32) {
             return error.CeltDecodeError;
         }
-        var channel_bits: i32 = total_bits;
+        const band_index: usize = band as usize;
+        if band_index >= CELT_MAX_BANDS {
+            return error.CeltDecodeError;
+        }
+        const total_bits_q3: i32 = scratch.pulse_bits[band_index];
+        if total_bits_q3 < 0 {
+            return error.CeltDecodeError;
+        }
+        var channel_bits_q3: i32 = total_bits_q3;
         if state.channels > 1 {
-            channel_bits = total_bits / state.channels;
-            const extra: i32 = total_bits - (channel_bits * state.channels);
+            channel_bits_q3 = total_bits_q3 / state.channels;
+            const extra: i32 = total_bits_q3 - (channel_bits_q3 * state.channels);
             if channel < extra {
-                channel_bits = channel_bits + 1;
+                channel_bits_q3 = channel_bits_q3 + 1;
             }
         }
-        scratch.channel_pulse_bits[band as usize] = channel_bits;
+        const pseudo: i32 = celt_rate_bits2pulses_pseudo(&state.mode, band, state.lm, channel_bits_q3) catch {
+            return error.CeltDecodeError;
+        };
+        var pulse_count: i32 = celt_rate_get_pulses(pseudo);
+        if pulse_count > CELT_BAND_SHAPE_MAX_PULSES {
+            pulse_count = CELT_BAND_SHAPE_MAX_PULSES;
+        }
+        scratch.channel_pulse_bits[band_index] = pulse_count;
         band = band + 1;
     }
+}
+
+fn celt_decode_spectral_shapes_i16(
+    state: &CeltDecoderState,
+    dec: &EcDec,
+    total_bits: i32,
+    total_dim: usize,
+    scratch: &CeltMonoDecodeScratch,
+    use_opus_allocation: bool,
+) !void {
+    clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.pulses[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+    clear_i16(&scratch.shape_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+
+    if use_opus_allocation {
+        _ = celt_rate_decode_allocation(
+            state,
+            dec,
+            total_bits,
+            &scratch.pulse_bits[0:CELT_MAX_BANDS],
+            &scratch.fine_quant[0:CELT_MAX_BANDS],
+        ) catch {
+            return error.CeltDecodeError;
+        };
+    } else {
+        _ = celt_rate_decode_legacy_allocation(
+            state,
+            dec,
+            total_bits,
+            &scratch.pulse_bits[0:CELT_MAX_BANDS],
+            &scratch.fine_quant[0:CELT_MAX_BANDS],
+        ) catch {
+            return error.CeltDecodeError;
+        };
+    }
+
+    celt_decode_fine_energy(state, dec, &scratch.fine_quant[0:CELT_MAX_BANDS]) catch {
+        return error.CeltDecodeError;
+    };
+
+    var channel: i32 = 0;
+    while channel < state.channels {
+        const spectral_offset: usize = (channel as usize) * total_dim;
+        if use_opus_allocation {
+            try celt_prepare_channel_pulse_counts_from_q3(state, channel, scratch);
+            _ = celt_decode_band_shapes_with_pulse_counts(
+                dec,
+                state.start_band,
+                state.end_band,
+                &scratch.band_dims[0:CELT_MAX_BANDS],
+                &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+                &scratch.pulses[spectral_offset:total_dim],
+                &scratch.shape_q15[spectral_offset:total_dim],
+            ) catch {
+                return error.CeltDecodeError;
+            };
+        } else {
+            try celt_prepare_channel_pulse_bits_from_legacy_allocation(state, channel, scratch);
+            _ = celt_decode_band_shapes(
+                dec,
+                state.start_band,
+                state.end_band,
+                &scratch.band_dims[0:CELT_MAX_BANDS],
+                &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+                &scratch.pulses[spectral_offset:total_dim],
+                &scratch.shape_q15[spectral_offset:total_dim],
+            ) catch {
+                return error.CeltDecodeError;
+            };
+        }
+        channel = channel + 1;
+    }
+
+    ec_dec_check(dec) catch {
+        return error.CeltDecodeError;
+    };
 }
 
 fn celt_mono_prepare_tables(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !void {
@@ -338,35 +497,17 @@ fn celt_decode_channels_from_ec_i16(
         return error.CeltDecodeError;
     };
 
-    _ = celt_rate_decode_allocation(
-        state,
-        dec,
-        total_bits,
-        &scratch.pulse_bits[0:CELT_MAX_BANDS],
-        &scratch.fine_quant[0:CELT_MAX_BANDS],
-    ) catch {
-        return error.CeltDecodeError;
-    };
-    celt_decode_fine_energy(state, dec, &scratch.fine_quant[0:CELT_MAX_BANDS]) catch {
-        return error.CeltDecodeError;
-    };
-    var channel: i32 = 0;
-    while channel < state.channels {
-        try celt_prepare_channel_pulse_bits(state, channel, scratch);
-        const spectral_offset: usize = (channel as usize) * total_dim;
-        _ = celt_decode_band_shapes(
-            dec,
-            state.start_band,
-            state.end_band,
-            &scratch.band_dims[0:CELT_MAX_BANDS],
-            &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
-            &scratch.pulses[spectral_offset:total_dim],
-            &scratch.shape_q15[spectral_offset:total_dim],
-        ) catch {
+    var allocation_dec: EcDec = EcDec{};
+    var allocation_old_ebands_q8: [i16: CELT_ENERGY_HISTORY_LEN] = [0: CELT_ENERGY_HISTORY_LEN];
+    celt_copy_ec_dec(&allocation_dec, dec);
+    try copy_i16_values(&allocation_old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN], &state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
+    celt_decode_spectral_shapes_i16(state, dec, total_bits, total_dim, scratch, false) catch {
+        celt_copy_ec_dec(dec, &allocation_dec);
+        try copy_i16_values(&state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN], &allocation_old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
+        celt_decode_spectral_shapes_i16(state, dec, total_bits, total_dim, scratch, true) catch {
             return error.CeltDecodeError;
         };
-        channel = channel + 1;
-    }
+    };
 
     celt_mono_build_collapse_masks(state, total_dim, scratch);
     try celt_copy_compact_history(state, scratch);
@@ -400,7 +541,7 @@ fn celt_decode_channels_from_ec_i16(
         return error.CeltDecodeError;
     };
 
-    channel = 0;
+    var channel: i32 = 0;
     while channel < state.channels {
         clear_i16(&scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS]);
         const spectral_offset: usize = (channel as usize) * total_dim;

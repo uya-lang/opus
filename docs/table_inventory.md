@@ -9,6 +9,9 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `CELT_EBAND_5MS` | `celt/modes.c` `eband5ms` | `i16` | MDCT bin band edge | 22 | 417698738 | 32768 |
 | `CELT_BAND_ALLOCATION_Q5` | `celt/modes.c` `band_allocation` | `byte` | 1/32 bit/sample | 231 | 305564943 | 0 |
 | `CELT_LOGN400` | `celt/static_modes_fixed.h` `logN400` | `i16` | logN, Q0 | 21 | 874482495 | 32768 |
+| `CELT_PULSE_CACHE_INDEX50` | `celt/static_modes_fixed.h` `cache_index50` | `i16` | pulse cache offsets by LM/band | 105 | 433495822 | 32768 |
+| `CELT_PULSE_CACHE_BITS50` | `celt/static_modes_fixed.h` `cache_bits50` | `byte` | Q3 pulse bit cost rows | 392 | 822794778 | 0 |
+| `CELT_PULSE_CACHE_CAPS50` | `celt/static_modes_fixed.h` `cache_caps50` | `byte` | Q3 allocation caps by LM/channel/band | 168 | 474607814 | 0 |
 | `CELT_TF_SELECT_TABLE` | `celt/celt.c` `tf_select_table` | `i8` | TF resolution delta | 32 | 428578013 | 32768 |
 | `CELT_TRIM_ICDF` | `celt/celt.h` `trim_icdf` | `byte` | iCDF, `ftb=7` | 11 | 441834106 | 0 |
 | `CELT_SPREAD_ICDF` | `celt/celt.h` `spread_icdf` | `byte` | iCDF, `ftb=5` | 4 | checked by shape | 0 |
@@ -87,7 +90,7 @@ The following upstream table families are required for later decoder conformance
 
 | Family | Upstream source | Primary consumer | Import target | Verification requirement |
 | --- | --- | --- | --- | --- |
-| CELT pulse cache | `celt/static_modes_fixed.h` `cache_index50`, `cache_bits50`, `cache_caps50`; `celt/cwrs.c` `CELT_PVQ_U_DATA`, `CELT_PVQ_U_ROW` | PVQ/CWRS | `src/opus/celt/cwrs.uya` or `src/opus/celt/tables.uya` | exhaustive small-dimension CWRS plus hash/length for imported cache rows |
+| CELT PVQ row data | `celt/cwrs.c` `CELT_PVQ_U_DATA`, `CELT_PVQ_U_ROW` | PVQ/CWRS | `src/opus/celt/cwrs.uya` or `src/opus/celt/tables.uya` | exhaustive small-dimension CWRS plus hash/length for imported rows |
 | CELT FFT bit reversal | `celt/static_modes_fixed.h` `fft_bitrev480`, `fft_bitrev240`, `fft_bitrev120`, `fft_bitrev60` | MDCT/FFT | `src/opus/dsp/mdct.uya` or `src/opus/celt/tables.uya` | FFT permutation golden tests and table hash |
 | CELT FFT twiddles | `celt/static_modes_fixed.h` `fft_twiddles48000_960`; NE10 variants are architecture-specific and out of first portable backend scope | MDCT/FFT | `src/opus/dsp/mdct.uya` | scalar FFT/MDCT golden tests and table hash |
 | CELT MDCT twiddles | `celt/static_modes_fixed.h` `mdct_twiddles960` | MDCT | `src/opus/dsp/mdct.uya` | IMDCT golden tests and overlap-add golden tests |
