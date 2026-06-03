@@ -37,6 +37,7 @@ const CELT_MONO_DECODE_DEEMPHASIS_Q15: i16 = 27853;
 export struct CeltMonoDecodeScratch {
     band_dims: [i32: CELT_MAX_BANDS],
     pulse_bits: [i32: CELT_MAX_BANDS],
+    channel_pulse_bits: [i32: CELT_MAX_BANDS],
     fine_quant: [i32: CELT_MAX_BANDS],
     tf_res: [i32: CELT_MAX_BANDS],
     collapse_masks: [u32: CELT_MAX_BANDS * 2],
@@ -241,6 +242,40 @@ fn celt_mono_build_collapse_masks(state: &const CeltDecoderState, total_dim: usi
     }
 }
 
+fn celt_prepare_channel_pulse_bits(state: &const CeltDecoderState, channel: i32, scratch: &CeltMonoDecodeScratch) !void {
+    if state.channels < 1 || state.channels > 2 || channel < 0 || channel >= state.channels {
+        return error.CeltDecodeError;
+    }
+    if state.start_band < 0 {
+        return error.CeltDecodeError;
+    }
+    if state.end_band <= state.start_band {
+        return error.CeltDecodeError;
+    }
+    if state.end_band > (CELT_MAX_BANDS as i32) {
+        return error.CeltDecodeError;
+    }
+
+    clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const total_bits: i32 = scratch.pulse_bits[band as usize];
+        if total_bits < 0 {
+            return error.CeltDecodeError;
+        }
+        var channel_bits: i32 = total_bits;
+        if state.channels > 1 {
+            channel_bits = total_bits / state.channels;
+            const extra: i32 = total_bits - (channel_bits * state.channels);
+            if channel < extra {
+                channel_bits = channel_bits + 1;
+            }
+        }
+        scratch.channel_pulse_bits[band as usize] = channel_bits;
+        band = band + 1;
+    }
+}
+
 fn celt_mono_prepare_tables(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !void {
     const imdct_len: i32 = state.frame_size * 2;
     if imdct_len <= 0 || imdct_len > (CELT_MONO_DECODE_MAX_IMDCT as i32) {
@@ -284,6 +319,7 @@ fn celt_decode_channels_from_ec_i16(
     try celt_mono_prepare_tables(state, scratch);
 
     clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.tf_res[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.pulses[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
@@ -316,13 +352,14 @@ fn celt_decode_channels_from_ec_i16(
     };
     var channel: i32 = 0;
     while channel < state.channels {
+        try celt_prepare_channel_pulse_bits(state, channel, scratch);
         const spectral_offset: usize = (channel as usize) * total_dim;
         _ = celt_decode_band_shapes(
             dec,
             state.start_band,
             state.end_band,
             &scratch.band_dims[0:CELT_MAX_BANDS],
-            &scratch.pulse_bits[0:CELT_MAX_BANDS],
+            &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
             &scratch.pulses[spectral_offset:total_dim],
             &scratch.shape_q15[spectral_offset:total_dim],
         ) catch {

@@ -195,10 +195,10 @@ python3 tools/generate_actual_decode.py /tmp/uopus-rfc8251-full-manifest.json \
   --decoder build/uopus-decode-vector
 ```
 
-Current result:
+Current full-vector result after the first packet fix:
 
 ```text
-error: actual decode failed for rfc8251-testvector01-8000-mono: exit 1: uopus-decode-vector: decode failed
+uopus-decode-vector: decode failed
 ```
 
 `tests/vectors/rfc8251/testvector01.bit` validates as an opus_demo stream with
@@ -209,12 +209,17 @@ after the complete length table, and the public decoder CELT path can decode
 multi-frame packets while mapping encoded mono/stereo packets to the configured
 mono/stereo output channel count.
 
-The current first blocker is inside the CELT core for this real RFC8251 frame:
-synthetic multi-frame CELT packets decode through the public API, but
-`rfc8251-testvector01-8000-mono` still fails during actual PCM generation with
-`uopus-decode-vector: decode failed`. The next RFC8251 step should continue
-from the first frame of `testvector01.bit` rather than from vector plumbing or
-public API channel dispatch.
+The first packet now decodes through both the core CELT tests and
+`build/uopus-decode-vector 8000 1 0`, producing 960 bytes of 8 kHz mono PCM.
+The fix splits stereo CELT PVQ shape pulse allocation across channels instead
+of applying the full stereo pulse budget independently to each channel.
+
+The current first blocker is the second packet of `testvector01.bit`: it is 966
+bytes with TOC `0xff` and count byte `0x85`. A full-file decode of
+`rfc8251-testvector01-8000-mono` writes the first packet's 960-byte output and
+then fails during the next packet. The next RFC8251 step should continue from
+that second packet rather than from vector plumbing or public API channel
+dispatch.
 
 ## Acceptance Commands
 
