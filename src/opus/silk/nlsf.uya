@@ -10,7 +10,7 @@ use src.opus.silk.nlsf_tables.silk_nlsf_codebook_order;
 use src.opus.silk.nlsf_tables.silk_nlsf_codebook_quant_step_q16;
 use src.opus.silk.nlsf_tables.silk_nlsf_pred_q8;
 use src.opus.silk.tables.silk_lsf_cos_q12;
-use src.opus.core.saturate.sat16;
+use src.opus.silk.lpc.silk_lpc_fit_q12;
 
 export error SilkNlsfError;
 
@@ -21,10 +21,6 @@ export const SILK_NLSF_MAX_INTERPOLATION_Q2: i32 = 4;
 export const SILK_NLSF_QUANT_MAX_AMPLITUDE: i32 = 4;
 export const SILK_NLSF_QUANT_LEVEL_ADJ_Q10: i32 = 102;
 const SILK_NLSF_LPC_QA: i32 = 16;
-const SILK_NLSF_LPC_QA1: i32 = 17;
-const SILK_NLSF_LPC_Q12: i32 = 12;
-const SILK_NLSF_LPC_FIT_ITERS: i32 = 10;
-const SILK_NLSF_LPC_CHIRP_Q16: i32 = 65470;
 
 export fn silk_nlsf_validate_order(order: i32) !void {
     if order != (SILK_NLSF_NB_ORDER as i32) && order != (SILK_NLSF_MAX_ORDER as i32) {
@@ -228,17 +224,6 @@ fn round_shift_i64_to_i32_silk(value: i64, shift: i32) i32 {
     return (((value >> (shift - 1)) + 1L) >> 1) as i32;
 }
 
-fn abs_i32(value: i32) i32 {
-    if value < 0 {
-        return -value;
-    }
-    return value;
-}
-
-fn smulww_i32(a: i32, b: i32) i32 {
-    return (((a as i64) * (b as i64)) >> 16) as i32;
-}
-
 fn silk_nlsf_lpc_order_index(order: i32, index: usize) !usize {
     if order == 16 && index < 16 {
         const ordering16: [usize: 16] = [0, 15, 8, 7, 4, 11, 12, 3, 2, 13, 10, 5, 6, 9, 14, 1];
@@ -269,70 +254,6 @@ fn silk_nlsf_find_poly(out_q16: &[i32], cos_lsf_q16: &[i32], offset: usize, dd: 
         }
         out_q16.ptr[1] = out_q16.ptr[1] - ftmp_q16;
         k = k + 1;
-    }
-}
-
-fn silk_nlsf_bwexpander_32(ar_q17: &[i32], order: i32, chirp_q16_start: i32) void {
-    var chirp_q16: i32 = chirp_q16_start;
-    const chirp_minus_one_q16: i32 = chirp_q16 - 65536;
-    var i: usize = 0;
-    while i + 1 < (order as usize) {
-        ar_q17.ptr[i] = smulww_i32(chirp_q16, ar_q17.ptr[i]);
-        chirp_q16 = chirp_q16 + round_shift_i64_to_i32_silk((chirp_q16 as i64) * (chirp_minus_one_q16 as i64), 16);
-        i = i + 1;
-    }
-    ar_q17.ptr[(order as usize) - 1] = smulww_i32(chirp_q16, ar_q17.ptr[(order as usize) - 1]);
-}
-
-fn silk_nlsf_lpc_fit_q12(out_q12: &[i16], in_q17: &[i32], order: i32) !void {
-    if out_q12.len < (order as usize) || in_q17.len < (order as usize) {
-        return error.SilkNlsfError;
-    }
-
-    var idx: usize = 0;
-    var iter: i32 = 0;
-    while iter < SILK_NLSF_LPC_FIT_ITERS {
-        var maxabs_q17: i32 = 0;
-        var k: usize = 0;
-        while k < (order as usize) {
-            const absval: i32 = abs_i32(in_q17.ptr[k]);
-            if absval > maxabs_q17 {
-                maxabs_q17 = absval;
-                idx = k;
-            }
-            k = k + 1;
-        }
-
-        var maxabs_q12: i32 = round_shift_i64_to_i32_silk(maxabs_q17 as i64, SILK_NLSF_LPC_QA1 - SILK_NLSF_LPC_Q12);
-        if maxabs_q12 <= 32767 {
-            break;
-        }
-
-        if maxabs_q12 > 163838 {
-            maxabs_q12 = 163838;
-        }
-        const denom: i32 = (maxabs_q12 * ((idx as i32) + 1)) >> 2;
-        if denom <= 0 {
-            return error.SilkNlsfError;
-        }
-        const chirp_q16: i32 = SILK_NLSF_LPC_CHIRP_Q16 - (((maxabs_q12 - 32767) << 14) / denom);
-        silk_nlsf_bwexpander_32(in_q17, order, chirp_q16);
-        iter = iter + 1;
-    }
-
-    var i: usize = 0;
-    if iter == SILK_NLSF_LPC_FIT_ITERS {
-        while i < (order as usize) {
-            out_q12.ptr[i] = sat16(round_shift_i64_to_i32_silk(in_q17.ptr[i] as i64, SILK_NLSF_LPC_QA1 - SILK_NLSF_LPC_Q12));
-            in_q17.ptr[i] = (out_q12.ptr[i] as i32) << (SILK_NLSF_LPC_QA1 - SILK_NLSF_LPC_Q12);
-            i = i + 1;
-        }
-        return;
-    }
-
-    while i < (order as usize) {
-        out_q12.ptr[i] = round_shift_i64_to_i32_silk(in_q17.ptr[i] as i64, SILK_NLSF_LPC_QA1 - SILK_NLSF_LPC_Q12) as i16;
-        i = i + 1;
     }
 }
 
@@ -482,5 +403,7 @@ export fn silk_nlsf2a_q12(out_q12: &[i16], nlsf_q15: &[i16], order: i32) !void {
         k = k + 1;
     }
 
-    try silk_nlsf_lpc_fit_q12(out_q12, &a_q17[0:SILK_NLSF_MAX_ORDER], order);
+    silk_lpc_fit_q12(out_q12, &a_q17[0:SILK_NLSF_MAX_ORDER], order) catch {
+        return error.SilkNlsfError;
+    };
 }

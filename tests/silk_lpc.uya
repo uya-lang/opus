@@ -1,0 +1,54 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.lpc.SILK_LPC_MAX_ORDER;
+use src.opus.silk.lpc.silk_lpc_bwexpander_32;
+use src.opus.silk.lpc.silk_lpc_fit_q12;
+
+test "silk lpc module exposes decoder order limit" {
+    try assert_eq_i32(SILK_LPC_MAX_ORDER as i32, 16);
+}
+
+test "silk lpc fit preserves coefficients already in q12 range" {
+    var input_q17: [i32: 10] = [85312, 8293, 15495, -11404, 9427, -5127, 7526, -229, 1611, -128];
+    var out_q12: [i16: 10] = [0: 10];
+    try silk_lpc_fit_q12(&out_q12[0:10], &input_q17[0:10], 10);
+
+    try assert_eq_i32(out_q12[0] as i32, 2666);
+    try assert_eq_i32(out_q12[1] as i32, 259);
+    try assert_eq_i32(out_q12[4] as i32, 295);
+    try assert_eq_i32(out_q12[9] as i32, -4);
+}
+
+test "silk lpc fit bandwidth-expands wide q17 coefficients" {
+    var input_q17: [i32: 16] = [
+        443735, -780171, 1016726, -1219825, 1387807, -1463535, 1434241, -1299285,
+        1067645, -824761, 598401, -373851, 179371, -68126, 20901, -5811,
+    ];
+    var out_q12: [i16: 16] = [0: 16];
+    try silk_lpc_fit_q12(&out_q12[0:16], &input_q17[0:16], 16);
+
+    try assert_eq_i32(out_q12[0] as i32, 13105);
+    try assert_eq_i32(out_q12[1] as i32, -21776);
+    try assert_eq_i32(out_q12[2] as i32, 26819);
+    try assert_eq_i32(out_q12[4] as i32, 32697);
+    try assert_eq_i32(out_q12[5] as i32, -32587);
+    try assert_eq_i32(out_q12[15] as i32, -74);
+}
+
+test "silk lpc bandwidth expansion applies increasing chirp powers" {
+    var ar_q17: [i32: 10] = [100000, -90000, 80000, -70000, 60000, -50000, 40000, -30000, 20000, -10000];
+    try silk_lpc_bwexpander_32(&ar_q17[0:10], 10, 65470);
+
+    try assert_eq_i32(ar_q17[0], 99899);
+    try assert_eq_i32(ar_q17[1], -89819);
+    try assert_eq_i32(ar_q17[2], 79758);
+    try assert_eq_i32(ar_q17[4], 59697);
+    try assert_eq_i32(ar_q17[9], -9900);
+
+    var out_q12: [i16: 10] = [0: 10];
+    const bad_order: !void = silk_lpc_fit_q12(&out_q12[0:10], &ar_q17[0:10], 12);
+    match bad_order {
+        error.SilkLpcError => {}
+        else => { try assert(false, "LPC fit must reject unsupported decoder orders"); }
+    }
+}
