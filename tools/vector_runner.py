@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+try:
+    from tools.opus_demo_bitstream import BitstreamError, summarize_bitstream
+except ModuleNotFoundError:  # pragma: no cover - supports `python3 tools/vector_runner.py`
+    from opus_demo_bitstream import BitstreamError, summarize_bitstream
+
 
 MANIFEST_FORMAT = "uopus.decoder-vectors.v1"
 VALID_SAMPLE_RATES = {8000, 12000, 16000, 24000, 48000}
@@ -276,6 +281,10 @@ def validate_manifest_files(cases: Iterable[VectorCase], corpus_root: Path) -> N
             bitstream_path = _resolve_corpus_path(corpus_root, case.bitstream)
             if not bitstream_path.is_file():
                 raise ManifestError(f"case {case.id}: missing bitstream file: {case.bitstream}")
+            try:
+                summarize_bitstream(bitstream_path)
+            except BitstreamError as exc:
+                raise ManifestError(f"case {case.id}: malformed bitstream {case.bitstream}: {exc}") from exc
 
         for reference in case.references:
             ref_path = _resolve_corpus_path(corpus_root, reference.path)

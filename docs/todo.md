@@ -342,7 +342,7 @@
 验收标准：
 
 - Full Opus decoder vectors 通过（拆分执行）。
-  blocked: `make test` 已通过，但 release gate 需要的 `tools/diff_decode.sh tests/vectors` 当前无法运行；`tools/diff_decode.sh` 尚未实现，`tests/vectors/` 只有 `.gitkeep`，且后续 conformance 章节仍未完成获取/整理 vectors、manifest 和 vector runner。
+  status: `make conformance` 已覆盖当前单元测试和 decoder diff gate；RFC8251 corpus 已导入，但 manifest cases 仍 disabled，等待 actual PCM 生成路径后启用全量 diff。
   - [x] 定义 vector manifest 格式并实现最小 vector runner contract。
   - [x] 实现 `tools/diff_decode.sh` 并支持空 corpus/缺 manifest 的清晰错误。
   - [x] 接入 `make conformance`，调用 `make test` 和 decoder vector diff。
@@ -350,7 +350,9 @@
     - [x] 记录 RFC/upstream decoder vector 来源和获取命令。
     - [x] 导入/整理 decoder vector corpus 到 `tests/vectors/manifest.json`。
     - [x] 生成并记录 reference PCM hash。
-    - [ ] 补齐 actual decode 生成路径并运行 full decoder diff。
+    - [x] 实现 opus_demo `.bit` framing parser contract。
+    - [ ] 实现 actual PCM 生成器，按 manifest case 产生 `<case id>.s16le`。
+    - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
 ## 13. Public Decoder API

@@ -116,6 +116,17 @@ Official opus_demo bitstream vectors use `bitstream` instead of `packets`:
 }
 ```
 
+The `bitstream` files use the `opus_demo` packet stream framing: each packet is
+stored as a 32-bit big-endian payload length, a 32-bit big-endian decoder final
+range, and then the raw Opus packet payload. The current contract rejects empty
+streams, truncated records, zero-length packets, and packet payloads larger
+than 1500 bytes. `tools/opus_demo_bitstream.py` validates that shape and prints
+a compact summary:
+
+```sh
+python3 tools/opus_demo_bitstream.py tests/vectors/rfc8251/testvector01.bit
+```
+
 Rules enforced by `tools/vector_runner.py`:
 
 - `id` values are unique and safe for filenames.
@@ -125,6 +136,7 @@ Rules enforced by `tools/vector_runner.py`:
 - exactly one of `packets` or `bitstream` is required.
 - all source paths and reference paths are relative paths inside the corpus
   root.
+- every `bitstream` source must pass the opus_demo framing contract above.
 - every `references[].sha256` must match the referenced s16le PCM file.
 - enabled cases are listed and diffed by default; disabled cases are validated
   for file/hash integrity but skipped by `list` and `diff`.

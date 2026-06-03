@@ -74,7 +74,9 @@ class VectorRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "rfc8251").mkdir()
-            (root / "rfc8251" / "testvector01.bit").write_bytes(bytes([0x01, 0x02, 0x03]))
+            (root / "rfc8251" / "testvector01.bit").write_bytes(
+                (2).to_bytes(4, "big") + (0x12345678).to_bytes(4, "big") + bytes([0x01, 0x02])
+            )
             ref_a = pcm_bytes([1, 2, 3])
             ref_b = pcm_bytes([1, 2, 4])
             (root / "rfc8251" / "testvector01.dec").write_bytes(ref_a)
@@ -119,6 +121,40 @@ class VectorRunnerTests(unittest.TestCase):
             self.assertEqual(cases[0].frame_size, 0)
             self.assertEqual(len(cases[0].references), 2)
             self.assertEqual(results, [])
+
+    def test_validate_manifest_files_checks_opus_demo_bitstream_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "rfc8251").mkdir()
+            (root / "rfc8251" / "bad.bit").write_bytes(b"\x00\x00")
+            reference = pcm_bytes([1, 2, 3])
+            (root / "rfc8251" / "bad.dec").write_bytes(reference)
+            manifest = self.write_manifest(
+                root,
+                {
+                    "format": "uopus.decoder-vectors.v1",
+                    "cases": [
+                        {
+                            "id": "bad-bitstream",
+                            "enabled": False,
+                            "blocked_by": "actual decode path is not wired yet",
+                            "sample_rate_hz": 48000,
+                            "channels": 1,
+                            "bitstream": "rfc8251/bad.bit",
+                            "references": [
+                                {
+                                    "path": "rfc8251/bad.dec",
+                                    "sha256": hashlib.sha256(reference).hexdigest(),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            cases = load_manifest(manifest)
+
+            with self.assertRaisesRegex(ManifestError, "malformed bitstream"):
+                validate_manifest_files(cases, root)
 
     def test_manifest_rejects_unsafe_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

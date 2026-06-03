@@ -18,6 +18,10 @@ def pcm_bytes(samples: list[int]) -> bytes:
     return b"".join(struct.pack("<h", sample) for sample in samples)
 
 
+def packet_record(payload: bytes, final_range: int) -> bytes:
+    return len(payload).to_bytes(4, "big") + final_range.to_bytes(4, "big") + payload
+
+
 class DiffDecodeScriptTests(unittest.TestCase):
     def write_manifest(self, root: Path, cases: list[dict]) -> None:
         (root / "manifest.json").write_text(
@@ -58,7 +62,7 @@ class DiffDecodeScriptTests(unittest.TestCase):
 
     def create_disabled_case_corpus(self, root: Path, reference: bytes) -> None:
         (root / "rfc8251").mkdir()
-        (root / "rfc8251" / "testvector01.bit").write_bytes(bytes([0x01, 0x02, 0x03]))
+        (root / "rfc8251" / "testvector01.bit").write_bytes(packet_record(bytes([0x01, 0x02]), 0x12345678))
         (root / "rfc8251" / "testvector01.dec").write_bytes(reference)
         self.write_manifest(
             root,
