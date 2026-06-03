@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use std.testing.assert_eq_i64;
 use src.opus.entropy.range_enc.EcEnc;
 use src.opus.entropy.range_enc.ec_enc_bit_logp;
 use src.opus.entropy.range_enc.ec_enc_check;
@@ -497,6 +498,74 @@ fn test_decoder_checksum_i32(values: &[i32]) i32 {
         i = i + 1;
     }
     return sum;
+}
+
+fn encode_silk_conformance_packet(packet: &[byte], toc: byte, frame_length: i32, frames_per_packet: i32, wideband: bool) !void {
+    if packet.len < 2 {
+        try assert(false, "conformance packet storage must include TOC and payload");
+    }
+    packet.ptr[0] = toc;
+    const payload_len: usize = packet.len - 1;
+    if wideband {
+        if frames_per_packet == 1 {
+            _ = try encode_simple_wb_unvoiced_payload(&packet[1:payload_len], frame_length);
+            return;
+        }
+        if frames_per_packet == 2 {
+            _ = try encode_simple_wb_40ms_unvoiced_payload(&packet[1:payload_len]);
+            return;
+        }
+        if frames_per_packet == 3 {
+            _ = try encode_simple_wb_60ms_unvoiced_payload(&packet[1:payload_len]);
+            return;
+        }
+    } else {
+        if frames_per_packet == 1 {
+            _ = try encode_simple_nb_mb_unvoiced_payload(&packet[1:payload_len], frame_length);
+            return;
+        }
+        if frames_per_packet == 2 {
+            _ = try encode_simple_nb_mb_40ms_unvoiced_payload(&packet[1:payload_len], frame_length);
+            return;
+        }
+        if frames_per_packet == 3 {
+            _ = try encode_simple_nb_mb_60ms_unvoiced_payload(&packet[1:payload_len], frame_length);
+            return;
+        }
+    }
+    try assert(false, "unsupported SILK conformance vector shape");
+}
+
+fn silk_conformance_checksum(toc: byte, frame_length: i32, frames_per_packet: i32, packet_len: usize, sample_len: usize, wideband: bool) !i32 {
+    var packet: [byte: 1024] = [0: 1024];
+    try encode_silk_conformance_packet(&packet[0:packet_len], toc, frame_length, frames_per_packet, wideband);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 960] = [0: 960];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:sample_len]);
+    try assert_eq_i32(decoded as i32, sample_len as i32);
+    return test_decoder_checksum_i32(&out_q14[0:sample_len]);
+}
+
+test "silk-only conformance vectors lock mono checksum matrix" {
+    const nb10: i32 = try silk_conformance_checksum(0, 80, 1, 160, 80, false);
+    const mb10: i32 = try silk_conformance_checksum(32, 120, 1, 192, 120, false);
+    const wb10: i32 = try silk_conformance_checksum(64, 160, 1, 256, 160, true);
+    const nb20: i32 = try silk_conformance_checksum(8, 160, 1, 192, 160, false);
+    const mb20: i32 = try silk_conformance_checksum(40, 240, 1, 256, 240, false);
+    const wb20: i32 = try silk_conformance_checksum(72, 320, 1, 384, 320, true);
+    const nb40: i32 = try silk_conformance_checksum(16, 160, 2, 384, 320, false);
+    const mb40: i32 = try silk_conformance_checksum(48, 240, 2, 512, 480, false);
+    const wb40: i32 = try silk_conformance_checksum(80, 320, 2, 768, 640, true);
+    const nb60: i32 = try silk_conformance_checksum(24, 160, 3, 640, 480, false);
+    const mb60: i32 = try silk_conformance_checksum(56, 240, 3, 768, 720, false);
+    const wb60: i32 = try silk_conformance_checksum(88, 320, 3, 1024, 960, true);
+
+    const matrix_digest: i64 = (nb10 as i64) + (mb10 as i64) + (wb10 as i64)
+        + (nb20 as i64) + (mb20 as i64) + (wb20 as i64)
+        + (nb40 as i64) + (mb40 as i64) + (wb40 as i64)
+        + (nb60 as i64) + (mb60 as i64) + (wb60 as i64);
+    try assert_eq_i64(matrix_digest, -366039299L);
 }
 
 test "silk mono packet decoder decodes one narrowband 10ms packet" {

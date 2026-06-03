@@ -292,12 +292,12 @@
 - [x] 支持 20ms。
 - [x] 支持 40ms。
 - [x] 支持 60ms。
-- [ ] 测试 SILK-only conformance vectors。
+- [x] 测试 SILK-only conformance vectors。
 - [ ] benchmark SILK WB/20ms mono decode。
 
 验收标准：
 
-- [ ] SILK-only decoder 通过目标 vectors。
+- [x] SILK-only decoder 通过目标 vectors。
 - [ ] 连续 frame 解码 state 与单帧测试一致。
 
 ## 11. PLC 和 FEC
