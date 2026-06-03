@@ -1,0 +1,154 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.hybrid.state.HYBRID_CELT_FB_END_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+use src.opus.hybrid.state.HYBRID_DELAY_BUFFER_LEN;
+use src.opus.hybrid.state.HYBRID_MAX_DELAY_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_MAX_FRAME_SAMPLES_48K;
+use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
+use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
+use src.opus.hybrid.state.HybridDecoderState;
+use src.opus.hybrid.state.hybrid_state_configure;
+use src.opus.hybrid.state.hybrid_state_configure_from_packet_info;
+use src.opus.hybrid.state.hybrid_state_delay_index;
+use src.opus.hybrid.state.hybrid_state_init;
+use src.opus.hybrid.state.hybrid_state_reset;
+
+test "hybrid state initializes SWB and FB glue layouts" {
+    var state: HybridDecoderState = HybridDecoderState{};
+    try hybrid_state_init(&state, 2, OpusBandwidth.SUPERWIDEBAND, 480);
+
+    try assert_eq_i32(state.channels, 2);
+    try assert(state.bandwidth == OpusBandwidth.SUPERWIDEBAND, "state must retain the active hybrid bandwidth");
+    try assert_eq_i32(state.frame_size_48k, 480);
+    try assert_eq_i32(state.frame_ms, 10);
+    try assert_eq_i32(state.silk_sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(state.silk_frame_size, 160);
+    try assert_eq_i32(state.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(state.celt_end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(state.delay_samples_48k, HYBRID_MAX_DELAY_SAMPLES_48K as i32);
+    try assert_eq_i32(HYBRID_STATE_MAX_CHANNELS as i32, 2);
+    try assert_eq_i32(HYBRID_MAX_FRAME_SAMPLES_48K as i32, 960);
+    try assert_eq_i32(HYBRID_DELAY_BUFFER_LEN as i32, 240);
+    try assert_eq_i32(state.delay_q14[0], 0);
+    try assert_eq_i32(state.merge_mem_q14[1], 0);
+
+    try hybrid_state_configure(&state, 1, OpusBandwidth.FULLBAND, 960);
+    try assert_eq_i32(state.channels, 1);
+    try assert(state.bandwidth == OpusBandwidth.FULLBAND, "state must switch to FB layout");
+    try assert_eq_i32(state.frame_size_48k, 960);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.silk_frame_size, 320);
+    try assert_eq_i32(state.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(state.celt_end_band, HYBRID_CELT_FB_END_BAND);
+}
+
+test "hybrid state validates channels bandwidth and frame duration" {
+    var state: HybridDecoderState = HybridDecoderState{};
+
+    const zero_channels: !void = hybrid_state_init(&state, 0, OpusBandwidth.SUPERWIDEBAND, 480);
+    match zero_channels {
+        error.HybridStateError => {}
+        else => { try assert(false, "zero channels must fail"); }
+    }
+
+    const too_many_channels: !void = hybrid_state_init(&state, 3, OpusBandwidth.SUPERWIDEBAND, 480);
+    match too_many_channels {
+        error.HybridStateError => {}
+        else => { try assert(false, "channels past Opus max must fail"); }
+    }
+
+    const wideband: !void = hybrid_state_init(&state, 1, OpusBandwidth.WIDEBAND, 480);
+    match wideband {
+        error.HybridStateError => {}
+        else => { try assert(false, "hybrid state must reject non-hybrid bandwidths"); }
+    }
+
+    const bad_frame: !void = hybrid_state_init(&state, 1, OpusBandwidth.FULLBAND, 240);
+    match bad_frame {
+        error.HybridStateError => {}
+        else => { try assert(false, "hybrid state only supports 10ms and 20ms frames"); }
+    }
+}
+
+test "hybrid state configures from hybrid packet metadata" {
+    var state: HybridDecoderState = HybridDecoderState{};
+    var info: PacketInfo = PacketInfo{
+        mode: OpusMode.HYBRID,
+        bandwidth: OpusBandwidth.FULLBAND,
+        channels: 2,
+        frame_count: 1,
+        frame_duration_us: 20000,
+        duration_samples_48k: 960,
+        payload_offset: 1,
+        payload_len: 20,
+        self_delimited: false,
+        has_padding: false,
+    };
+
+    try hybrid_state_configure_from_packet_info(&state, &info);
+    try assert_eq_i32(state.channels, 2);
+    try assert_eq_i32(state.frame_size_48k, 960);
+    try assert_eq_i32(state.silk_frame_size, 320);
+    try assert_eq_i32(state.celt_end_band, HYBRID_CELT_FB_END_BAND);
+
+    info.mode = OpusMode.CELT;
+    const bad_mode: !void = hybrid_state_configure_from_packet_info(&state, &info);
+    match bad_mode {
+        error.HybridStateError => {}
+        else => { try assert(false, "non-hybrid packet metadata must fail"); }
+    }
+
+    info.mode = OpusMode.HYBRID;
+    info.frame_duration_us = 40000;
+    const bad_duration: !void = hybrid_state_configure_from_packet_info(&state, &info);
+    match bad_duration {
+        error.HybridStateError => {}
+        else => { try assert(false, "hybrid packet metadata must reject 40ms frames"); }
+    }
+}
+
+test "hybrid state indexes and resets only small glue buffers" {
+    var state: HybridDecoderState = HybridDecoderState{};
+    try hybrid_state_init(&state, 2, OpusBandwidth.SUPERWIDEBAND, 480);
+
+    const left_tail: usize = try hybrid_state_delay_index(&state, 0, HYBRID_MAX_DELAY_SAMPLES_48K as i32 - 1);
+    const right_base: usize = try hybrid_state_delay_index(&state, 1, 0);
+    try assert_eq_i32(left_tail as i32, 119);
+    try assert_eq_i32(right_base as i32, 120);
+    if left_tail >= HYBRID_DELAY_BUFFER_LEN || right_base >= HYBRID_DELAY_BUFFER_LEN {
+        try assert(false, "delay index helpers must stay inside the small glue buffer");
+    }
+
+    state.delay_q14[left_tail] = 1234;
+    state.delay_q14[right_base] = -4321;
+    state.merge_mem_q14[1] = 700;
+    state.pending_fec = true;
+    state.loss_count = 3;
+
+    hybrid_state_reset(&state);
+    try assert_eq_i32(state.channels, 2);
+    try assert(state.bandwidth == OpusBandwidth.SUPERWIDEBAND, "reset must keep hybrid bandwidth layout");
+    try assert_eq_i32(state.frame_size_48k, 480);
+    try assert_eq_i32(state.delay_q14[119], 0);
+    try assert_eq_i32(state.delay_q14[120], 0);
+    try assert_eq_i32(state.merge_mem_q14[1], 0);
+    try assert(!state.pending_fec, "reset must clear FEC marker");
+    try assert_eq_i32(state.loss_count, 0);
+
+    const bad_channel: !usize = hybrid_state_delay_index(&state, 2, 0);
+    match bad_channel {
+        error.HybridStateError => {}
+        else => { try assert(false, "delay index must reject channels outside state layout"); }
+    }
+
+    const bad_sample: !usize = hybrid_state_delay_index(&state, 0, HYBRID_MAX_DELAY_SAMPLES_48K as i32);
+    match bad_sample {
+        error.HybridStateError => {}
+        else => { try assert(false, "delay index must reject samples outside active delay buffer"); }
+    }
+}

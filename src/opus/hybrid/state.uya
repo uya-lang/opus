@@ -1,0 +1,131 @@
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+
+export error HybridStateError;
+
+export const HYBRID_STATE_MAX_CHANNELS: usize = 2;
+export const HYBRID_INTERNAL_SAMPLE_RATE_HZ: i32 = 48000;
+export const HYBRID_SILK_SAMPLE_RATE_HZ: i32 = 16000;
+export const HYBRID_MIN_FRAME_SAMPLES_48K: i32 = 480;
+export const HYBRID_MAX_FRAME_SAMPLES_48K: usize = 960;
+export const HYBRID_MAX_DELAY_SAMPLES_48K: usize = 120;
+export const HYBRID_DELAY_BUFFER_LEN: usize = HYBRID_MAX_DELAY_SAMPLES_48K * HYBRID_STATE_MAX_CHANNELS;
+export const HYBRID_CELT_START_BAND: i32 = 17;
+export const HYBRID_CELT_SWB_END_BAND: i32 = 19;
+export const HYBRID_CELT_FB_END_BAND: i32 = 21;
+
+// Hybrid state owns only glue history. SILK and CELT persistent codec
+// histories stay in their own state modules.
+export struct HybridDecoderState {
+    channels: i32,
+    bandwidth: OpusBandwidth,
+    frame_size_48k: i32,
+    frame_ms: i32,
+    silk_sample_rate_hz: i32,
+    silk_frame_size: i32,
+    celt_start_band: i32,
+    celt_end_band: i32,
+    delay_samples_48k: i32,
+    pending_fec: bool,
+    loss_count: i32,
+    delay_q14: [i32: HYBRID_DELAY_BUFFER_LEN],
+    merge_mem_q14: [i32: HYBRID_STATE_MAX_CHANNELS],
+}
+
+fn clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn validate_channel_count(channels: i32) !void {
+    if channels < 1 || channels > (HYBRID_STATE_MAX_CHANNELS as i32) {
+        return error.HybridStateError;
+    }
+}
+
+fn hybrid_state_frame_ms_for_48k(frame_size_48k: i32) !i32 {
+    if frame_size_48k == 480 {
+        return 10;
+    }
+    if frame_size_48k == 960 {
+        return 20;
+    }
+    return error.HybridStateError;
+}
+
+fn hybrid_state_frame_size_48k_for_duration_us(duration_us: u32) !i32 {
+    if duration_us == 10000 {
+        return 480;
+    }
+    if duration_us == 20000 {
+        return 960;
+    }
+    return error.HybridStateError;
+}
+
+fn hybrid_state_celt_end_band_for_bandwidth(bandwidth: OpusBandwidth) !i32 {
+    if bandwidth == OpusBandwidth.SUPERWIDEBAND {
+        return HYBRID_CELT_SWB_END_BAND;
+    }
+    if bandwidth == OpusBandwidth.FULLBAND {
+        return HYBRID_CELT_FB_END_BAND;
+    }
+    return error.HybridStateError;
+}
+
+export fn hybrid_state_clear_glue(state: &HybridDecoderState) void {
+    clear_i32(&state.delay_q14[0:HYBRID_DELAY_BUFFER_LEN]);
+    clear_i32(&state.merge_mem_q14[0:HYBRID_STATE_MAX_CHANNELS]);
+    state.pending_fec = false;
+    state.loss_count = 0;
+}
+
+export fn hybrid_state_configure(state: &HybridDecoderState, channels: i32, bandwidth: OpusBandwidth, frame_size_48k: i32) !void {
+    try validate_channel_count(channels);
+    const frame_ms: i32 = try hybrid_state_frame_ms_for_48k(frame_size_48k);
+    const celt_end_band: i32 = try hybrid_state_celt_end_band_for_bandwidth(bandwidth);
+
+    state.channels = channels;
+    state.bandwidth = bandwidth;
+    state.frame_size_48k = frame_size_48k;
+    state.frame_ms = frame_ms;
+    state.silk_sample_rate_hz = HYBRID_SILK_SAMPLE_RATE_HZ;
+    state.silk_frame_size = frame_size_48k / 3;
+    state.celt_start_band = HYBRID_CELT_START_BAND;
+    state.celt_end_band = celt_end_band;
+    state.delay_samples_48k = HYBRID_MAX_DELAY_SAMPLES_48K as i32;
+    hybrid_state_clear_glue(state);
+}
+
+export fn hybrid_state_init(state: &HybridDecoderState, channels: i32, bandwidth: OpusBandwidth, frame_size_48k: i32) !void {
+    try hybrid_state_configure(state, channels, bandwidth, frame_size_48k);
+}
+
+export fn hybrid_state_configure_from_packet_info(state: &HybridDecoderState, info: &const PacketInfo) !void {
+    if info.mode != OpusMode.HYBRID || info.frame_count == 0 {
+        return error.HybridStateError;
+    }
+    const frame_size_48k: i32 = try hybrid_state_frame_size_48k_for_duration_us(info.frame_duration_us);
+    try hybrid_state_configure(state, info.channels as i32, info.bandwidth, frame_size_48k);
+}
+
+export fn hybrid_state_reset(state: &HybridDecoderState) void {
+    hybrid_state_clear_glue(state);
+}
+
+export fn hybrid_state_delay_index(state: &const HybridDecoderState, channel: i32, sample: i32) !usize {
+    if state.channels < 1 || state.channels > (HYBRID_STATE_MAX_CHANNELS as i32) {
+        return error.HybridStateError;
+    }
+    if state.delay_samples_48k <= 0 || state.delay_samples_48k > (HYBRID_MAX_DELAY_SAMPLES_48K as i32) {
+        return error.HybridStateError;
+    }
+    if channel < 0 || channel >= state.channels || sample < 0 || sample >= state.delay_samples_48k {
+        return error.HybridStateError;
+    }
+    return (channel as usize) * HYBRID_MAX_DELAY_SAMPLES_48K + (sample as usize);
+}
