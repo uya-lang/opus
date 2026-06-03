@@ -282,7 +282,7 @@
 - [x] 解码 random seed。
 - [x] 解码 pulse blocks。
 - [x] 实现 excitation reconstruction。
-- [ ] 集成 LTP/LPC synthesis。
+- [x] 集成 LTP/LPC synthesis。
 - [ ] 实现 mono decode。
 - [ ] 实现 stereo mid/side reconstruction。
 - [ ] 支持 NB。

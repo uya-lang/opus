@@ -1,0 +1,298 @@
+use src.opus.core.saturate.sat32;
+use src.opus.silk.decoder_control.SILK_CONTROL_LTP_ORDER;
+use src.opus.silk.decoder_control.SILK_CONTROL_GAIN_LEN;
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_NB_SUBFR;
+use src.opus.silk.decoder_control.SILK_CONTROL_NLSF_LEN;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_gain_index;
+use src.opus.silk.decoder_control.silk_decoder_control_lpc_index;
+use src.opus.silk.decoder_control.silk_decoder_control_ltp_index;
+use src.opus.silk.decoder_control.silk_decoder_control_pitch_index;
+use src.opus.silk.lpc.silk_lpc_synthesis_q14;
+use src.opus.silk.ltp.silk_ltp_synthesis_q14;
+use src.opus.silk.pulses.silk_pulses_reconstruct_excitation_q14;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
+use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SILK_MAX_PITCH_LAG;
+use src.opus.silk.state.SILK_CHANNEL_HISTORY_LEN;
+use src.opus.silk.state.SILK_CHANNEL_LPC_STATE_LEN;
+use src.opus.silk.state.SILK_CHANNEL_NLSF_LEN;
+use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.state.SILK_STATE_HISTORY_LEN;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_history_index;
+use src.opus.silk.state.silk_state_lpc_index;
+
+export error SilkSynthesisError;
+
+export const SILK_SYNTHESIS_HISTORY_WRITE_INDEX: usize = SILK_MAX_PITCH_LAG + SILK_MAX_LPC_ORDER;
+
+fn validate_layout(state: &const SilkDecoderState, control: &const SilkDecoderControl, channel: i32, input_len: usize, output_len: usize) !void {
+    if channel < 0 || channel >= state.channels || channel >= control.channels {
+        return error.SilkSynthesisError;
+    }
+    if state.channels != control.channels || state.fs_khz != control.fs_khz || state.lpc_order != control.lpc_order {
+        return error.SilkSynthesisError;
+    }
+    if state.frame_length != control.frame_length || state.subframe_length != control.subframe_length || state.nb_subframes != control.nb_subframes {
+        return error.SilkSynthesisError;
+    }
+    if control.signal_type != SILK_SIGNAL_TYPE_UNVOICED && control.signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkSynthesisError;
+    }
+    if control.frame_length <= 0 || control.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) || control.subframe_length <= 0 || control.nb_subframes <= 0 || control.nb_subframes > (SILK_CONTROL_MAX_NB_SUBFR as i32) {
+        return error.SilkSynthesisError;
+    }
+    if control.subframe_length * control.nb_subframes != control.frame_length {
+        return error.SilkSynthesisError;
+    }
+    const frame_len: usize = control.frame_length as usize;
+    if input_len < frame_len || output_len < frame_len {
+        return error.SilkSynthesisError;
+    }
+}
+
+fn load_lpc_coefficients_q12(coeff_q12: &[i16], control: &const SilkDecoderControl, channel: i32) !void {
+    if coeff_q12.len < (control.lpc_order as usize) {
+        return error.SilkSynthesisError;
+    }
+    var i: i32 = 0;
+    while i < control.lpc_order {
+        const control_index: usize = silk_decoder_control_lpc_index(control, channel, i) catch {
+            return error.SilkSynthesisError;
+        };
+        if control_index >= SILK_CONTROL_NLSF_LEN {
+            return error.SilkSynthesisError;
+        }
+        const value_q12: i32 = control.pred_coef_q12[control_index];
+        if value_q12 < -32768 || value_q12 > 32767 {
+            return error.SilkSynthesisError;
+        }
+        coeff_q12.ptr[i as usize] = value_q12 as i16;
+        i = i + 1;
+    }
+}
+
+fn load_ltp_coefficients_q14(coeff_q14: &[i16], control: &const SilkDecoderControl, channel: i32, subframe: i32) !void {
+    if coeff_q14.len < SILK_CONTROL_LTP_ORDER {
+        return error.SilkSynthesisError;
+    }
+    var tap: i32 = 0;
+    while tap < (SILK_CONTROL_LTP_ORDER as i32) {
+        const control_index: usize = silk_decoder_control_ltp_index(control, channel, subframe, tap) catch {
+            return error.SilkSynthesisError;
+        };
+        coeff_q14.ptr[tap as usize] = control.ltp_coef_q14[control_index];
+        tap = tap + 1;
+    }
+}
+
+fn copy_state_history_to_q15(state: &const SilkDecoderState, channel: i32, history_q15: &[i32]) !void {
+    if history_q15.len < SILK_STATE_HISTORY_LEN {
+        return error.SilkSynthesisError;
+    }
+    var i: i32 = 0;
+    while i < (SILK_STATE_HISTORY_LEN as i32) {
+        const state_index: usize = silk_state_history_index(state, channel, i) catch {
+            return error.SilkSynthesisError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkSynthesisError;
+        }
+        history_q15.ptr[i as usize] = sat32((state.history_q14[state_index] as i64) << 1);
+        i = i + 1;
+    }
+}
+
+fn update_ltp_history_q14(state: &SilkDecoderState, channel: i32, lpc_excitation_q14: &[i32], frame_len: usize) !void {
+    if lpc_excitation_q14.len < frame_len {
+        return error.SilkSynthesisError;
+    }
+
+    var next_history_q14: [i32: SILK_STATE_HISTORY_LEN] = [0: SILK_STATE_HISTORY_LEN];
+    var i: usize = 0;
+    while i < SILK_SYNTHESIS_HISTORY_WRITE_INDEX {
+        const source: usize = frame_len + i;
+        if source < SILK_SYNTHESIS_HISTORY_WRITE_INDEX {
+            const source_index: usize = silk_state_history_index(state, channel, source as i32) catch {
+                return error.SilkSynthesisError;
+            };
+            if source_index >= SILK_CHANNEL_HISTORY_LEN {
+                return error.SilkSynthesisError;
+            }
+            next_history_q14[i] = state.history_q14[source_index];
+        } else {
+            const frame_index: usize = source - SILK_SYNTHESIS_HISTORY_WRITE_INDEX;
+            if frame_index >= frame_len {
+                return error.SilkSynthesisError;
+            }
+            next_history_q14[i] = lpc_excitation_q14.ptr[frame_index];
+        }
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < SILK_SYNTHESIS_HISTORY_WRITE_INDEX {
+        const state_index: usize = silk_state_history_index(state, channel, i as i32) catch {
+            return error.SilkSynthesisError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkSynthesisError;
+        }
+        state.history_q14[state_index] = next_history_q14[i];
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < frame_len {
+        const state_index: usize = silk_state_history_index(state, channel, (SILK_SYNTHESIS_HISTORY_WRITE_INDEX + i) as i32) catch {
+            return error.SilkSynthesisError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkSynthesisError;
+        }
+        state.history_q14[state_index] = lpc_excitation_q14.ptr[i];
+        i = i + 1;
+    }
+
+    i = SILK_SYNTHESIS_HISTORY_WRITE_INDEX + frame_len;
+    while i < SILK_STATE_HISTORY_LEN {
+        const state_index: usize = silk_state_history_index(state, channel, i as i32) catch {
+            return error.SilkSynthesisError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkSynthesisError;
+        }
+        state.history_q14[state_index] = 0;
+        i = i + 1;
+    }
+}
+
+fn update_side_state(state: &SilkDecoderState, control: &const SilkDecoderControl, channel: i32, final_seed: i32) !void {
+    const last_gain_index: usize = silk_decoder_control_gain_index(control, channel, control.nb_subframes - 1) catch {
+        return error.SilkSynthesisError;
+    };
+    if last_gain_index >= SILK_CONTROL_GAIN_LEN {
+        return error.SilkSynthesisError;
+    }
+    if (channel as usize) >= SILK_STATE_MAX_CHANNELS {
+        return error.SilkSynthesisError;
+    }
+    state.prev_gain_q16[channel as usize] = control.gains_q16[last_gain_index];
+
+    var i: i32 = 0;
+    while i < control.lpc_order {
+        const control_index: usize = silk_decoder_control_lpc_index(control, channel, i) catch {
+            return error.SilkSynthesisError;
+        };
+        const state_index: usize = silk_state_lpc_index(state, channel, i) catch {
+            return error.SilkSynthesisError;
+        };
+        if control_index >= SILK_CONTROL_NLSF_LEN {
+            return error.SilkSynthesisError;
+        }
+        if state_index >= SILK_CHANNEL_NLSF_LEN {
+            return error.SilkSynthesisError;
+        }
+        state.old_nlsf_q15[state_index] = control.nlsf_q15[control_index];
+        i = i + 1;
+    }
+
+    state.prev_signal_type = control.signal_type;
+    if control.signal_type == SILK_SIGNAL_TYPE_VOICED {
+        const pitch_index: usize = silk_decoder_control_pitch_index(control, control.nb_subframes - 1) catch {
+            return error.SilkSynthesisError;
+        };
+        if pitch_index >= SILK_CONTROL_MAX_NB_SUBFR {
+            return error.SilkSynthesisError;
+        }
+        state.prev_lag = control.pitch_lags[pitch_index];
+    }
+    state.rng = final_seed as u32;
+    state.loss_count = 0;
+    state.first_frame_after_reset = false;
+}
+
+export fn silk_synthesis_filter_frame_q14(state: &SilkDecoderState, control: &const SilkDecoderControl, channel: i32, excitation_q14: &[i32], out_q14: &[i32]) !void {
+    try validate_layout(state, control, channel, excitation_q14.len, out_q14.len);
+
+    const frame_len: usize = control.frame_length as usize;
+    const subframe_len: usize = control.subframe_length as usize;
+    var lpc_excitation_q14: [i32: SILK_MAX_FRAME_SAMPLES] = [0: SILK_MAX_FRAME_SAMPLES];
+
+    if control.signal_type == SILK_SIGNAL_TYPE_VOICED {
+        var ltp_history_q15: [i32: SILK_STATE_HISTORY_LEN] = [0: SILK_STATE_HISTORY_LEN];
+        try copy_state_history_to_q15(state, channel, &ltp_history_q15[0:SILK_STATE_HISTORY_LEN]);
+
+        var subframe: i32 = 0;
+        while subframe < control.nb_subframes {
+            const pitch_index: usize = silk_decoder_control_pitch_index(control, subframe) catch {
+                return error.SilkSynthesisError;
+            };
+            if pitch_index >= SILK_CONTROL_MAX_NB_SUBFR {
+                return error.SilkSynthesisError;
+            }
+            const pitch_lag: i32 = control.pitch_lags[pitch_index];
+            if pitch_lag <= 0 {
+                return error.SilkSynthesisError;
+            }
+            var ltp_coeff_q14: [i16: SILK_CONTROL_LTP_ORDER] = [0: SILK_CONTROL_LTP_ORDER];
+            try load_ltp_coefficients_q14(&ltp_coeff_q14[0:SILK_CONTROL_LTP_ORDER], control, channel, subframe);
+            const sample_offset: usize = (subframe as usize) * subframe_len;
+            silk_ltp_synthesis_q14(
+                &lpc_excitation_q14[sample_offset:subframe_len],
+                &ltp_history_q15[0:SILK_STATE_HISTORY_LEN],
+                &excitation_q14.ptr[sample_offset:subframe_len],
+                &ltp_coeff_q14[0:SILK_CONTROL_LTP_ORDER],
+                (SILK_SYNTHESIS_HISTORY_WRITE_INDEX + sample_offset) as i32,
+                pitch_lag,
+                subframe_len as i32,
+            ) catch {
+                return error.SilkSynthesisError;
+            };
+            subframe = subframe + 1;
+        }
+    } else {
+        var i: usize = 0;
+        while i < frame_len {
+            lpc_excitation_q14[i] = excitation_q14.ptr[i];
+            i = i + 1;
+        }
+    }
+
+    var lpc_coeff_q12: [i16: SILK_MAX_LPC_ORDER] = [0: SILK_MAX_LPC_ORDER];
+    try load_lpc_coefficients_q12(&lpc_coeff_q12[0:SILK_MAX_LPC_ORDER], control, channel);
+
+    const lpc_state_offset: usize = silk_state_lpc_index(state, channel, 0) catch {
+        return error.SilkSynthesisError;
+    };
+    silk_lpc_synthesis_q14(
+        &out_q14[0:frame_len],
+        &state.lpc_state_q14[lpc_state_offset:SILK_MAX_LPC_ORDER],
+        &lpc_excitation_q14[0:frame_len],
+        &lpc_coeff_q12[0:SILK_MAX_LPC_ORDER],
+        control.lpc_order,
+        control.frame_length,
+    ) catch {
+        return error.SilkSynthesisError;
+    };
+
+    try update_ltp_history_q14(state, channel, &lpc_excitation_q14[0:frame_len], frame_len);
+    try update_side_state(state, control, channel, state.rng as i32);
+}
+
+export fn silk_synthesis_decode_frame_q14(state: &SilkDecoderState, control: &const SilkDecoderControl, channel: i32, out_q14: &[i32]) !i32 {
+    if control.frame_length <= 0 || control.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkSynthesisError;
+    }
+    const frame_len: usize = control.frame_length as usize;
+    var excitation_q14: [i32: SILK_MAX_FRAME_SAMPLES] = [0: SILK_MAX_FRAME_SAMPLES];
+    const final_seed: i32 = silk_pulses_reconstruct_excitation_q14(control, channel, &excitation_q14[0:frame_len]) catch {
+        return error.SilkSynthesisError;
+    };
+    try silk_synthesis_filter_frame_q14(state, control, channel, &excitation_q14[0:frame_len], out_q14);
+    state.rng = final_seed as u32;
+    return final_seed;
+}

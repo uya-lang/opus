@@ -1,0 +1,184 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.decoder_control.SILK_CONTROL_LTP_ORDER;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
+use src.opus.silk.decoder_control.silk_decoder_control_lpc_index;
+use src.opus.silk.decoder_control.silk_decoder_control_ltp_index;
+use src.opus.silk.decoder_control.silk_decoder_control_pitch_index;
+use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SILK_MAX_PITCH_LAG;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_history_index;
+use src.opus.silk.state.silk_state_init;
+use src.opus.silk.state.silk_state_lpc_index;
+use src.opus.silk.synthesis.SILK_SYNTHESIS_HISTORY_WRITE_INDEX;
+use src.opus.silk.synthesis.silk_synthesis_decode_frame_q14;
+use src.opus.silk.synthesis.silk_synthesis_filter_frame_q14;
+
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
+fn init_small_synthesis_state(state: &SilkDecoderState, control: &SilkDecoderControl, frame_length: i32, subframe_length: i32, nb_subframes: i32) !void {
+    try silk_state_init(state, 1, 8000, 10);
+    state.frame_length = frame_length;
+    state.subframe_length = subframe_length;
+    state.nb_subframes = nb_subframes;
+    try silk_decoder_control_init_from_state(control, state);
+}
+
+fn fill_test_lpc_coefficients(control: &SilkDecoderControl) !void {
+    var coeff_q12: [i32: SILK_MAX_LPC_ORDER] = [512, -256, 128, -64, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var i: i32 = 0;
+    while i < control.lpc_order {
+        const index: usize = try silk_decoder_control_lpc_index(control, 0, i);
+        control.pred_coef_q12[index] = coeff_q12[i as usize];
+        i = i + 1;
+    }
+}
+
+test "silk synthesis exposes the LTP history write point" {
+    try assert_eq_i32(SILK_SYNTHESIS_HISTORY_WRITE_INDEX as i32, (SILK_MAX_PITCH_LAG + SILK_MAX_LPC_ORDER) as i32);
+}
+
+test "silk synthesis reconstructs unvoiced pulses and runs LPC" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_small_synthesis_state(&state, &control, 4, 2, 2);
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 0;
+    control.seed = 0;
+    control.pulses[0] = 1;
+    control.pulses[1] = -1;
+    control.pulses[2] = 0;
+    control.pulses[3] = 2;
+    control.gains_q16[1] = 65536;
+    control.nlsf_q15[0] = 1000;
+    control.nlsf_q15[9] = 19000;
+    try fill_test_lpc_coefficients(&control);
+
+    var out_q14: [i32: 4] = [0: 4];
+    const final_seed: i32 = try silk_synthesis_decode_frame_q14(&state, &control, 0, &out_q14[0:4]);
+
+    var expected_out_q14: [i32: 4] = [16784, 15680, -624, 32608];
+    var expected_lpc_state_q14: [i32: 10] = [0, 0, 0, 0, 0, 0, 16784, 15680, -624, 32608];
+    try assert_i32_slice_eq(&out_q14[0:4], &expected_out_q14[0:4]);
+    try assert_i32_slice_eq(&state.lpc_state_q14[0:10], &expected_lpc_state_q14[0:10]);
+    try assert_eq_i32(state.history_q14[300], 16704);
+    try assert_eq_i32(state.history_q14[301], 13504);
+    try assert_eq_i32(state.history_q14[302], -1600);
+    try assert_eq_i32(state.history_q14[303], 33088);
+    try assert_eq_i32(state.history_q14[SILK_SYNTHESIS_HISTORY_WRITE_INDEX], 16704);
+    try assert_eq_i32(state.history_q14[SILK_SYNTHESIS_HISTORY_WRITE_INDEX + 3], 33088);
+    try assert_eq_i32(final_seed, 1591146794);
+    try assert_eq_i32(state.rng as i32, 1591146794);
+    try assert_eq_i32(state.prev_gain_q16[0], 65536);
+    try assert_eq_i32(state.old_nlsf_q15[0] as i32, 1000);
+    try assert_eq_i32(state.old_nlsf_q15[9] as i32, 19000);
+    try assert(!state.first_frame_after_reset, "synthesis must advance the reset marker");
+}
+
+test "silk synthesis applies voiced LTP per subframe before LPC" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_small_synthesis_state(&state, &control, 6, 3, 2);
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+    control.quant_offset_type = 0;
+    try fill_test_lpc_coefficients(&control);
+    control.gains_q16[1] = 777;
+
+    state.history_q14[297] = 3125;
+    state.history_q14[298] = -6250;
+    state.history_q14[299] = 12500;
+    state.history_q14[300] = -25000;
+    state.history_q14[301] = 50000;
+
+    var subframe: i32 = 0;
+    while subframe < 2 {
+        control.pitch_lags[try silk_decoder_control_pitch_index(&control, subframe)] = 5;
+        var tap: i32 = 0;
+        while tap < (SILK_CONTROL_LTP_ORDER as i32) {
+            const ltp_index: usize = try silk_decoder_control_ltp_index(&control, 0, subframe, tap);
+            if tap == 0 || tap == 1 {
+                control.ltp_coef_q14[ltp_index] = 8192;
+            } else {
+                control.ltp_coef_q14[ltp_index] = 0;
+            }
+            tap = tap + 1;
+        }
+        subframe = subframe + 1;
+    }
+
+    var excitation_q14: [i32: 6] = [0, 0, 0, 0, 0, 0];
+    var out_q14: [i32: 6] = [0: 6];
+    try silk_synthesis_filter_frame_q14(&state, &control, 0, &excitation_q14[0:6], &out_q14[0:6]);
+
+    var expected_out_q14: [i32: 6] = [12584, 26652, 2612, 5360, 19942, 14476];
+    var expected_lpc_state_q14: [i32: 10] = [0, 0, 0, 0, 12584, 26652, 2612, 5360, 19942, 14476];
+    try assert_i32_slice_eq(&out_q14[0:6], &expected_out_q14[0:6]);
+    try assert_i32_slice_eq(&state.lpc_state_q14[0:10], &expected_lpc_state_q14[0:10]);
+    try assert_eq_i32(state.history_q14[298], 12504);
+    try assert_eq_i32(state.history_q14[299], 25004);
+    try assert_eq_i32(state.history_q14[300], 4);
+    try assert_eq_i32(state.history_q14[301], 6256);
+    try assert_eq_i32(state.history_q14[302], 18758);
+    try assert_eq_i32(state.history_q14[303], 12508);
+    try assert_eq_i32(state.history_q14[SILK_SYNTHESIS_HISTORY_WRITE_INDEX + 5], 12508);
+    try assert_eq_i32(state.prev_signal_type, SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(state.prev_lag, 5);
+    try assert_eq_i32(state.prev_gain_q16[0], 777);
+}
+
+test "silk synthesis rejects mismatched frame layouts" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try init_small_synthesis_state(&state, &control, 4, 2, 2);
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    control.quant_offset_type = 0;
+    try fill_test_lpc_coefficients(&control);
+
+    var excitation_q14: [i32: 4] = [0: 4];
+    var out_q14: [i32: 4] = [0: 4];
+    control.frame_length = 5;
+    const mismatch: !void = silk_synthesis_filter_frame_q14(&state, &control, 0, &excitation_q14[0:4], &out_q14[0:4]);
+    match mismatch {
+        error.SilkSynthesisError => {}
+        else => { try assert(false, "synthesis must reject state/control frame mismatches"); }
+    }
+
+    control.frame_length = 4;
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+    control.pitch_lags[0] = 0;
+    const bad_pitch: !void = silk_synthesis_filter_frame_q14(&state, &control, 0, &excitation_q14[0:4], &out_q14[0:4]);
+    match bad_pitch {
+        error.SilkSynthesisError => {}
+        else => { try assert(false, "voiced synthesis must reject missing pitch lags"); }
+    }
+
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    const bad_channel: !i32 = silk_synthesis_decode_frame_q14(&state, &control, 1, &out_q14[0:4]);
+    match bad_channel {
+        error.SilkSynthesisError => {}
+        else => { try assert(false, "synthesis must reject inactive channels"); }
+    }
+
+    const bad_history: !usize = silk_state_history_index(&state, 0, 624);
+    match bad_history {
+        error.SilkStateError => {}
+        else => { try assert(false, "test must keep state history bounds honest"); }
+    }
+
+    const bad_lpc: !usize = silk_state_lpc_index(&state, 0, 10);
+    match bad_lpc {
+        error.SilkStateError => {}
+        else => { try assert(false, "test must keep state LPC bounds honest"); }
+    }
+}
