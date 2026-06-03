@@ -112,6 +112,45 @@ test "decoder api conceals consecutive lost celt packets" {
     try assert(decoder.celt_plc_scratch.used_frequency_history, "consecutive CELT losses must keep using bounded PLC history");
 }
 
+test "decoder api decodes a normal celt packet after packet loss" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var first_packet: [byte: 65] = [0: 65];
+    first_packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        first_packet[i] = ((i * 9 + 13) as! byte).value;
+        i = i + 1;
+    }
+
+    var first_pcm: [i16: 120] = [0: 120];
+    const first_decoded: i32 = try decoder_decode_i16(&decoder, &first_packet[0:65], &first_pcm[0:120], 120, false);
+    try assert_eq_i32(first_decoded, 120);
+
+    var empty_packet: [byte: 1] = [0];
+    var lost_pcm: [i16: 120] = [0: 120];
+    const lost_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &lost_pcm[0:120], 120, false);
+    try assert_eq_i32(lost_decoded, 120);
+    try assert_eq_i32(decoder.celt.loss_count, 1);
+
+    var second_packet: [byte: 65] = [0: 65];
+    second_packet[0] = (128 as! byte).value;
+    i = 1;
+    while i < 65 {
+        second_packet[i] = ((255 - (i * 2)) as! byte).value;
+        i = i + 1;
+    }
+
+    var second_pcm: [i16: 120] = [0: 120];
+    const second_decoded: i32 = try decoder_decode_i16(&decoder, &second_packet[0:65], &second_pcm[0:120], 120, false);
+    try assert_eq_i32(second_decoded, 120);
+    try assert_eq_i32(decoder.celt.loss_count, 0);
+    try assert(decoder.active_mode == OpusMode.CELT, "normal packet decode after PLC must keep CELT mode active");
+    try assert(decoder.celt.freq_history_ready, "normal packet decode after PLC must refresh frequency PLC history");
+}
+
 test "decoder api decode_fec falls back to plc without consuming celt packet" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
