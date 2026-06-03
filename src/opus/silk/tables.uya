@@ -319,6 +319,20 @@ export fn silk_lbrr_flags_3_icdf_value(index: usize) byte {
     return SILK_LBRR_FLAGS_3_ICDF[index];
 }
 
+export fn silk_pitch_lag_icdf_value(index: usize) byte {
+    if index >= 32 {
+        return 0;
+    }
+    return SILK_PITCH_LAG_ICDF[index];
+}
+
+export fn silk_pitch_delta_icdf_value(index: usize) byte {
+    if index >= 21 {
+        return 0;
+    }
+    return SILK_PITCH_DELTA_ICDF[index];
+}
+
 export fn silk_type_offset_vad_icdf_value(index: usize) byte {
     if index >= 4 {
         return 0;
@@ -368,11 +382,25 @@ export fn silk_uniform3_icdf_value(index: usize) byte {
     return SILK_UNIFORM3_ICDF[index];
 }
 
+export fn silk_uniform4_icdf_value(index: usize) byte {
+    if index >= 4 {
+        return 0;
+    }
+    return SILK_UNIFORM4_ICDF[index];
+}
+
 export fn silk_uniform5_icdf_value(index: usize) byte {
     if index >= 5 {
         return 0;
     }
     return SILK_UNIFORM5_ICDF[index];
+}
+
+export fn silk_uniform6_icdf_value(index: usize) byte {
+    if index >= 6 {
+        return 0;
+    }
+    return SILK_UNIFORM6_ICDF[index];
 }
 
 export fn silk_uniform8_icdf_value(index: usize) byte {

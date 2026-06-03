@@ -275,7 +275,7 @@
 - [x] 解码 quantization offset。
 - [x] 解码 gains。
 - [x] 解码 NLSF indices。
-- [ ] 解码 pitch lag。
+- [x] 解码 pitch lag。
 - [ ] 解码 pitch contour。
 - [ ] 解码 LTP coefficients。
 - [ ] 解码 LTP scaling。

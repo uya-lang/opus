@@ -9,6 +9,7 @@ use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.decoder_control.silk_decoder_control_gain_index;
 use src.opus.silk.decoder_control.silk_decoder_control_lpc_index;
+use src.opus.silk.decoder_control.silk_decoder_control_pitch_index;
 use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
 use src.opus.silk.nlsf.silk_nlsf_decode_q15;
 use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
@@ -21,6 +22,8 @@ use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
 use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
 use src.opus.silk.state.SILK_MAX_LPC_ORDER;
 use src.opus.silk.state.SILK_MAX_NB_SUBFR;
+use src.opus.silk.state.SILK_MAX_PITCH_LAG_MS;
+use src.opus.silk.state.SILK_MIN_PITCH_LAG_MS;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
@@ -28,8 +31,12 @@ use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 use src.opus.silk.tables.silk_nlsf_ext_icdf_value;
 use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pitch_delta_icdf_value;
+use src.opus.silk.tables.silk_pitch_lag_icdf_value;
 use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform6_icdf_value;
 use src.opus.silk.tables.silk_uniform8_icdf_value;
 
 export error SilkEntropyDecodeError;
@@ -68,6 +75,11 @@ export struct SilkEntropyDecoder {
     nlsf_indices: [i16: SILK_ENTROPY_NLSF_INDEX_CAPACITY],
     nlsf_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
     nlsf_interp_q2: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    pitch_lag_indices: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    pitch_lag_values: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    pitch_lag_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    last_pitch_lag_indices: [i32: SILK_ENTROPY_MAX_CHANNELS],
+    last_pitch_lag_valid: [bool: SILK_ENTROPY_MAX_CHANNELS],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -178,6 +190,76 @@ fn fill_uniform8_icdf(out: &[byte]) !void {
         out.ptr[i] = silk_uniform8_icdf_value(i);
         i = i + 1;
     }
+}
+
+fn fill_pitch_lag_icdf(out: &[byte]) !void {
+    if out.len < 32 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_pitch_lag_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_pitch_delta_icdf(out: &[byte]) !void {
+    if out.len < 21 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 21 {
+        out.ptr[i] = silk_pitch_delta_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_pitch_low_bits_icdf(out: &[byte], fs_khz: i32) !usize {
+    if fs_khz == 8 {
+        if out.len < 4 {
+            return error.SilkEntropyDecodeError;
+        }
+        var i: usize = 0;
+        while i < 4 {
+            out.ptr[i] = silk_uniform4_icdf_value(i);
+            i = i + 1;
+        }
+        return 4 as usize;
+    }
+    if fs_khz == 12 {
+        if out.len < 6 {
+            return error.SilkEntropyDecodeError;
+        }
+        var j: usize = 0;
+        while j < 6 {
+            out.ptr[j] = silk_uniform6_icdf_value(j);
+            j = j + 1;
+        }
+        return 6 as usize;
+    }
+    if fs_khz == 16 {
+        try fill_uniform8_icdf(out);
+        return 8 as usize;
+    }
+    return error.SilkEntropyDecodeError;
+}
+
+fn silk_entropy_decode_pitch_lag_absolute(decoder: &SilkEntropyDecoder, fs_khz: i32) !i32 {
+    const low_bits_len: i32 = fs_khz >> 1;
+    if low_bits_len != 4 && low_bits_len != 6 && low_bits_len != 8 {
+        return error.SilkEntropyDecodeError;
+    }
+    var pitch_lag_icdf: [byte: 32] = [0: 32];
+    var low_bits_icdf: [byte: 8] = [0: 8];
+    try fill_pitch_lag_icdf(&pitch_lag_icdf[0:32]);
+    const low_len: usize = try fill_pitch_low_bits_icdf(&low_bits_icdf[0:8], fs_khz);
+
+    const high_symbol: i32 = try silk_entropy_decode_icdf(decoder, &pitch_lag_icdf[0:32], 8);
+    const low_symbol: i32 = try silk_entropy_decode_icdf(decoder, &low_bits_icdf[0:low_len], 8);
+    if high_symbol < 0 || high_symbol >= 32 || low_symbol < 0 || low_symbol >= low_bits_len {
+        return error.SilkEntropyDecodeError;
+    }
+    return high_symbol * low_bits_len + low_symbol;
 }
 
 fn fill_nlsf_cb1_icdf(out: &[byte], codebook: i32, signal_type: i32) !void {
@@ -344,6 +426,11 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_i16(&decoder.nlsf_indices[0:SILK_ENTROPY_NLSF_INDEX_CAPACITY]);
     clear_bool(&decoder.nlsf_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_i32(&decoder.nlsf_interp_q2[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.pitch_lag_indices[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.pitch_lag_values[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.pitch_lag_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.last_pitch_lag_indices[0:SILK_ENTROPY_MAX_CHANNELS]);
+    clear_bool(&decoder.last_pitch_lag_valid[0:SILK_ENTROPY_MAX_CHANNELS]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -459,6 +546,12 @@ export fn silk_entropy_decode_signal_type(decoder: &SilkEntropyDecoder, channel:
     decoder.quant_offset_types[index] = 0;
     decoder.quant_offset_valid[index] = false;
     decoder.signal_types[index] = signal_type;
+    if signal_type == SILK_SIGNAL_TYPE_UNVOICED {
+        if channel < 0 || channel >= (SILK_ENTROPY_MAX_CHANNELS as i32) {
+            return error.SilkEntropyDecodeError;
+        }
+        decoder.last_pitch_lag_valid[channel as usize] = false;
+    }
     try silk_entropy_decoder_check(decoder);
     return signal_type;
 }
@@ -636,6 +729,74 @@ export fn silk_entropy_decode_nlsf_indices(decoder: &SilkEntropyDecoder, control
         control.nlsf_q15[control_index] = nlsf_q15[lpc_index as usize];
         lpc_index = lpc_index + 1;
     }
+    try silk_entropy_decoder_check(decoder);
+}
+
+export fn silk_entropy_decode_pitch_lag(decoder: &SilkEntropyDecoder, control: &SilkDecoderControl, channel: i32, frame_index: i32, conditional_coding: bool) !void {
+    const flag_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    if channel < 0 || channel >= decoder.channels || channel >= (SILK_ENTROPY_MAX_CHANNELS as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.type_offset_valid[flag_index] {
+        return error.SilkEntropyDecodeError;
+    }
+    if decoder.signal_types[flag_index] != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.channels != decoder.channels || channel >= control.channels || control.nb_subframes < 1 || control.nb_subframes > (SILK_ENTROPY_MAX_NB_SUBFR as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.fs_khz != 8 && control.fs_khz != 12 && control.fs_khz != 16 {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.frame_length <= 0 || control.subframe_length <= 0 {
+        return error.SilkEntropyDecodeError;
+    }
+
+    const channel_index: usize = channel as usize;
+    if channel_index >= SILK_ENTROPY_MAX_CHANNELS {
+        return error.SilkEntropyDecodeError;
+    }
+    var lag_index: i32 = 0;
+    var decoded_delta: bool = false;
+    if conditional_coding && decoder.last_pitch_lag_valid[channel_index] {
+        var delta_icdf: [byte: 21] = [0: 21];
+        try fill_pitch_delta_icdf(&delta_icdf[0:21]);
+        const delta_symbol: i32 = try silk_entropy_decode_icdf(decoder, &delta_icdf[0:21], 8);
+        if delta_symbol < 0 || delta_symbol > 20 {
+            return error.SilkEntropyDecodeError;
+        }
+        if delta_symbol > 0 {
+            lag_index = decoder.last_pitch_lag_indices[channel_index] + delta_symbol - 9;
+            decoded_delta = true;
+        }
+    }
+    if !decoded_delta {
+        lag_index = try silk_entropy_decode_pitch_lag_absolute(decoder, control.fs_khz);
+    }
+
+    const min_lag: i32 = SILK_MIN_PITCH_LAG_MS * control.fs_khz;
+    const max_lag: i32 = SILK_MAX_PITCH_LAG_MS * control.fs_khz;
+    const pitch_lag: i32 = min_lag + lag_index;
+    if pitch_lag < min_lag || pitch_lag > max_lag {
+        return error.SilkEntropyDecodeError;
+    }
+
+    var subframe: i32 = 0;
+    while subframe < control.nb_subframes {
+        const pitch_index: usize = try silk_decoder_control_pitch_index(control, subframe);
+        control.pitch_lags[pitch_index] = pitch_lag;
+        subframe = subframe + 1;
+    }
+
+    decoder.pitch_lag_indices[flag_index] = lag_index;
+    decoder.pitch_lag_values[flag_index] = pitch_lag;
+    decoder.pitch_lag_valid[flag_index] = true;
+    decoder.last_pitch_lag_indices[channel_index] = lag_index;
+    decoder.last_pitch_lag_valid[channel_index] = true;
     try silk_entropy_decoder_check(decoder);
 }
 
