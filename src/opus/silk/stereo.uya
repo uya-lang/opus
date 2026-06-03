@@ -16,6 +16,7 @@ const SILK_STEREO_QUANT_STEP_Q16: i32 = 6554;
 
 export struct SilkStereoState {
     pred_prev_q13: [i32: SILK_STEREO_PRED_COUNT],
+    // PCM-domain delayed mid/side samples, not Q-format values.
     s_mid: [i16: 2],
     s_side: [i16: 2],
 }

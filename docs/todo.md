@@ -264,7 +264,7 @@
 验收标准：
 
 - [x] SILK 基础模块可独立跑 unit tests。
-- [ ] 所有 Q-format 在结构体字段中明确。
+- [x] 所有 Q-format 在结构体字段中明确。
 
 ## 10. SILK-only Decoder
 

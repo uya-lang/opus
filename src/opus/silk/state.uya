@@ -17,6 +17,8 @@ export const SILK_CHANNEL_HISTORY_LEN: usize = SILK_STATE_HISTORY_LEN * SILK_STA
 export const SILK_CHANNEL_LPC_STATE_LEN: usize = SILK_MAX_LPC_ORDER * SILK_STATE_MAX_CHANNELS;
 export const SILK_CHANNEL_NLSF_LEN: usize = SILK_MAX_LPC_ORDER * SILK_STATE_MAX_CHANNELS;
 
+// Fixed-point history fields use a _q* suffix; other fields are counts,
+// rates, flags, entropy state, or integer decoder metadata.
 export struct SilkDecoderState {
     channels: i32,
     sample_rate_hz: i32,

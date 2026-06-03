@@ -16,6 +16,8 @@ export const SILK_CONTROL_LTP_LEN: usize = SILK_CONTROL_MAX_CHANNELS * SILK_CONT
 export const SILK_SIGNAL_TYPE_UNVOICED: i32 = 0;
 export const SILK_SIGNAL_TYPE_VOICED: i32 = 1;
 
+// Fixed-point control vectors use a _q* suffix; pitch_lags and layout fields
+// are integer indices, counts, or codec flags.
 export struct SilkDecoderControl {
     channels: i32,
     fs_khz: i32,

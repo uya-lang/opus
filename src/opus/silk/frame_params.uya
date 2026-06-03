@@ -10,6 +10,7 @@ use src.opus.silk.state.silk_state_lpc_order_for_fs_khz;
 
 export error SilkFrameParamsError;
 
+// Packet-derived integer layout metadata; no field in this struct is Q-format.
 export struct SilkFrameParams {
     channels: i32,
     sample_rate_hz: i32,
