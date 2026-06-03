@@ -8,9 +8,12 @@ use src.opus.entropy.range_enc.ec_enc_icdf;
 use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
+use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_NB_SUBFR;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
+use src.opus.silk.entropy_decode.silk_entropy_decode_gains;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
@@ -18,13 +21,17 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_gain_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 use src.opus.silk.tables.silk_table_len;
 use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
 
 fn encode_test_payload(packet: &[byte]) !void {
     const icdf: [byte: 4] = [200, 100, 40, 0];
@@ -131,6 +138,91 @@ fn encode_type_offset_payload(packet: &[byte], symbols: &[i32], vad_flags: &[boo
         }
         channel = channel + 1;
     }
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fill_gain_icdf(out: &[byte], signal_table: i32) !void {
+    if out.len < 8 {
+        try assert(false, "test gain iCDF helper needs 8 bytes");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(signal_table, i);
+        i = i + 1;
+    }
+}
+
+fn fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        try assert(false, "test delta gain iCDF helper needs 41 bytes");
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "test uniform8 iCDF helper needs 8 bytes");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn encode_independent_gains_payload(packet: &[byte], type_offset_symbol: i32, vad: bool, first_msb: i32, first_lsb: i32, delta_symbols: &[i32], nb_subframes: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], vad);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+
+    var gain_signal_table: i32 = 0;
+    if vad {
+        gain_signal_table = (type_offset_symbol >> 1) + 1;
+    }
+    var gain_icdf: [byte: 8] = [0: 8];
+    try fill_gain_icdf(&gain_icdf[0:8], gain_signal_table);
+    ec_enc_icdf(&enc, first_msb, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    ec_enc_icdf(&enc, first_lsb, &uniform8_icdf[0:8], 8);
+
+    var delta_icdf: [byte: 41] = [0: 41];
+    try fill_delta_gain_icdf(&delta_icdf[0:41]);
+    var subframe: i32 = 1;
+    while subframe < nb_subframes {
+        ec_enc_icdf(&enc, delta_symbols.ptr[(subframe - 1) as usize], &delta_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn encode_conditional_gains_payload(packet: &[byte], type_offset_symbol: i32, vad: bool, delta_symbols: &[i32], nb_subframes: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], vad);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+
+    var delta_icdf: [byte: 41] = [0: 41];
+    try fill_delta_gain_icdf(&delta_icdf[0:41]);
+    var subframe: i32 = 0;
+    while subframe < nb_subframes {
+        ec_enc_icdf(&enc, delta_symbols.ptr[subframe as usize], &delta_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
     _ = try ec_enc_done(&enc);
     try ec_enc_check(&enc);
 }
@@ -313,6 +405,19 @@ test "silk entropy decoder exposes type offset tables" {
     try assert_eq_i32(silk_type_offset_no_vad_icdf_value(1) as i32, 0);
 }
 
+test "silk entropy decoder exposes gain tables" {
+    try assert_eq_i32(SILK_ENTROPY_MAX_NB_SUBFR as i32, 4);
+    try assert_eq_i32(silk_table_len(18) as i32, 24);
+    try assert_eq_i32(silk_table_len(19) as i32, 41);
+    try assert_eq_i32(silk_gain_icdf_value(0, 0) as i32, 224);
+    try assert_eq_i32(silk_gain_icdf_value(1, 1) as i32, 237);
+    try assert_eq_i32(silk_gain_icdf_value(2, 7) as i32, 0);
+    try assert_eq_i32(silk_delta_gain_icdf_value(0) as i32, 250);
+    try assert_eq_i32(silk_delta_gain_icdf_value(40) as i32, 0);
+    try assert_eq_i32(silk_uniform8_icdf_value(0) as i32, 224);
+    try assert_eq_i32(silk_uniform8_icdf_value(7) as i32, 0);
+}
+
 test "silk entropy decoder decodes signal type from cached VAD flags" {
     var symbols: [i32: 24] = [0: 24];
     var vad: [bool: 24] = [false: 24];
@@ -379,4 +484,76 @@ test "silk entropy decoder derives quantization offset from cached type offset" 
         error.SilkEntropyDecodeError => {}
         else => { try assert(false, "quantization offset decode must require a cached type offset symbol"); }
     }
+}
+
+test "silk entropy decoder decodes and dequantizes gains" {
+    var delta_symbols: [i32: 3] = [4, 5, 3];
+    var packet: [byte: 32] = [0: 32];
+    try encode_independent_gains_payload(&packet[0:32], 2, true, 3, 5, &delta_symbols[0:3], 4);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(try silk_entropy_decode_quantization_offset(&dec, 0, 0), 0);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_gains(&dec, &control, 0, 0, false);
+
+    try assert_eq_i32((try silk_entropy_decoder_gain_index(&dec, 0, 0, 0)) as i32, 0);
+    try assert_eq_i32((try silk_entropy_decoder_gain_index(&dec, 0, 0, 3)) as i32, 3);
+    try assert_eq_i32(dec.gain_indices[0], 29);
+    try assert_eq_i32(dec.gain_indices[1], 4);
+    try assert_eq_i32(dec.gain_indices[2], 5);
+    try assert_eq_i32(dec.gain_indices[3], 3);
+    try assert(dec.gain_valid[0], "gain index for subframe 0 is cached");
+    try assert(dec.gain_valid[3], "gain index for subframe 3 is cached");
+    try assert_eq_i32(dec.last_gain_indices[0], 29);
+    try assert_eq_i32(control.gains_q16[0], 7929856);
+    try assert_eq_i32(control.gains_q16[1], 7929856);
+    try assert_eq_i32(control.gains_q16[2], 9240576);
+    try assert_eq_i32(control.gains_q16[3], 7929856);
+    try silk_entropy_decoder_check(&dec);
+
+    var uncached_dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&uncached_dec, &packet[0:32], 1, 1);
+    const uncached: !void = silk_entropy_decode_gains(&uncached_dec, &control, 0, 0, false);
+    match uncached {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "gain decode must require a cached signal type"); }
+    }
+}
+
+test "silk entropy decoder decodes conditionally coded gains" {
+    var delta_symbols: [i32: 2] = [5, 4];
+    var packet: [byte: 32] = [0: 32];
+    try encode_conditional_gains_payload(&packet[0:32], 1, false, &delta_symbols[0:2], 2);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 1, 1);
+    dec.last_gain_indices[0] = 10;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
+    try assert_eq_i32(try silk_entropy_decode_quantization_offset(&dec, 0, 0), 1);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 160;
+    control.subframe_length = 80;
+    control.nb_subframes = 2;
+    control.lpc_order = 16;
+    try silk_entropy_decode_gains(&dec, &control, 0, 0, true);
+
+    try assert_eq_i32(dec.gain_indices[0], 5);
+    try assert_eq_i32(dec.gain_indices[1], 4);
+    try assert_eq_i32(dec.last_gain_indices[0], 11);
+    try assert_eq_i32(control.gains_q16[0], 464896);
+    try assert_eq_i32(control.gains_q16[1], 464896);
+    try silk_entropy_decoder_check(&dec);
 }

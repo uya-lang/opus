@@ -20,6 +20,19 @@ const SILK_LSB_ICDF: [byte: 2] = [120, 0];
 const SILK_LTP_SCALE_ICDF: [byte: 3] = [128, 64, 0];
 const SILK_TYPE_OFFSET_VAD_ICDF: [byte: 4] = [232, 158, 10, 0];
 const SILK_TYPE_OFFSET_NO_VAD_ICDF: [byte: 2] = [230, 0];
+const SILK_GAIN_ICDF: [byte: 24] = [
+    224, 112, 44, 15, 3, 2, 1, 0,
+    254, 237, 192, 132, 70, 23, 4, 0,
+    255, 252, 226, 155, 61, 11, 2, 0,
+];
+const SILK_DELTA_GAIN_ICDF: [byte: 41] = [
+    250, 245, 234, 203, 71, 50, 42, 38,
+    35, 33, 31, 29, 28, 27, 26, 25,
+    24, 23, 22, 21, 20, 19, 18, 17,
+    16, 15, 14, 13, 12, 11, 10, 9,
+    8, 7, 6, 5, 4, 3, 2, 1,
+    0,
+];
 const SILK_NLSF_INTERPOLATION_FACTOR_ICDF: [byte: 5] = [243, 221, 192, 181, 0];
 
 // Flattened [2][2], Q10.
@@ -320,6 +333,20 @@ export fn silk_type_offset_no_vad_icdf_value(index: usize) byte {
     return SILK_TYPE_OFFSET_NO_VAD_ICDF[index];
 }
 
+export fn silk_gain_icdf_value(signal_table: i32, index: usize) byte {
+    if signal_table < 0 || signal_table > 2 || index >= 8 {
+        return 0;
+    }
+    return SILK_GAIN_ICDF[(signal_table as usize) * 8 + index];
+}
+
+export fn silk_delta_gain_icdf_value(index: usize) byte {
+    if index >= 41 {
+        return 0;
+    }
+    return SILK_DELTA_GAIN_ICDF[index];
+}
+
 export fn silk_uniform3_icdf_value(index: usize) byte {
     if index >= 3 {
         return 0;
@@ -332,6 +359,13 @@ export fn silk_uniform5_icdf_value(index: usize) byte {
         return 0;
     }
     return SILK_UNIFORM5_ICDF[index];
+}
+
+export fn silk_uniform8_icdf_value(index: usize) byte {
+    if index >= 8 {
+        return 0;
+    }
+    return SILK_UNIFORM8_ICDF[index];
 }
 
 export fn silk_shell_code_table_value(table: i32, index: usize) byte {
@@ -375,5 +409,7 @@ export fn silk_table_len(table: i32) usize {
     if table == 15 { return 7; }
     if table == 16 { return 4; }
     if table == 17 { return 2; }
+    if table == 18 { return 24; }
+    if table == 19 { return 41; }
     return 0 as usize;
 }

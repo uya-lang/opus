@@ -6,18 +6,32 @@ use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_dec_init;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_gain_index;
+use src.opus.silk.state.SILK_MAX_NB_SUBFR;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
 
 export error SilkEntropyDecodeError;
 
 export const SILK_ENTROPY_MAX_CHANNELS: usize = SILK_STATE_MAX_CHANNELS;
+export const SILK_ENTROPY_MAX_NB_SUBFR: usize = SILK_MAX_NB_SUBFR;
 // 120 ms packet cap divided by SILK's 10 ms shortest frame duration.
 export const SILK_ENTROPY_MAX_FRAMES_PER_PACKET: usize = 12;
 export const SILK_ENTROPY_FLAG_CAPACITY: usize = SILK_ENTROPY_MAX_CHANNELS * SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
+export const SILK_ENTROPY_GAIN_CAPACITY: usize = SILK_ENTROPY_FLAG_CAPACITY * SILK_ENTROPY_MAX_NB_SUBFR;
+
+const SILK_N_LEVELS_QGAIN: i32 = 64;
+const SILK_MIN_DELTA_GAIN_QUANT: i32 = -4;
+const SILK_MAX_DELTA_GAIN_QUANT: i32 = 36;
+const SILK_GAIN_OFFSET_Q7: i32 = 2090;
+const SILK_GAIN_INV_SCALE_Q16: i32 = 1907825;
 
 export struct SilkEntropyDecoder {
     ec: EcDec,
@@ -32,6 +46,9 @@ export struct SilkEntropyDecoder {
     type_offset_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
     quant_offset_types: [i32: SILK_ENTROPY_FLAG_CAPACITY],
     quant_offset_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    gain_indices: [i32: SILK_ENTROPY_GAIN_CAPACITY],
+    gain_valid: [bool: SILK_ENTROPY_GAIN_CAPACITY],
+    last_gain_indices: [i32: SILK_ENTROPY_MAX_CHANNELS],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -103,6 +120,114 @@ fn fill_type_offset_icdf(out: &[byte], vad: bool) usize {
     return 2 as usize;
 }
 
+fn fill_gain_icdf(out: &[byte], signal_table: i32) !void {
+    if signal_table < 0 || signal_table > 2 || out.len < 8 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(signal_table, i);
+        i = i + 1;
+    }
+}
+
+fn fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn clamp_i32(value: i32, low: i32, high: i32) i32 {
+    if value < low {
+        return low;
+    }
+    if value > high {
+        return high;
+    }
+    return value;
+}
+
+fn max_i32(a: i32, b: i32) i32 {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+fn min_i32(a: i32, b: i32) i32 {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn smulwb_i32(a: i32, b: i32) i32 {
+    return (((a as i64) * (b as i64)) >> 16) as i32;
+}
+
+fn smlawb_i32(a: i32, b: i32, c: i32) i32 {
+    return a + smulwb_i32(b, c);
+}
+
+fn silk_log2lin_q7(in_log_q7: i32) i32 {
+    if in_log_q7 < 0 {
+        return 0;
+    }
+    if in_log_q7 >= 3967 {
+        return 2147483647;
+    }
+
+    var out: i32 = 1 << (in_log_q7 >> 7);
+    const frac_q7: i32 = in_log_q7 & 127;
+    const inner: i32 = smlawb_i32(frac_q7, frac_q7 * (128 - frac_q7), -174);
+    if in_log_q7 < 2048 {
+        out = out + ((out * inner) >> 7);
+    } else {
+        out = out + ((out >> 7) * inner);
+    }
+    return out;
+}
+
+fn silk_gain_index_to_q16(prev_index: i32) i32 {
+    const log_q7: i32 = min_i32(smulwb_i32(SILK_GAIN_INV_SCALE_Q16, prev_index) + SILK_GAIN_OFFSET_Q7, 3967);
+    return silk_log2lin_q7(log_q7);
+}
+
+fn silk_entropy_gain_signal_table(decoder: &const SilkEntropyDecoder, flag_index: usize) !i32 {
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.type_offset_valid[flag_index] {
+        return error.SilkEntropyDecodeError;
+    }
+    if decoder.signal_types[flag_index] == SILK_SIGNAL_TYPE_VOICED {
+        return 2;
+    }
+    if decoder.signal_types[flag_index] == SILK_SIGNAL_TYPE_UNVOICED {
+        if decoder.vad_flags[flag_index] {
+            return 1;
+        }
+        return 0;
+    }
+    return error.SilkEntropyDecodeError;
+}
+
 export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byte], channels: i32, frames_per_packet: i32) !void {
     try silk_entropy_validate_layout(channels, frames_per_packet);
     if payload.len == 0 {
@@ -121,6 +246,9 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_bool(&decoder.type_offset_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_i32(&decoder.quant_offset_types[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_bool(&decoder.quant_offset_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.gain_indices[0:SILK_ENTROPY_GAIN_CAPACITY]);
+    clear_bool(&decoder.gain_valid[0:SILK_ENTROPY_GAIN_CAPACITY]);
+    clear_i32(&decoder.last_gain_indices[0:SILK_ENTROPY_MAX_CHANNELS]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -137,6 +265,14 @@ export fn silk_entropy_decoder_set_frame(decoder: &SilkEntropyDecoder, frame_ind
         return error.SilkEntropyDecodeError;
     }
     decoder.current_frame = frame_index;
+}
+
+export fn silk_entropy_decoder_gain_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32, subframe: i32) !usize {
+    const flag_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if subframe < 0 || subframe >= (SILK_ENTROPY_MAX_NB_SUBFR as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    return flag_index * SILK_ENTROPY_MAX_NB_SUBFR + (subframe as usize);
 }
 
 export fn silk_entropy_decode_icdf(decoder: &SilkEntropyDecoder, icdf: &[byte], ftb: u32) !i32 {
@@ -240,6 +376,70 @@ export fn silk_entropy_decode_quantization_offset(decoder: &SilkEntropyDecoder, 
     decoder.quant_offset_types[index] = quant_offset_type;
     decoder.quant_offset_valid[index] = true;
     return quant_offset_type;
+}
+
+export fn silk_entropy_decode_gains(decoder: &SilkEntropyDecoder, control: &SilkDecoderControl, channel: i32, frame_index: i32, conditional_coding: bool) !void {
+    const flag_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY || channel < 0 || channel >= decoder.channels {
+        return error.SilkEntropyDecodeError;
+    }
+    if channel >= (SILK_ENTROPY_MAX_CHANNELS as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.channels != decoder.channels || channel >= control.channels || control.nb_subframes < 1 || control.nb_subframes > (SILK_ENTROPY_MAX_NB_SUBFR as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    const channel_index: usize = channel as usize;
+
+    const signal_table: i32 = try silk_entropy_gain_signal_table(decoder, flag_index);
+    var gain_icdf: [byte: 8] = [0: 8];
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    var delta_icdf: [byte: 41] = [0: 41];
+    try fill_delta_gain_icdf(&delta_icdf[0:41]);
+
+    var prev_index: i32 = decoder.last_gain_indices[channel_index];
+    var subframe: i32 = 0;
+    while subframe < control.nb_subframes {
+        var gain_index: i32 = 0;
+        if subframe == 0 && !conditional_coding {
+            try fill_gain_icdf(&gain_icdf[0:8], signal_table);
+            try fill_uniform8_icdf(&uniform8_icdf[0:8]);
+            const msb: i32 = try silk_entropy_decode_icdf(decoder, &gain_icdf[0:8], 8);
+            const lsb: i32 = try silk_entropy_decode_icdf(decoder, &uniform8_icdf[0:8], 8);
+            gain_index = (msb << 3) + lsb;
+            if gain_index < 0 || gain_index >= SILK_N_LEVELS_QGAIN {
+                return error.SilkEntropyDecodeError;
+            }
+            prev_index = max_i32(gain_index, prev_index - 16);
+        } else {
+            gain_index = try silk_entropy_decode_icdf(decoder, &delta_icdf[0:41], 8);
+            if gain_index < 0 || gain_index > (SILK_MAX_DELTA_GAIN_QUANT - SILK_MIN_DELTA_GAIN_QUANT) {
+                return error.SilkEntropyDecodeError;
+            }
+            const ind_tmp: i32 = gain_index + SILK_MIN_DELTA_GAIN_QUANT;
+            const double_step_size_threshold: i32 = 2 * SILK_MAX_DELTA_GAIN_QUANT - SILK_N_LEVELS_QGAIN + prev_index;
+            if ind_tmp > double_step_size_threshold {
+                prev_index = prev_index + (ind_tmp << 1) - double_step_size_threshold;
+            } else {
+                prev_index = prev_index + ind_tmp;
+            }
+        }
+
+        prev_index = clamp_i32(prev_index, 0, SILK_N_LEVELS_QGAIN - 1);
+        const cache_index: usize = try silk_entropy_decoder_gain_index(decoder, channel, frame_index, subframe);
+        if cache_index >= SILK_ENTROPY_GAIN_CAPACITY {
+            return error.SilkEntropyDecodeError;
+        }
+        decoder.gain_indices[cache_index] = gain_index;
+        decoder.gain_valid[cache_index] = true;
+
+        const control_index: usize = try silk_decoder_control_gain_index(control, channel, subframe);
+        control.gains_q16[control_index] = silk_gain_index_to_q16(prev_index);
+        subframe = subframe + 1;
+    }
+
+    decoder.last_gain_indices[channel_index] = prev_index;
+    try silk_entropy_decoder_check(decoder);
 }
 
 export fn silk_entropy_decoder_check(decoder: &const SilkEntropyDecoder) !void {
