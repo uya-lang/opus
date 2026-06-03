@@ -359,7 +359,7 @@
 - [x] 实现 gain Q8 设置。
 - [x] 实现 packet loss API。
 - [x] 拆分 decoder 常驻 history 和 scratch。
-- [ ] 确认 Hybrid glue 不复制 SILK/CELT 大型 history buffer。
+- [x] 确认 Hybrid glue 不复制 SILK/CELT 大型 history buffer。
 - [ ] 写 API smoke tests。
 - [ ] 写非法参数 tests。
 - [ ] 写小型 raw packet stream decode test。
