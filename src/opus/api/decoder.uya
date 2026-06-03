@@ -9,10 +9,19 @@ use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
 use src.opus.core.errors.validate_decoder_config;
 use src.opus.core.errors.validate_frame_size_48k;
+use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
+use src.opus.hybrid.decoder.HybridDecodeResult;
+use src.opus.hybrid.decoder.HybridDecoderScratch;
+use src.opus.hybrid.decoder.hybrid_decode_i16;
+use src.opus.hybrid.state.HybridDecoderState;
+use src.opus.hybrid.state.hybrid_state_reset;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_reset;
 
 export error DecoderApiError;
 export error DecoderApiUnsupported;
@@ -23,6 +32,9 @@ export struct OpusDecoder {
     celt: CeltDecoderState,
     celt_scratch: CeltMonoDecodeScratch,
     celt_plc_scratch: CeltPlcScratch,
+    hybrid: HybridDecoderState,
+    hybrid_silk: SilkDecoderState,
+    hybrid_scratch: HybridDecoderScratch,
     last_frame_size_48k: i32,
 }
 
@@ -55,10 +67,18 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     decoder.active_mode = OpusMode.CELT;
     decoder.celt_scratch = CeltMonoDecodeScratch{};
     decoder.celt_plc_scratch = CeltPlcScratch{};
+    decoder.hybrid = HybridDecoderState{};
+    decoder.hybrid_silk = SilkDecoderState{};
+    decoder.hybrid_scratch = HybridDecoderScratch{};
     celt_state_init(&decoder.celt, config.channels as i32) catch {
         return error.DecoderApiError;
     };
     decoder.last_frame_size_48k = decoder.celt.frame_size;
+}
+
+fn decoder_clear_hybrid_transition_state(decoder: &OpusDecoder) void {
+    hybrid_state_reset(&decoder.hybrid);
+    silk_state_reset(&decoder.hybrid_silk);
 }
 
 fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_size: i32) !i32 {
@@ -82,11 +102,7 @@ fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_siz
     return decoded as i32;
 }
 
-fn decoder_decode_celt_packet_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32) !i32 {
-    var parsed: PacketParseResult = PacketParseResult{};
-    parse_packet(packet, &parsed) catch {
-        return error.DecoderApiError;
-    };
+fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
     if parsed.info.mode != OpusMode.CELT || parsed.info.frame_count != 1 {
         return error.DecoderApiUnsupported;
     }
@@ -120,9 +136,72 @@ fn decoder_decode_celt_packet_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &
         };
     }
 
+    if decoder.active_mode == OpusMode.HYBRID {
+        decoder_clear_hybrid_transition_state(decoder);
+    }
     decoder.active_mode = OpusMode.CELT;
     decoder.last_frame_size_48k = decoded as i32;
     return decoded as i32;
+}
+
+fn decoder_supports_hybrid_packet_info(info: &const PacketInfo) bool {
+    var duration_matches: bool = false;
+    if info.frame_duration_us == 10000 && info.duration_samples_48k == 480 {
+        duration_matches = true;
+    }
+    if info.frame_duration_us == 20000 && info.duration_samples_48k == 960 {
+        duration_matches = true;
+    }
+
+    var bandwidth_matches: bool = false;
+    if info.bandwidth == OpusBandwidth.SUPERWIDEBAND || info.bandwidth == OpusBandwidth.FULLBAND {
+        bandwidth_matches = true;
+    }
+
+    return info.mode == OpusMode.HYBRID
+        && bandwidth_matches
+        && info.channels == 1
+        && info.frame_count == 1
+        && duration_matches;
+}
+
+fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+    if !decoder_supports_hybrid_packet_info(&parsed.info) {
+        return error.DecoderApiUnsupported;
+    }
+    if parsed.info.channels != decoder.config.channels {
+        return error.DecoderApiError;
+    }
+
+    const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
+    _ = try decoder_validate_frame_request(decoder, pcm, decoded_frame_size);
+    if frame_size < decoded_frame_size {
+        return error.DecoderApiError;
+    }
+
+    if decoder.active_mode != OpusMode.HYBRID {
+        decoder_clear_hybrid_transition_state(decoder);
+    }
+
+    const frame: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
+    const result: HybridDecodeResult = hybrid_decode_i16(
+        &decoder.hybrid,
+        &decoder.hybrid_silk,
+        &decoder.celt,
+        &parsed.info,
+        frame,
+        &pcm[0:(decoded_frame_size as usize)],
+        &decoder.hybrid_scratch,
+    ) catch {
+        return error.DecoderApiError;
+    };
+    if result.decoded_samples_48k != decoded_frame_size || result.channels != (decoder.config.channels as i32) {
+        return error.DecoderApiError;
+    }
+
+    decoder.active_mode = OpusMode.HYBRID;
+    decoder.last_frame_size_48k = result.decoded_samples_48k;
+    return result.decoded_samples_48k;
 }
 
 fn decoder_decode_fec_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32) !i32 {
@@ -147,5 +226,16 @@ export fn decoder_decode_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16]
     if packet.len == 0 {
         return decoder_decode_empty_packet_i16(decoder, pcm, frame_size);
     }
-    return decoder_decode_celt_packet_i16(decoder, packet, pcm, frame_size);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.DecoderApiError;
+    };
+    if parsed.info.mode == OpusMode.CELT {
+        return decoder_decode_celt_parsed_i16(decoder, packet, &parsed, pcm, frame_size);
+    }
+    if parsed.info.mode == OpusMode.HYBRID {
+        return decoder_decode_hybrid_parsed_i16(decoder, packet, &parsed, pcm, frame_size);
+    }
+    return error.DecoderApiUnsupported;
 }

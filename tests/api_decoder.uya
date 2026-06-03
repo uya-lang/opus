@@ -7,6 +7,10 @@ use src.opus.api.decoder.decoder_init;
 use src.opus.celt.state.CELT_DECODE_MEM;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
+use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
 
 test "decoder api empty packet invokes celt plc" {
     var decoder: OpusDecoder = OpusDecoder{};
@@ -149,6 +153,59 @@ test "decoder api decodes a normal celt packet after packet loss" {
     try assert_eq_i32(decoder.celt.loss_count, 0);
     try assert(decoder.active_mode == OpusMode.CELT, "normal packet decode after PLC must keep CELT mode active");
     try assert(decoder.celt.freq_history_ready, "normal packet decode after PLC must refresh frequency PLC history");
+}
+
+test "decoder api switches into and out of hybrid mode" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var celt_packet: [byte: 65] = [0: 65];
+    celt_packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        celt_packet[i] = ((i * 13 + 5) as! byte).value;
+        i = i + 1;
+    }
+
+    var celt_pcm: [i16: 120] = [0: 120];
+    const celt_decoded: i32 = try decoder_decode_i16(&decoder, &celt_packet[0:65], &celt_pcm[0:120], 120, false);
+    try assert_eq_i32(celt_decoded, 120);
+    try assert(decoder.active_mode == OpusMode.CELT, "first CELT packet must leave decoder in CELT mode");
+    try assert_eq_i32(decoder.celt.start_band, 0);
+
+    var hybrid_packet: [byte: 256] = [0: 256];
+    hybrid_packet[0] = (96 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&hybrid_packet[1:255], 160);
+
+    var hybrid_pcm: [i16: 480] = [0: 480];
+    const hybrid_decoded: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &hybrid_pcm[0:480], 480, false);
+    try assert_eq_i32(hybrid_decoded, 480);
+    try assert(decoder.active_mode == OpusMode.HYBRID, "hybrid packet must switch the public decoder into Hybrid mode");
+    try assert_eq_i32(decoder.hybrid.frame_size_48k, 480);
+    try assert_eq_i32(decoder.hybrid.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(decoder.hybrid.celt_end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(decoder.hybrid_silk.sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(decoder.celt.start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(decoder.celt.end_band, HYBRID_CELT_SWB_END_BAND);
+
+    decoder.hybrid.merge_mem_q14[0] = 123456;
+    decoder.hybrid.delay_q14[0] = 654321;
+    decoder.hybrid_silk.history_q14[0] = 345678;
+
+    var after_hybrid_celt_pcm: [i16: 120] = [0: 120];
+    const after_hybrid_celt: i32 = try decoder_decode_i16(&decoder, &celt_packet[0:65], &after_hybrid_celt_pcm[0:120], 120, false);
+    try assert_eq_i32(after_hybrid_celt, 120);
+    try assert(decoder.active_mode == OpusMode.CELT, "CELT packet after Hybrid must switch back to CELT mode");
+    try assert_eq_i32(decoder.celt.start_band, 0);
+    try assert_eq_i32(decoder.hybrid.merge_mem_q14[0], 0);
+    try assert_eq_i32(decoder.hybrid.delay_q14[0], 0);
+    try assert_eq_i32(decoder.hybrid_silk.history_q14[0], 0);
+
+    var second_hybrid_pcm: [i16: 480] = [0: 480];
+    const second_hybrid: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &second_hybrid_pcm[0:480], 480, false);
+    try assert_eq_i32(second_hybrid, 480);
+    try assert(decoder.active_mode == OpusMode.HYBRID, "Hybrid packet after CELT must switch back into Hybrid mode");
 }
 
 test "decoder api decode_fec falls back to plc without consuming celt packet" {
