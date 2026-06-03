@@ -1,5 +1,6 @@
 // Imported from Xiph.Org Opus v1.5.2, commit ddbe48383984d56acd9e1ab6a090c54ca6b735a6.
-// Sources: silk/tables_other.c, silk/tables_pitch_lag.c, and silk/tables_pulses_per_block.c.
+// Sources: silk/tables_other.c, silk/tables_pitch_lag.c, silk/tables_pulses_per_block.c,
+// and silk/table_LSF_cos.c.
 
 const SILK_STEREO_PRED_QUANT_Q13: [i16: 16] = [
     -13732, -10050, -8266, -7526, -6500, -5000, -2950, -820,
@@ -181,6 +182,26 @@ const SILK_SIGN_ICDF: [byte: 42] = [
     248, 53, 69, 80, 88, 95, 102,
 ];
 
+const SILK_LSF_COS_TAB_Q12: [i16: 129] = [
+    8192, 8190, 8182, 8170, 8152, 8130, 8104, 8072,
+    8034, 7994, 7946, 7896, 7840, 7778, 7714, 7644,
+    7568, 7490, 7406, 7318, 7226, 7128, 7026, 6922,
+    6812, 6698, 6580, 6458, 6332, 6204, 6070, 5934,
+    5792, 5648, 5502, 5352, 5198, 5040, 4880, 4718,
+    4552, 4382, 4212, 4038, 3862, 3684, 3502, 3320,
+    3136, 2948, 2760, 2570, 2378, 2186, 1990, 1794,
+    1598, 1400, 1202, 1002, 802, 602, 402, 202,
+    0, -202, -402, -602, -802, -1002, -1202, -1400,
+    -1598, -1794, -1990, -2186, -2378, -2570, -2760, -2948,
+    -3136, -3320, -3502, -3684, -3862, -4038, -4212, -4382,
+    -4552, -4718, -4880, -5040, -5198, -5352, -5502, -5648,
+    -5792, -5934, -6070, -6204, -6332, -6458, -6580, -6698,
+    -6812, -6922, -7026, -7128, -7226, -7318, -7406, -7490,
+    -7568, -7644, -7714, -7778, -7840, -7896, -7946, -7994,
+    -8034, -8072, -8104, -8130, -8152, -8170, -8182, -8190,
+    -8192,
+];
+
 fn silk_shell_hash_value(table: i32, index: usize) u64 {
     if table == 0 { return SILK_SHELL_CODE_TABLE0[index] as u64; }
     if table == 1 { return SILK_SHELL_CODE_TABLE1[index] as u64; }
@@ -188,6 +209,10 @@ fn silk_shell_hash_value(table: i32, index: usize) u64 {
     if table == 3 { return SILK_SHELL_CODE_TABLE3[index] as u64; }
     if table == 4 { return SILK_SHELL_CODE_TABLE_OFFSETS[index] as u64; }
     return 0;
+}
+
+fn silk_lsf_cos_hash_value(index: usize) u64 {
+    return SILK_LSF_COS_TAB_Q12[index] as u64;
 }
 
 fn hash_shell_table(table: i32, len: usize) u32 {
@@ -219,6 +244,24 @@ export fn silk_sign_icdf_hash() u32 {
         i = i + 1;
     }
     return h as u32;
+}
+
+export fn silk_lsf_cos_table_hash() u32 {
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < 129 {
+        h = (h * (131 as u64) + silk_lsf_cos_hash_value(i) + (32768 as u64) + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
+export fn silk_lsf_cos_q12(index: usize) i16 {
+    if index >= 129 {
+        return 0;
+    }
+    return SILK_LSF_COS_TAB_Q12[index];
 }
 
 export fn silk_sign_icdf_value(index: usize) byte {
@@ -264,5 +307,6 @@ export fn silk_table_len(table: i32) usize {
     if table == 10 { return 152; }
     if table == 11 { return 17; }
     if table == 12 { return 42; }
+    if table == 13 { return 129; }
     return 0 as usize;
 }

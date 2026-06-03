@@ -53,6 +53,7 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_SHELL_CODE_TABLE3` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 524016143 | 0 |
 | `SILK_SHELL_CODE_TABLE_OFFSETS` | `silk/tables_pulses_per_block.c` | `usize` | offsets by total pulse count | 17 | 711768652 | 0 |
 | `SILK_SIGN_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | sign iCDF, `ftb=8`, flattened `[6][7]` | 42 | 281612844 | 0 |
+| `SILK_LSF_COS_TAB_Q12` | `silk/table_LSF_cos.c` | `i16` | LSF cosine approximation, Q12 | 129 | 518643764 | 32768 |
 | `SILK_NLSF_CB1_NB_MB_Q8` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage vectors, Q8 | 320 | 529135816 | 0 |
 | `SILK_NLSF_CB1_NB_MB_WGHT_Q9` | `silk/tables_NLSF_CB_NB_MB.c` | `i16` | NLSF first-stage weights, Q9 | 320 | 666379621 | 32768 |
 | `SILK_NLSF_CB1_ICDF_NB_MB` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage iCDF, `ftb=8` | 64 | 705421896 | 0 |
@@ -86,7 +87,6 @@ The following upstream table families are required for later decoder conformance
 | SILK pulse shell tables | `silk/tables_pulses_per_block.c`, `silk/shell_coder.c` | pulse decode | `src/opus/silk/tables.uya` plus pulse module | pulse shell decode vectors and iCDF shape checks |
 | SILK pitch estimation tables | `silk/pitch_est_tables.c` | encoder-side or later analysis work | encoder/analysis module, not decoder-first path | defer until encoder quality tasks; hash/length if imported |
 | SILK resampler ROM | `silk/resampler_rom.c`, `silk/resampler_rom.h` | resampler | `src/opus/dsp/resampler.uya` | resampler golden tests for every supported conversion |
-| SILK LSF cosine table | `silk/table_LSF_cos.c` | NLSF conversion | `src/opus/silk/tables.uya` plus NLSF module | NLSF-to-LPC golden tests |
 | SILK sigmoid/VAD/control rate tables | `silk/sigm_Q15.c`, `silk/VAD.c`, `silk/control_SNR.c` | encoder/VAD/control | encoder/control modules | defer until encoder/control tasks; hash/length if imported |
 
 Acceptance status: table errors are now caught before full decode by `make test`, which runs `tools/check_tables.uya` for Uya-visible smoke checks and `tools/check_tables.py` for exact source-table length, hash, iCDF shape, and monotonicity checks.

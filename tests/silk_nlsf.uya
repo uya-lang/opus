@@ -5,6 +5,7 @@ use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_NB_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_Q15_ONE;
 use src.opus.silk.nlsf.silk_nlsf_decode_q15;
+use src.opus.silk.nlsf.silk_nlsf2a_q12;
 use src.opus.silk.nlsf.silk_nlsf_interpolate_q15;
 use src.opus.silk.nlsf.silk_nlsf_is_sorted_q15;
 use src.opus.silk.nlsf.silk_nlsf_stabilize_q15;
@@ -15,6 +16,8 @@ use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_NB_MB;
 use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
 use src.opus.silk.nlsf_tables.silk_nlsf_table_hash;
 use src.opus.silk.nlsf_tables.silk_nlsf_table_len;
+use src.opus.silk.tables.silk_lsf_cos_table_hash;
+use src.opus.silk.tables.silk_table_len;
 
 test "silk nlsf exposes q15 and order constants" {
     try assert_eq_i32(SILK_NLSF_Q15_ONE, 32768);
@@ -102,6 +105,8 @@ test "silk nlsf codebook tables match upstream lengths and hashes" {
     try assert_eq_i32(silk_nlsf_table_hash(7) as i32, 453859076);
     try assert_eq_i32(silk_nlsf_table_hash(8) as i32, 749453744);
     try assert_eq_i32(silk_nlsf_table_hash(13) as i32, 6214487);
+    try assert_eq_i32(silk_table_len(13) as i32, 129);
+    try assert_eq_i32(silk_lsf_cos_table_hash() as i32, 518643764);
 }
 
 test "silk nlsf unpack exposes entropy offsets and predictors" {
@@ -169,5 +174,39 @@ test "silk nlsf stabilization fallback sorts severely unstable vectors" {
     match short_delta {
         error.SilkNlsfError => {}
         else => { try assert(false, "stabilizer must require order + 1 delta entries"); }
+    }
+}
+
+test "silk nlsf to lpc converts narrowband q15 vectors to q12 coefficients" {
+    var nlsf: [i16: 10] = [1536, 4480, 7424, 10496, 13824, 17024, 20160, 23296, 26240, 29184];
+    var a_q12: [i16: 10] = [0: 10];
+    try silk_nlsf2a_q12(&a_q12[0:10], &nlsf[0:10], 10);
+
+    try assert_eq_i32(a_q12[0] as i32, 2666);
+    try assert_eq_i32(a_q12[1] as i32, 259);
+    try assert_eq_i32(a_q12[4] as i32, 295);
+    try assert_eq_i32(a_q12[7] as i32, -7);
+    try assert_eq_i32(a_q12[9] as i32, -4);
+}
+
+test "silk nlsf to lpc fits wideband coefficients into q12 int16 range" {
+    var nlsf: [i16: 16] = [
+        2530, 3092, 4886, 5848, 6892, 8035, 8955, 11062,
+        14198, 15838, 17416, 20280, 21912, 23812, 25064, 26566,
+    ];
+    var a_q12: [i16: 16] = [0: 16];
+    try silk_nlsf2a_q12(&a_q12[0:16], &nlsf[0:16], 16);
+
+    try assert_eq_i32(a_q12[0] as i32, 13105);
+    try assert_eq_i32(a_q12[1] as i32, -21776);
+    try assert_eq_i32(a_q12[2] as i32, 26819);
+    try assert_eq_i32(a_q12[4] as i32, 32697);
+    try assert_eq_i32(a_q12[5] as i32, -32587);
+    try assert_eq_i32(a_q12[15] as i32, -74);
+
+    const bad_order: !void = silk_nlsf2a_q12(&a_q12[0:16], &nlsf[0:16], 12);
+    match bad_order {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "NLSF to LPC must reject unsupported orders"); }
     }
 }

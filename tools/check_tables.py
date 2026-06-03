@@ -61,6 +61,7 @@ TABLES = [
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE3", 152, 524016143, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE_OFFSETS", 17, 711768652, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SIGN_ICDF", 42, 281612844, 0, None),
+    ("src/opus/silk/tables.uya", "SILK_LSF_COS_TAB_Q12", 129, 518643764, 32768, None),
     ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_NB_MB_Q8", 320, 529135816, 0, None),
     ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_NB_MB_WGHT_Q9", 320, 666379621, 32768, None),
     ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_ICDF_NB_MB", 64, 705421896, 0, None),
