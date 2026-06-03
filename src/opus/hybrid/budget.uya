@@ -1,0 +1,129 @@
+use src.opus.core.constants.MAX_FRAME_BYTES;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.hybrid.state.HYBRID_CELT_FB_END_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
+
+export error HybridBudgetError;
+
+export struct HybridBudgetSplit {
+    channels: i32,
+    bandwidth: OpusBandwidth,
+    frame_duration_us: u32,
+    frame_bytes: usize,
+    active_frame_bytes: usize,
+    tail_reserved_bytes: usize,
+    frame_bits: i32,
+    active_bits: i32,
+    silk_start_bit: i32,
+    celt_start_bit: i32,
+    celt_budget_bits: i32,
+    celt_start_band: i32,
+    celt_end_band: i32,
+    dec: EcDec,
+}
+
+fn hybrid_budget_celt_end_band(bandwidth: OpusBandwidth) !i32 {
+    if bandwidth == OpusBandwidth.SUPERWIDEBAND {
+        return HYBRID_CELT_SWB_END_BAND;
+    }
+    if bandwidth == OpusBandwidth.FULLBAND {
+        return HYBRID_CELT_FB_END_BAND;
+    }
+    return error.HybridBudgetError;
+}
+
+fn hybrid_budget_validate_info(info: &const PacketInfo) !i32 {
+    if info.mode != OpusMode.HYBRID {
+        return error.HybridBudgetError;
+    }
+    if info.channels < 1 || info.channels > (HYBRID_STATE_MAX_CHANNELS as u8) {
+        return error.HybridBudgetError;
+    }
+    if info.frame_duration_us != 10000 && info.frame_duration_us != 20000 {
+        return error.HybridBudgetError;
+    }
+    return hybrid_budget_celt_end_band(info.bandwidth);
+}
+
+fn hybrid_budget_bits_for_len(len: usize) !i32 {
+    if len > MAX_FRAME_BYTES {
+        return error.HybridBudgetError;
+    }
+    return (len * 8) as i32;
+}
+
+fn hybrid_budget_refresh_fields(split: &HybridBudgetSplit, active_bytes: usize, reserved_bytes: usize) !void {
+    const active_bits: i32 = try hybrid_budget_bits_for_len(active_bytes);
+    const tell: i32 = ec_tell(&split.dec) as i32;
+    if tell > active_bits {
+        return error.HybridBudgetError;
+    }
+
+    split.active_frame_bytes = active_bytes;
+    split.tail_reserved_bytes = reserved_bytes;
+    split.active_bits = active_bits;
+    split.celt_start_bit = tell;
+    split.celt_budget_bits = active_bits - tell;
+}
+
+export fn hybrid_budget_init(split: &HybridBudgetSplit, info: &const PacketInfo, frame: &[byte]) !void {
+    const celt_end_band: i32 = try hybrid_budget_validate_info(info);
+    if frame.len <= 1 || frame.len > MAX_FRAME_BYTES {
+        return error.HybridBudgetError;
+    }
+
+    split.channels = info.channels as i32;
+    split.bandwidth = info.bandwidth;
+    split.frame_duration_us = info.frame_duration_us;
+    split.frame_bytes = frame.len;
+    split.active_frame_bytes = frame.len;
+    split.tail_reserved_bytes = 0;
+    split.frame_bits = try hybrid_budget_bits_for_len(frame.len);
+    split.active_bits = split.frame_bits;
+    split.celt_start_band = HYBRID_CELT_START_BAND;
+    split.celt_end_band = celt_end_band;
+
+    ec_dec_init(&split.dec, frame);
+    split.silk_start_bit = ec_tell(&split.dec) as i32;
+    split.celt_start_bit = split.silk_start_bit;
+    split.celt_budget_bits = split.active_bits - split.celt_start_bit;
+    if split.celt_budget_bits < 0 {
+        return error.HybridBudgetError;
+    }
+}
+
+export fn hybrid_budget_refresh_after_silk(split: &HybridBudgetSplit) !void {
+    try hybrid_budget_refresh_fields(split, split.active_frame_bytes, split.tail_reserved_bytes);
+}
+
+export fn hybrid_budget_reserve_tail_bytes(split: &HybridBudgetSplit, tail_bytes: usize) !void {
+    if split.frame_bytes <= 1 || split.active_frame_bytes == 0 {
+        return error.HybridBudgetError;
+    }
+    if tail_bytes == 0 {
+        try hybrid_budget_refresh_after_silk(split);
+        return;
+    }
+    if tail_bytes > split.frame_bytes - split.tail_reserved_bytes {
+        return error.HybridBudgetError;
+    }
+
+    const reserved_bytes: usize = split.tail_reserved_bytes + tail_bytes;
+    const active_bytes: usize = split.frame_bytes - reserved_bytes;
+    if active_bytes <= 1 {
+        return error.HybridBudgetError;
+    }
+    if split.dec.offs + split.dec.end_offs > active_bytes {
+        return error.HybridBudgetError;
+    }
+
+    split.dec.storage = active_bytes;
+    try hybrid_budget_refresh_fields(split, active_bytes, reserved_bytes);
+}

@@ -1,0 +1,130 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_init;
+use src.opus.hybrid.budget.hybrid_budget_refresh_after_silk;
+use src.opus.hybrid.budget.hybrid_budget_reserve_tail_bytes;
+use src.opus.hybrid.state.HYBRID_CELT_FB_END_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
+use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
+
+fn hybrid_packet_info(bandwidth: OpusBandwidth, channels: u8, frame_duration_us: u32) PacketInfo {
+    return PacketInfo{
+        mode: OpusMode.HYBRID,
+        bandwidth: bandwidth,
+        channels: channels,
+        frame_count: 1,
+        frame_duration_us: frame_duration_us,
+        duration_samples_48k: 480,
+        payload_offset: 1,
+        payload_len: 8,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+test "hybrid budget initializes a shared range decoder for SWB and FB frames" {
+    var swb_info: PacketInfo = hybrid_packet_info(OpusBandwidth.SUPERWIDEBAND, 2, 10000);
+    const frame: [byte: 8] = [17, 33, 65, 129, 5, 8, 13, 21];
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+
+    try hybrid_budget_init(&split, &swb_info, &frame[0:8]);
+    try assert_eq_i32(split.channels, 2);
+    try assert_eq_i32(split.frame_duration_us as i32, 10000);
+    try assert_eq_i32(split.frame_bytes as i32, 8);
+    try assert_eq_i32(split.active_frame_bytes as i32, 8);
+    try assert_eq_i32(split.frame_bits, 64);
+    try assert_eq_i32(split.active_bits, 64);
+    try assert_eq_i32(split.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(split.celt_end_band, HYBRID_CELT_SWB_END_BAND);
+    try assert_eq_i32(split.silk_start_bit, ec_tell(&split.dec) as i32);
+    try assert_eq_i32(split.celt_start_bit, split.silk_start_bit);
+    try assert_eq_i32(split.celt_budget_bits, split.active_bits - split.celt_start_bit);
+
+    var fb_info: PacketInfo = hybrid_packet_info(OpusBandwidth.FULLBAND, 1, 20000);
+    try hybrid_budget_init(&split, &fb_info, &frame[0:8]);
+    try assert_eq_i32(split.channels, 1);
+    try assert_eq_i32(split.frame_duration_us as i32, 20000);
+    try assert_eq_i32(split.celt_start_band, HYBRID_CELT_START_BAND);
+    try assert_eq_i32(split.celt_end_band, HYBRID_CELT_FB_END_BAND);
+}
+
+test "hybrid budget records the CELT budget after SILK consumes shared range bits" {
+    var info: PacketInfo = hybrid_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+    const frame: [byte: 10] = [200, 17, 34, 51, 68, 85, 102, 119, 136, 153];
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:10]);
+
+    const initial_tell: i32 = ec_tell(&split.dec) as i32;
+    _ = ec_dec_bit_logp(&split.dec, 1);
+    _ = ec_dec_bit_logp(&split.dec, 2);
+    try hybrid_budget_refresh_after_silk(&split);
+
+    const after_silk_tell: i32 = ec_tell(&split.dec) as i32;
+    try assert(after_silk_tell > initial_tell, "simulated SILK symbols must advance the shared range decoder");
+    try assert_eq_i32(split.celt_start_bit, after_silk_tell);
+    try assert_eq_i32(split.celt_budget_bits, split.active_bits - split.celt_start_bit);
+    try assert(split.celt_budget_bits >= 0, "CELT budget must never be negative for a valid split");
+}
+
+test "hybrid budget reserves byte-aligned tail data before CELT raw bits" {
+    var info: PacketInfo = hybrid_packet_info(OpusBandwidth.FULLBAND, 2, 20000);
+    const frame: [byte: 12] = [11, 22, 33, 44, 55, 66, 77, 88, 99, 111, 123, 222];
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &frame[0:12]);
+
+    _ = ec_dec_bit_logp(&split.dec, 2);
+    try hybrid_budget_reserve_tail_bytes(&split, 3);
+    const celt_start: i32 = ec_tell(&split.dec) as i32;
+    try assert_eq_i32(split.tail_reserved_bytes as i32, 3);
+    try assert_eq_i32(split.active_frame_bytes as i32, 9);
+    try assert_eq_i32(split.active_bits, 72);
+    try assert_eq_i32(split.dec.storage as i32, 9);
+    try assert_eq_i32(split.celt_start_bit, celt_start);
+    try assert_eq_i32(split.celt_budget_bits, 72 - celt_start);
+
+    try hybrid_budget_reserve_tail_bytes(&split, 1);
+    try assert_eq_i32(split.tail_reserved_bytes as i32, 4);
+    try assert_eq_i32(split.active_frame_bytes as i32, 8);
+    try assert_eq_i32(split.active_bits, 64);
+}
+
+test "hybrid budget rejects non-hybrid layouts and impossible splits" {
+    var info: PacketInfo = hybrid_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+    var frame: [byte: 4] = [1, 2, 3, 4];
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+
+    info.mode = OpusMode.CELT;
+    const bad_mode: !void = hybrid_budget_init(&split, &info, &frame[0:4]);
+    match bad_mode {
+        error.HybridBudgetError => {}
+        else => { try assert(false, "budget split must reject non-hybrid packet metadata"); }
+    }
+
+    info.mode = OpusMode.HYBRID;
+    info.bandwidth = OpusBandwidth.WIDEBAND;
+    const bad_bandwidth: !void = hybrid_budget_init(&split, &info, &frame[0:4]);
+    match bad_bandwidth {
+        error.HybridBudgetError => {}
+        else => { try assert(false, "budget split must reject non-hybrid bandwidths"); }
+    }
+
+    info.bandwidth = OpusBandwidth.SUPERWIDEBAND;
+    const short_frame: !void = hybrid_budget_init(&split, &info, &frame[0:1]);
+    match short_frame {
+        error.HybridBudgetError => {}
+        else => { try assert(false, "normal hybrid budget split must reject DTX/PLC-sized frames"); }
+    }
+
+    const valid_split: void = try hybrid_budget_init(&split, &info, &frame[0:4]);
+    const too_much_tail: !void = hybrid_budget_reserve_tail_bytes(&split, 4);
+    match too_much_tail {
+        error.HybridBudgetError => {}
+        else => { try assert(false, "tail reservation must leave already-consumed range bits inside the active frame"); }
+    }
+}
