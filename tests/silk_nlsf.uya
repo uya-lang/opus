@@ -19,6 +19,15 @@ use src.opus.silk.nlsf_tables.silk_nlsf_table_len;
 use src.opus.silk.tables.silk_lsf_cos_table_hash;
 use src.opus.silk.tables.silk_table_len;
 
+fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
+        i = i + 1;
+    }
+}
+
 test "silk nlsf exposes q15 and order constants" {
     try assert_eq_i32(SILK_NLSF_Q15_ONE, 32768);
     try assert_eq_i32(SILK_NLSF_NB_ORDER as i32, 10);
@@ -175,6 +184,20 @@ test "silk nlsf stabilization fallback sorts severely unstable vectors" {
         error.SilkNlsfError => {}
         else => { try assert(false, "stabilizer must require order + 1 delta entries"); }
     }
+}
+
+test "silk nlsf stabilization matches fixed q15 vectors" {
+    var border_nlsf: [i16: 10] = [20, 100, 105, 110, 900, 1200, 1250, 2000, 3000, 32760];
+    var border_delta: [i16: 11] = [100, 40, 40, 40, 40, 40, 40, 40, 40, 40, 120];
+    var border_expected: [i16: 10] = [100, 140, 180, 220, 900, 1200, 1250, 2000, 3000, 32648];
+    try silk_nlsf_stabilize_q15(&border_nlsf[0:10], &border_delta[0:11], 10);
+    try assert_i16_slice_eq(&border_nlsf[0:10], &border_expected[0:10]);
+
+    var fallback_nlsf: [i16: 10] = [3000, 1200, 900, 600, 500, 400, 300, 200, 100, 50];
+    var fallback_delta: [i16: 11] = [250, 3, 6, 3, 3, 3, 4, 3, 3, 3, 461];
+    var fallback_expected: [i16: 10] = [250, 253, 326, 484, 488, 878, 1085, 1088, 1291, 1482];
+    try silk_nlsf_stabilize_q15(&fallback_nlsf[0:10], &fallback_delta[0:11], 10);
+    try assert_i16_slice_eq(&fallback_nlsf[0:10], &fallback_expected[0:10]);
 }
 
 test "silk nlsf to lpc converts narrowband q15 vectors to q12 coefficients" {
