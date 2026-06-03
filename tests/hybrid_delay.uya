@@ -2,12 +2,17 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.hybrid.delay.hybrid_delay_apply_channel_q14;
+use src.opus.hybrid.delay.hybrid_delay_apply_highband_i16_to_q14;
 use src.opus.hybrid.delay.hybrid_delay_apply_interleaved_q14;
 use src.opus.hybrid.state.HYBRID_DELAY_BUFFER_LEN;
 use src.opus.hybrid.state.HYBRID_MAX_DELAY_SAMPLES_48K;
 use src.opus.hybrid.state.HybridDecoderState;
 use src.opus.hybrid.state.hybrid_state_delay_index;
 use src.opus.hybrid.state.hybrid_state_init;
+
+fn test_i16_to_q14(value: i32) i32 {
+    return value * 16384;
+}
 
 test "hybrid delay channel emits stored delay then shifted input" {
     var state: HybridDecoderState = HybridDecoderState{};
@@ -77,6 +82,74 @@ test "hybrid delay interleaved path keeps channels independent" {
     try assert_eq_i32(right_base as i32, 120);
     try assert_eq_i32(state.delay_q14[120], -1360);
     try assert_eq_i32(state.delay_q14[239], -1479);
+}
+
+test "hybrid delay compensates interleaved highband i16 into q14" {
+    var state: HybridDecoderState = HybridDecoderState{};
+    try hybrid_state_init(&state, 2, OpusBandwidth.FULLBAND, 480);
+
+    var input: [i16: 960] = [0: 960];
+    var output: [i32: 960] = [0: 960];
+    var frame: usize = 0;
+    while frame < 480 {
+        input[frame * 2] = (100 + (frame as i32)) as i16;
+        input[frame * 2 + 1] = (-100 - (frame as i32)) as i16;
+        frame = frame + 1;
+    }
+
+    const decoded: usize = try hybrid_delay_apply_highband_i16_to_q14(&state, &input[0:960], &output[0:960]);
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(output[0], 0);
+    try assert_eq_i32(output[1], 0);
+    try assert_eq_i32(output[238], 0);
+    try assert_eq_i32(output[239], 0);
+    try assert_eq_i32(output[240], test_i16_to_q14(100));
+    try assert_eq_i32(output[241], test_i16_to_q14(-100));
+    try assert_eq_i32(output[958], test_i16_to_q14(459));
+    try assert_eq_i32(output[959], test_i16_to_q14(-459));
+    try assert_eq_i32(state.delay_q14[0], test_i16_to_q14(460));
+    try assert_eq_i32(state.delay_q14[119], test_i16_to_q14(579));
+    try assert_eq_i32(state.delay_q14[120], test_i16_to_q14(-460));
+    try assert_eq_i32(state.delay_q14[239], test_i16_to_q14(-579));
+
+    frame = 0;
+    while frame < 480 {
+        input[frame * 2] = (1000 + (frame as i32)) as i16;
+        input[frame * 2 + 1] = (-1000 - (frame as i32)) as i16;
+        output[frame * 2] = 0;
+        output[frame * 2 + 1] = 0;
+        frame = frame + 1;
+    }
+
+    _ = try hybrid_delay_apply_highband_i16_to_q14(&state, &input[0:960], &output[0:960]);
+    try assert_eq_i32(output[0], test_i16_to_q14(460));
+    try assert_eq_i32(output[1], test_i16_to_q14(-460));
+    try assert_eq_i32(output[238], test_i16_to_q14(579));
+    try assert_eq_i32(output[239], test_i16_to_q14(-579));
+    try assert_eq_i32(output[240], test_i16_to_q14(1000));
+    try assert_eq_i32(output[241], test_i16_to_q14(-1000));
+    try assert_eq_i32(output[958], test_i16_to_q14(1359));
+    try assert_eq_i32(output[959], test_i16_to_q14(-1359));
+}
+
+test "hybrid delay validates highband i16 buffers" {
+    var state: HybridDecoderState = HybridDecoderState{};
+    try hybrid_state_init(&state, 1, OpusBandwidth.SUPERWIDEBAND, 480);
+
+    var input: [i16: 480] = [0: 480];
+    var output: [i32: 480] = [0: 480];
+
+    const short_input: !usize = hybrid_delay_apply_highband_i16_to_q14(&state, &input[0:479], &output[0:480]);
+    match short_input {
+        error.HybridDelayError => {}
+        else => { try assert(false, "highband i16 delay helper must reject short input"); }
+    }
+
+    const short_output: !usize = hybrid_delay_apply_highband_i16_to_q14(&state, &input[0:480], &output[0:479]);
+    match short_output {
+        error.HybridDelayError => {}
+        else => { try assert(false, "highband i16 delay helper must reject short output"); }
+    }
 }
 
 test "hybrid delay works when input and output share storage" {

@@ -330,7 +330,7 @@
 - [x] 实现 SILK/CELT budget split。
 - [x] 实现 SILK lowband decode glue。
 - [x] 实现 CELT highband decode glue。
-- [ ] 实现 delay compensation。
+- [x] 实现 delay compensation。
 - [ ] 实现 high/low band merge。
 - [ ] 支持 Hybrid SWB 10ms。
 - [ ] 支持 Hybrid SWB 20ms。
