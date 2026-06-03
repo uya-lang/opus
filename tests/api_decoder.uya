@@ -153,6 +153,51 @@ test "decoder api decodes silk-only through native-rate output resampler" {
     try assert(pcm[0] != 0 || pcm[1] != 0 || pcm[159] != 0, "SILK-only decode must synthesize output samples");
 }
 
+test "decoder api validates mono and stereo output channel layout" {
+    var stereo_decoder: OpusDecoder = OpusDecoder{};
+    const stereo_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try decoder_init(&stereo_decoder, &stereo_config);
+
+    var stereo_packet: [byte: 65] = [0: 65];
+    stereo_packet[0] = (132 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        stereo_packet[i] = ((i * 17 + 3) as! byte).value;
+        i = i + 1;
+    }
+
+    var stereo_pcm: [i16: 240] = [0: 240];
+    const stereo_decoded: i32 = try decoder_decode_i16(&stereo_decoder, &stereo_packet[0:65], &stereo_pcm[0:240], 120, false);
+    try assert_eq_i32(stereo_decoded, 120);
+    try assert_eq_i32(stereo_decoder.celt.channels, 2);
+    try assert(stereo_decoder.active_mode == OpusMode.CELT, "stereo CELT packet must keep CELT mode active");
+
+    var mono_decoder: OpusDecoder = OpusDecoder{};
+    const mono_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&mono_decoder, &mono_config);
+
+    var mono_pcm: [i16: 120] = [0: 120];
+    const stereo_to_mono: !i32 = decoder_decode_i16(&mono_decoder, &stereo_packet[0:65], &mono_pcm[0:120], 120, false);
+    match stereo_to_mono {
+        error.DecoderApiError => {}
+        else => { try assert(false, "stereo packet must not decode into a mono-configured decoder"); }
+    }
+
+    var mono_packet: [byte: 65] = [0: 65];
+    mono_packet[0] = (128 as! byte).value;
+    i = 1;
+    while i < 65 {
+        mono_packet[i] = ((i * 7 + 29) as! byte).value;
+        i = i + 1;
+    }
+
+    const mono_to_stereo: !i32 = decoder_decode_i16(&stereo_decoder, &mono_packet[0:65], &stereo_pcm[0:240], 120, false);
+    match mono_to_stereo {
+        error.DecoderApiError => {}
+        else => { try assert(false, "mono packet must not decode into a stereo-configured decoder"); }
+    }
+}
+
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
