@@ -55,6 +55,57 @@ Differential references may use external tools such as `opus_demo`, `opusdec`,
 or FFmpeg only from `tools/` or `tests/`. They must not become runtime
 dependencies of `src/opus/**`.
 
+## Decoder Vector Manifest
+
+Decoder corpus directories contain a `manifest.json` with format
+`uopus.decoder-vectors.v1`. The manifest is intentionally file-oriented so the
+decoder runner, reference PCM, and future differential scripts can be inspected
+without importing codec internals.
+
+```json
+{
+  "format": "uopus.decoder-vectors.v1",
+  "cases": [
+    {
+      "id": "example-celt-fb-20ms-mono",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "frame_size": 960,
+      "decode_fec": false,
+      "packets": ["packets/example.opus"],
+      "reference_pcm": "pcm/example.s16le",
+      "reference_sha256": "64 lowercase hex characters",
+      "tolerance": {
+        "max_abs_error": 0,
+        "max_total_abs_error": 0
+      },
+      "tags": ["celt", "fullband"]
+    }
+  ]
+}
+```
+
+Rules enforced by `tools/vector_runner.py`:
+
+- `id` values are unique and safe for filenames.
+- `sample_rate_hz` is one of 8000, 12000, 16000, 24000, or 48000.
+- `channels` is 1 or 2.
+- `packets` and `reference_pcm` are relative paths inside the corpus root.
+- `reference_sha256` must match the reference s16le PCM file.
+- Omitted `tolerance` means bit-exact comparison.
+
+The runner contract is:
+
+```sh
+python3 tools/vector_runner.py validate tests/vectors/manifest.json
+python3 tools/vector_runner.py list tests/vectors/manifest.json
+python3 tools/vector_runner.py diff tests/vectors/manifest.json --actual-dir build/vectors
+```
+
+`diff` compares files named `<case id>.s16le` in the actual directory against
+the manifest reference PCM. Producing those actual files from the Uya decoder is
+the responsibility of `tools/diff_decode.sh`.
+
 ## Acceptance Commands
 
 At the empty-skeleton stage, conformance documentation is accepted by:
