@@ -350,7 +350,7 @@
 - [x] 实现 `decoder_init`。
 - [x] 实现 `decoder_get_packet_info`。
 - [x] 实现 `decoder_decode_i16`。
-- [ ] 实现 output sample rate 转换。
+- [x] 实现 output sample rate 转换。
 - [ ] 实现 48 kHz output fast path。
 - [ ] 实现 SILK-only 原生采样率到目标采样率的一次转换路径。
 - [ ] 实现 mono/stereo output 校验。

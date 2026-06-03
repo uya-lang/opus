@@ -9,10 +9,17 @@ use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
 use src.opus.core.errors.validate_decoder_config;
 use src.opus.core.errors.validate_frame_size_48k;
+use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
 use src.opus.core.types.PacketInfo;
+use src.opus.dsp.resampler.ResamplerConfig;
+use src.opus.dsp.resampler.resampler_config_init;
+use src.opus.dsp.resampler.resampler_is_identity;
+use src.opus.dsp.resampler.resampler_output_samples_per_channel;
+use src.opus.dsp.resampler.resampler_process_i16;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
 use src.opus.hybrid.decoder.HybridDecodeResult;
@@ -26,8 +33,11 @@ use src.opus.silk.state.silk_state_reset;
 export error DecoderApiError;
 export error DecoderApiUnsupported;
 
+const DECODER_OUTPUT_SCRATCH_SAMPLES: usize = 5760;
+
 export struct OpusDecoder {
     config: OpusDecoderConfig,
+    resampler: ResamplerConfig,
     active_mode: OpusMode,
     celt: CeltDecoderState,
     celt_scratch: CeltMonoDecodeScratch,
@@ -35,6 +45,7 @@ export struct OpusDecoder {
     hybrid: HybridDecoderState,
     hybrid_silk: SilkDecoderState,
     hybrid_scratch: HybridDecoderScratch,
+    output_scratch_i16: [i16: DECODER_OUTPUT_SCRATCH_SAMPLES],
     last_frame_size_48k: i32,
 }
 
@@ -49,21 +60,94 @@ fn decoder_validate_frame_request(decoder: &const OpusDecoder, pcm: &[i16], fram
         return error.DecoderApiError;
     }
     const required: usize = (frame_size as usize) * (decoder.config.channels as usize);
-    if pcm.len < required {
+    if required > pcm.len {
         return error.DecoderApiError;
     }
     return required;
+}
+
+fn decoder_validate_output_frame_request(decoder: &const OpusDecoder, pcm: &[i16], frame_size: i32) !usize {
+    if frame_size <= 0 {
+        return error.DecoderApiError;
+    }
+    if decoder.config.channels < 1 || decoder.config.channels > 2 {
+        return error.DecoderApiError;
+    }
+    const required: usize = (frame_size as usize) * (decoder.config.channels as usize);
+    if required > pcm.len {
+        return error.DecoderApiError;
+    }
+    return required;
+}
+
+fn decoder_output_samples_for_48k(decoder: &const OpusDecoder, frame_size_48k: i32) !i32 {
+    if frame_size_48k <= 0 {
+        return error.DecoderApiError;
+    }
+    const output_samples: usize = resampler_output_samples_per_channel(frame_size_48k as usize, &decoder.resampler) catch {
+        return error.DecoderApiError;
+    };
+    return output_samples as i32;
+}
+
+fn decoder_frame_size_48k_for_output(decoder: &const OpusDecoder, frame_size: i32) !i32 {
+    if frame_size <= 0 || decoder.config.sample_rate_hz == 0 {
+        return error.DecoderApiError;
+    }
+    const numerator: u64 = (frame_size as u64) * (SAMPLE_RATE_48K as u64);
+    const denominator: u64 = decoder.config.sample_rate_hz as u64;
+    if (numerator % denominator) != 0 {
+        return error.DecoderApiError;
+    }
+    const frame_size_48k: u64 = numerator / denominator;
+    if frame_size_48k > (MAX_FRAME_SAMPLES_48K as u64) {
+        return error.DecoderApiError;
+    }
+    validate_frame_size_48k(frame_size_48k as u32) catch {
+        return error.DecoderApiError;
+    };
+    return frame_size_48k as i32;
+}
+
+fn decoder_prepare_output_for_48k(decoder: &const OpusDecoder, pcm: &[i16], frame_size: i32, frame_size_48k: i32) !i32 {
+    const output_frame_size: i32 = try decoder_output_samples_for_48k(decoder, frame_size_48k);
+    if frame_size < output_frame_size {
+        return error.DecoderApiError;
+    }
+    _ = try decoder_validate_output_frame_request(decoder, pcm, output_frame_size);
+    return output_frame_size;
+}
+
+fn decoder_resample_output_i16(decoder: &OpusDecoder, decoded_frame_size_48k: i32, input_48k: &[i16], pcm: &[i16], frame_size: i32) !i32 {
+    const output_frame_size: i32 = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size_48k);
+    if resampler_is_identity(&decoder.resampler) {
+        return decoded_frame_size_48k;
+    }
+
+    const input_required: usize = (decoded_frame_size_48k as usize) * (decoder.config.channels as usize);
+    const output_required: usize = (output_frame_size as usize) * (decoder.config.channels as usize);
+    const written: usize = resampler_process_i16(
+        &input_48k[0:input_required],
+        &decoder.resampler,
+        &pcm[0:output_required],
+    ) catch {
+        return error.DecoderApiError;
+    };
+    if written != output_required {
+        return error.DecoderApiError;
+    }
+    return output_frame_size;
 }
 
 export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) !void {
     validate_decoder_config(config) catch {
         return error.DecoderApiError;
     };
-    if config.sample_rate_hz != 48000 {
-        return error.DecoderApiUnsupported;
-    }
 
     decoder.config = *config;
+    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, config.sample_rate_hz, config.channels as u32, MAX_FRAME_SAMPLES_48K as usize) catch {
+        return error.DecoderApiError;
+    };
     decoder.active_mode = OpusMode.CELT;
     decoder.celt_scratch = CeltMonoDecodeScratch{};
     decoder.celt_plc_scratch = CeltPlcScratch{};
@@ -89,7 +173,7 @@ fn decoder_clear_hybrid_transition_state(decoder: &OpusDecoder) void {
     silk_state_reset(&decoder.hybrid_silk);
 }
 
-fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_size: i32) !i32 {
+fn decoder_decode_empty_packet_48k_i16(decoder: &OpusDecoder, pcm: &[i16], frame_size: i32) !i32 {
     const required: usize = try decoder_validate_frame_request(decoder, pcm, frame_size);
     if decoder.active_mode != OpusMode.CELT {
         return error.DecoderApiUnsupported;
@@ -110,7 +194,29 @@ fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_siz
     return decoded as i32;
 }
 
-fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_size: i32) !i32 {
+    const frame_size_48k: i32 = try decoder_frame_size_48k_for_output(decoder, frame_size);
+    if resampler_is_identity(&decoder.resampler) {
+        return decoder_decode_empty_packet_48k_i16(decoder, pcm, frame_size_48k);
+    }
+
+    _ = try decoder_validate_output_frame_request(decoder, pcm, frame_size);
+    const input_required: usize = (frame_size_48k as usize) * (decoder.config.channels as usize);
+    const decoded: i32 = try decoder_decode_empty_packet_48k_i16(
+        decoder,
+        &decoder.output_scratch_i16[0:input_required],
+        frame_size_48k,
+    );
+    return decoder_resample_output_i16(
+        decoder,
+        decoded,
+        &decoder.output_scratch_i16[0:input_required],
+        pcm,
+        frame_size,
+    );
+}
+
+fn decoder_decode_celt_parsed_48k_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16]) !i32 {
     if parsed.info.mode != OpusMode.CELT || parsed.info.frame_count != 1 {
         return error.DecoderApiUnsupported;
     }
@@ -120,9 +226,6 @@ fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed
 
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
     _ = try decoder_validate_frame_request(decoder, pcm, decoded_frame_size);
-    if frame_size < decoded_frame_size {
-        return error.DecoderApiError;
-    }
 
     const end_band: i32 = celt_mode_end_band_for_bandwidth(&decoder.celt.mode, parsed.info.bandwidth) catch {
         return error.DecoderApiError;
@@ -152,6 +255,29 @@ fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed
     return decoded as i32;
 }
 
+fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+    const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
+    _ = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
+    if resampler_is_identity(&decoder.resampler) {
+        return decoder_decode_celt_parsed_48k_i16(decoder, packet, parsed, pcm);
+    }
+
+    const input_required: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
+    const decoded: i32 = try decoder_decode_celt_parsed_48k_i16(
+        decoder,
+        packet,
+        parsed,
+        &decoder.output_scratch_i16[0:input_required],
+    );
+    return decoder_resample_output_i16(
+        decoder,
+        decoded,
+        &decoder.output_scratch_i16[0:input_required],
+        pcm,
+        frame_size,
+    );
+}
+
 fn decoder_supports_hybrid_packet_info(info: &const PacketInfo) bool {
     var duration_matches: bool = false;
     if info.frame_duration_us == 10000 && info.duration_samples_48k == 480 {
@@ -173,7 +299,7 @@ fn decoder_supports_hybrid_packet_info(info: &const PacketInfo) bool {
         && duration_matches;
 }
 
-fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+fn decoder_decode_hybrid_parsed_48k_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16]) !i32 {
     if !decoder_supports_hybrid_packet_info(&parsed.info) {
         return error.DecoderApiUnsupported;
     }
@@ -183,9 +309,6 @@ fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], pars
 
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
     _ = try decoder_validate_frame_request(decoder, pcm, decoded_frame_size);
-    if frame_size < decoded_frame_size {
-        return error.DecoderApiError;
-    }
 
     if decoder.active_mode != OpusMode.HYBRID {
         decoder_clear_hybrid_transition_state(decoder);
@@ -210,6 +333,29 @@ fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], pars
     decoder.active_mode = OpusMode.HYBRID;
     decoder.last_frame_size_48k = result.decoded_samples_48k;
     return result.decoded_samples_48k;
+}
+
+fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+    const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
+    _ = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
+    if resampler_is_identity(&decoder.resampler) {
+        return decoder_decode_hybrid_parsed_48k_i16(decoder, packet, parsed, pcm);
+    }
+
+    const input_required: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
+    const decoded: i32 = try decoder_decode_hybrid_parsed_48k_i16(
+        decoder,
+        packet,
+        parsed,
+        &decoder.output_scratch_i16[0:input_required],
+    );
+    return decoder_resample_output_i16(
+        decoder,
+        decoded,
+        &decoder.output_scratch_i16[0:input_required],
+        pcm,
+        frame_size,
+    );
 }
 
 fn decoder_decode_fec_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32) !i32 {

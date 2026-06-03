@@ -34,11 +34,17 @@ test "decoder init validates config and initializes 48k state" {
         else => { try assert(false, "decoder init must reject invalid channel counts"); }
     }
 
-    const unsupported_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    const output_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &output_rate);
+    try assert_eq_i32(decoder.config.sample_rate_hz as i32, 16000);
+    try assert_eq_i32(decoder.resampler.output_rate_hz as i32, 16000);
+    try assert_eq_i32(decoder.resampler.input_rate_hz as i32, 48000);
+
+    const unsupported_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 44100, channels: 1 };
     const unsupported_rate_result: !void = decoder_init(&decoder, &unsupported_rate);
     match unsupported_rate_result {
-        error.DecoderApiUnsupported => {}
-        else => { try assert(false, "decoder init must reject non-48k output until resampling is implemented"); }
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder init must reject unsupported output rates"); }
     }
 }
 
@@ -75,6 +81,31 @@ test "decoder api empty packet invokes celt plc" {
     try assert_eq_i32(pcm[0] as i32, 5000);
     try assert_eq_i32(decoder.celt.loss_count, 1);
     try assert(decoder.active_mode == OpusMode.CELT, "empty-packet PLC must keep CELT mode active");
+}
+
+test "decoder api converts empty-packet plc to configured output rate" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    const tail: usize = CELT_DECODE_MEM - 120;
+    var i: usize = 0;
+    while i < 120 {
+        decoder.celt.decode_mem[tail + i] = (i as i32) * 3;
+        i = i + 1;
+    }
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 40] = [0: 40];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:40], 40, false);
+
+    try assert_eq_i32(decoded, 40);
+    try assert_eq_i32(decoder.last_frame_size_48k, 120);
+    try assert_eq_i32(pcm[0] as i32, 3);
+    try assert_eq_i32(pcm[1] as i32, 12);
+    try assert_eq_i32(pcm[39] as i32, 354);
+    try assert_eq_i32(decoder.celt.loss_count, 1);
+    try assert(decoder.active_mode == OpusMode.CELT, "sample-rate conversion must preserve active CELT mode");
 }
 
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {

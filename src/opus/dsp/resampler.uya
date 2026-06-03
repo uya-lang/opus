@@ -1,3 +1,5 @@
+use src.opus.core.saturate.sat16;
+
 export error DspResamplerError;
 
 export struct ResamplerConfig {
@@ -26,11 +28,11 @@ export fn resampler_config_init(input_rate_hz: u32, output_rate_hz: u32, channel
     };
 }
 
-export fn resampler_is_identity(config: &ResamplerConfig) bool {
+export fn resampler_is_identity(config: &const ResamplerConfig) bool {
     return config.input_rate_hz == config.output_rate_hz;
 }
 
-export fn resampler_output_samples_per_channel(input_samples_per_channel: usize, config: &ResamplerConfig) !usize {
+export fn resampler_output_samples_per_channel(input_samples_per_channel: usize, config: &const ResamplerConfig) !usize {
     if input_samples_per_channel > config.max_frame_samples_per_channel || config.input_rate_hz == 0 {
         return error.DspResamplerError;
     }
@@ -38,7 +40,7 @@ export fn resampler_output_samples_per_channel(input_samples_per_channel: usize,
     return ((numerator + (config.input_rate_hz as u64) - 1) / (config.input_rate_hz as u64)) as usize;
 }
 
-export fn resampler_process_identity_i16(input: &[i16], config: &ResamplerConfig, output: &[i16]) !usize {
+export fn resampler_process_identity_i16(input: &[i16], config: &const ResamplerConfig, output: &[i16]) !usize {
     if !resampler_is_identity(config) {
         return error.DspResamplerError;
     }
@@ -56,4 +58,123 @@ export fn resampler_process_identity_i16(input: &[i16], config: &ResamplerConfig
         i = i + 1;
     }
     return input.len;
+}
+
+fn resampler_validate_process_i16(input: &[i16], config: &const ResamplerConfig, output: &[i16]) !usize {
+    if config.channels == 0 || config.channels > 2 {
+        return error.DspResamplerError;
+    }
+    const channels: usize = config.channels as usize;
+    if (input.len % channels) != 0 {
+        return error.DspResamplerError;
+    }
+
+    const input_samples: usize = input.len / channels;
+    const output_samples: usize = try resampler_output_samples_per_channel(input_samples, config);
+    if output.len < output_samples * channels {
+        return error.DspResamplerError;
+    }
+    return output_samples;
+}
+
+fn resampler_round_div_i32(sum: i32, count: i32) i32 {
+    if count <= 1 {
+        return sum;
+    }
+    const half: i32 = count / 2;
+    if sum >= 0 {
+        return (sum + half) / count;
+    }
+    return (sum - half) / count;
+}
+
+fn resampler_process_integer_downsample_i16(input: &[i16], config: &const ResamplerConfig, output: &[i16], output_samples: usize, factor: usize) !usize {
+    if factor == 0 {
+        return error.DspResamplerError;
+    }
+    const channels: usize = config.channels as usize;
+    const input_samples: usize = input.len / channels;
+
+    var out_sample: usize = 0;
+    while out_sample < output_samples {
+        const start: usize = out_sample * factor;
+        var end: usize = start + factor;
+        if end > input_samples {
+            end = input_samples;
+        }
+        if start >= end {
+            return error.DspResamplerError;
+        }
+
+        var channel: usize = 0;
+        while channel < channels {
+            var sum: i32 = 0;
+            var sample: usize = start;
+            while sample < end {
+                sum = sum + (input.ptr[sample * channels + channel] as i32);
+                sample = sample + 1;
+            }
+            const count: i32 = (end - start) as i32;
+            output.ptr[out_sample * channels + channel] = sat16(resampler_round_div_i32(sum, count));
+            channel = channel + 1;
+        }
+        out_sample = out_sample + 1;
+    }
+
+    return output_samples * channels;
+}
+
+fn resampler_process_linear_i16(input: &[i16], config: &const ResamplerConfig, output: &[i16], output_samples: usize) !usize {
+    const channels: usize = config.channels as usize;
+    const input_samples: usize = input.len / channels;
+    if input_samples == 0 {
+        return 0 as usize;
+    }
+
+    var out_sample: usize = 0;
+    while out_sample < output_samples {
+        const pos_q16: u64 = ((out_sample as u64) * (config.input_rate_hz as u64) * 65536) / (config.output_rate_hz as u64);
+        var source_sample: usize = (pos_q16 / 65536) as usize;
+        var frac_q16: i32 = (pos_q16 - ((source_sample as u64) * 65536)) as i32;
+        if source_sample >= input_samples {
+            source_sample = input_samples - 1;
+            frac_q16 = 0;
+        }
+        var next_sample: usize = source_sample + 1;
+        if next_sample >= input_samples {
+            next_sample = source_sample;
+            frac_q16 = 0;
+        }
+
+        var channel: usize = 0;
+        while channel < channels {
+            const a: i32 = input.ptr[source_sample * channels + channel] as i32;
+            const b: i32 = input.ptr[next_sample * channels + channel] as i32;
+            const mixed: i32 = (a * (65536 - frac_q16) + b * frac_q16 + 32768) / 65536;
+            output.ptr[out_sample * channels + channel] = sat16(mixed);
+            channel = channel + 1;
+        }
+        out_sample = out_sample + 1;
+    }
+
+    return output_samples * channels;
+}
+
+export fn resampler_process_i16(input: &[i16], config: &const ResamplerConfig, output: &[i16]) !usize {
+    const output_samples: usize = try resampler_validate_process_i16(input, config, output);
+    if resampler_is_identity(config) {
+        return resampler_process_identity_i16(input, config, output);
+    }
+
+    if config.input_rate_hz > config.output_rate_hz && (config.input_rate_hz % config.output_rate_hz) == 0 {
+        return resampler_process_integer_downsample_i16(
+            input,
+            config,
+            output,
+            output_samples,
+            (config.input_rate_hz / config.output_rate_hz) as usize,
+        );
+    }
+
+    return resampler_process_linear_i16(input, config, output, output_samples);
 }
