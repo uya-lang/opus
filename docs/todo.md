@@ -272,7 +272,7 @@
 - [x] 解码 VAD flags。
 - [x] 解码 LBRR flags。
 - [x] 解码 signal type。
-- [ ] 解码 quantization offset。
+- [x] 解码 quantization offset。
 - [ ] 解码 gains。
 - [ ] 解码 NLSF indices。
 - [ ] 解码 pitch lag。

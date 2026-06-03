@@ -30,6 +30,8 @@ export struct SilkEntropyDecoder {
     signal_types: [i32: SILK_ENTROPY_FLAG_CAPACITY],
     type_offset_symbols: [i32: SILK_ENTROPY_FLAG_CAPACITY],
     type_offset_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    quant_offset_types: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    quant_offset_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -117,6 +119,8 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_i32(&decoder.signal_types[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_i32(&decoder.type_offset_symbols[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_bool(&decoder.type_offset_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.quant_offset_types[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.quant_offset_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -213,9 +217,29 @@ export fn silk_entropy_decode_signal_type(decoder: &SilkEntropyDecoder, channel:
 
     decoder.type_offset_symbols[index] = type_offset;
     decoder.type_offset_valid[index] = true;
+    decoder.quant_offset_types[index] = 0;
+    decoder.quant_offset_valid[index] = false;
     decoder.signal_types[index] = signal_type;
     try silk_entropy_decoder_check(decoder);
     return signal_type;
+}
+
+export fn silk_entropy_decode_quantization_offset(decoder: &SilkEntropyDecoder, channel: i32, frame_index: i32) !i32 {
+    const index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.type_offset_valid[index] {
+        return error.SilkEntropyDecodeError;
+    }
+    const quant_offset_type: i32 = decoder.type_offset_symbols[index] & 1;
+    if quant_offset_type < 0 || quant_offset_type > 1 {
+        return error.SilkEntropyDecodeError;
+    }
+
+    decoder.quant_offset_types[index] = quant_offset_type;
+    decoder.quant_offset_valid[index] = true;
+    return quant_offset_type;
 }
 
 export fn silk_entropy_decoder_check(decoder: &const SilkEntropyDecoder) !void {

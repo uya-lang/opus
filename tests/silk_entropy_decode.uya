@@ -13,6 +13,7 @@ use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
@@ -342,5 +343,40 @@ test "silk entropy decoder decodes signal type from cached VAD flags" {
     match bad_channel {
         error.SilkEntropyDecodeError => {}
         else => { try assert(false, "signal type decode must reject inactive channels"); }
+    }
+}
+
+test "silk entropy decoder derives quantization offset from cached type offset" {
+    var symbols: [i32: 24] = [0: 24];
+    var vad: [bool: 24] = [false: 24];
+    vad[0] = true;
+    symbols[0] = 2;
+    symbols[1] = 1;
+
+    var packet: [byte: 32] = [0: 32];
+    try encode_type_offset_payload(&packet[0:32], &symbols[0:24], &vad[0:24], 1, 2);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 1, 2);
+    dec.vad_flags[0] = true;
+    dec.vad_flags[1] = false;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 1), SILK_SIGNAL_TYPE_UNVOICED);
+
+    try assert_eq_i32(try silk_entropy_decode_quantization_offset(&dec, 0, 0), 0);
+    try assert_eq_i32(dec.quant_offset_types[0], 0);
+    try assert(dec.quant_offset_valid[0], "quantization offset for frame 0 is cached");
+
+    try assert_eq_i32(try silk_entropy_decode_quantization_offset(&dec, 0, 1), 1);
+    try assert_eq_i32(dec.quant_offset_types[1], 1);
+    try assert(dec.quant_offset_valid[1], "quantization offset for frame 1 is cached");
+    try silk_entropy_decoder_check(&dec);
+
+    var uncached_dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&uncached_dec, &packet[0:32], 1, 2);
+    const uncached: !i32 = silk_entropy_decode_quantization_offset(&uncached_dec, 0, 0);
+    match uncached {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "quantization offset decode must require a cached type offset symbol"); }
     }
 }
