@@ -284,7 +284,7 @@
 - [x] 实现 excitation reconstruction。
 - [x] 集成 LTP/LPC synthesis。
 - [x] 实现 mono decode。
-- [ ] 实现 stereo mid/side reconstruction。
+- [x] 实现 stereo mid/side reconstruction。
 - [ ] 支持 NB。
 - [ ] 支持 MB。
 - [ ] 支持 WB。

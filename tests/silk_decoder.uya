@@ -7,6 +7,7 @@ use src.opus.entropy.range_enc.ec_enc_done;
 use src.opus.entropy.range_enc.ec_enc_icdf;
 use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.decoder.silk_decode_mono_packet_q14;
+use src.opus.silk.decoder.silk_decoder_reconstruct_stereo_i16;
 use src.opus.silk.decoder.SilkDecoderError;
 use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
@@ -20,6 +21,7 @@ use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
 use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
 use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
 use src.opus.silk.shell_coder.silk_shell_encoder;
+use src.opus.silk.stereo.SilkStereoState;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
@@ -449,5 +451,40 @@ test "silk mono packet decoder rejects stereo packets and short output" {
     match stereo_res {
         error.SilkDecoderError => {}
         else => { try assert(false, "mono packet decode must reject stereo packets"); }
+    };
+}
+
+test "silk decoder reconstructs interleaved stereo from mid-side q14 frames" {
+    var stereo: SilkStereoState = SilkStereoState{};
+    stereo.s_mid[0] = 10;
+    stereo.s_mid[1] = -20;
+    stereo.s_side[0] = 3;
+    stereo.s_side[1] = -4;
+    var mid_q14: [i32: 4] = [100 << 14, 200 << 14, 300 << 14, 400 << 14];
+    var side_q14: [i32: 4] = [7 << 14, -9 << 14, 11 << 14, -13 << 14];
+    var pred_q13: [i32: 2] = [0: 2];
+    var pcm: [i16: 8] = [0: 8];
+
+    const decoded: usize = try silk_decoder_reconstruct_stereo_i16(&stereo, &mid_q14[0:4], &side_q14[0:4], &pred_q13[0:2], 16, 4, &pcm[0:8]);
+
+    try assert_eq_i32(decoded as i32, 4);
+    try assert_eq_i32(pcm[0] as i32, -24);
+    try assert_eq_i32(pcm[1] as i32, -16);
+    try assert_eq_i32(pcm[2] as i32, 107);
+    try assert_eq_i32(pcm[3] as i32, 93);
+    try assert_eq_i32(pcm[4] as i32, 191);
+    try assert_eq_i32(pcm[5] as i32, 209);
+    try assert_eq_i32(pcm[6] as i32, 311);
+    try assert_eq_i32(pcm[7] as i32, 289);
+    try assert_eq_i32(stereo.s_mid[0] as i32, 300);
+    try assert_eq_i32(stereo.s_mid[1] as i32, 400);
+    try assert_eq_i32(stereo.s_side[0] as i32, 11);
+    try assert_eq_i32(stereo.s_side[1] as i32, -13);
+
+    var short_pcm: [i16: 7] = [0: 7];
+    const short_res: !usize = silk_decoder_reconstruct_stereo_i16(&stereo, &mid_q14[0:4], &side_q14[0:4], &pred_q13[0:2], 16, 4, &short_pcm[0:7]);
+    match short_res {
+        error.SilkDecoderError => {}
+        else => { try assert(false, "stereo reconstruction must reject undersized interleaved output"); }
     };
 }

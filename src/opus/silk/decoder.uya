@@ -1,4 +1,5 @@
 use src.opus.core.types.OpusMode;
+use src.opus.core.saturate.sat16;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
 use src.opus.silk.decoder_control.SILK_CONTROL_NLSF_LEN;
@@ -25,9 +26,12 @@ use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
 use src.opus.silk.frame_params.SilkFrameParams;
 use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
 use src.opus.silk.nlsf.silk_nlsf2a_q12;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_MAX_LPC_ORDER;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_init;
+use src.opus.silk.stereo.SilkStereoState;
+use src.opus.silk.stereo.silk_stereo_ms_to_lr_i16;
 use src.opus.silk.synthesis.silk_synthesis_decode_frame_q14;
 
 export error SilkDecoderError;
@@ -188,4 +192,46 @@ export fn silk_decode_mono_packet_q14(state: &SilkDecoderState, packet: &[byte],
 
     const payload: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
     return silk_decode_mono_payload_q14(state, payload, out_q14);
+}
+
+const SILK_DECODER_STEREO_SCRATCH_LEN: usize = SILK_MAX_FRAME_SAMPLES + 2;
+
+fn silk_decoder_q14_to_i16(value_q14: i32) i16 {
+    const value: i64 = value_q14 as i64;
+    if value >= 0L {
+        return sat16(((value + 8192L) >> 14) as i32);
+    }
+    return sat16((0L - (((0L - value) + 8192L) >> 14)) as i32);
+}
+
+export fn silk_decoder_reconstruct_stereo_i16(stereo_state: &SilkStereoState, mid_q14: &[i32], side_q14: &[i32], pred_q13: &[i32], fs_khz: i32, frame_length: i32, out_i16: &[i16]) !usize {
+    if frame_length <= 0 || frame_length > (SILK_MAX_FRAME_SAMPLES as i32) || fs_khz <= 0 {
+        return error.SilkDecoderError;
+    }
+    const frame_len: usize = frame_length as usize;
+    if mid_q14.len < frame_len || side_q14.len < frame_len || out_i16.len < frame_len * 2 {
+        return error.SilkDecoderError;
+    }
+
+    var mid_i16: [i16: SILK_DECODER_STEREO_SCRATCH_LEN] = [0: SILK_DECODER_STEREO_SCRATCH_LEN];
+    var side_i16: [i16: SILK_DECODER_STEREO_SCRATCH_LEN] = [0: SILK_DECODER_STEREO_SCRATCH_LEN];
+    var i: usize = 0;
+    while i < frame_len {
+        mid_i16[i + 2] = silk_decoder_q14_to_i16(mid_q14.ptr[i]);
+        side_i16[i + 2] = silk_decoder_q14_to_i16(side_q14.ptr[i]);
+        i = i + 1;
+    }
+
+    silk_stereo_ms_to_lr_i16(stereo_state, &mid_i16[0:(frame_len + 2)], &side_i16[0:(frame_len + 2)], pred_q13, fs_khz, frame_length) catch {
+        return error.SilkDecoderError;
+    };
+
+    i = 0;
+    while i < frame_len {
+        const out_index: usize = i * 2;
+        out_i16.ptr[out_index] = mid_i16[i + 1];
+        out_i16.ptr[out_index + 1] = side_i16[i + 1];
+        i = i + 1;
+    }
+    return frame_len;
 }
