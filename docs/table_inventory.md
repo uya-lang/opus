@@ -54,6 +54,13 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_SHELL_CODE_TABLE_OFFSETS` | `silk/tables_pulses_per_block.c` | `usize` | offsets by total pulse count | 17 | 711768652 | 0 |
 | `SILK_SIGN_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | sign iCDF, `ftb=8`, flattened `[6][7]` | 42 | 281612844 | 0 |
 | `SILK_LSF_COS_TAB_Q12` | `silk/table_LSF_cos.c` | `i16` | LSF cosine approximation, Q12 | 129 | 518643764 | 32768 |
+| `SILK_LTP_PER_INDEX_ICDF` | `silk/tables_LTP.c` | `byte` | periodicity index iCDF, `ftb=8` | 3 | 402142135 | 0 |
+| `SILK_LTP_GAIN_ICDF_0` | `silk/tables_LTP.c` | `byte` | LTP gain table 0 iCDF, `ftb=8` | 8 | 31249073 | 0 |
+| `SILK_LTP_GAIN_ICDF_1` | `silk/tables_LTP.c` | `byte` | LTP gain table 1 iCDF, `ftb=8` | 16 | 97972471 | 0 |
+| `SILK_LTP_GAIN_ICDF_2` | `silk/tables_LTP.c` | `byte` | LTP gain table 2 iCDF, `ftb=8` | 32 | 503242496 | 0 |
+| `SILK_LTP_VQ_0_Q7` | `silk/tables_LTP.c` | `i16` | flattened LTP gain codebook 0, Q7 | 40 | 538968179 | 32768 |
+| `SILK_LTP_VQ_1_Q7` | `silk/tables_LTP.c` | `i16` | flattened LTP gain codebook 1, Q7 | 80 | 969848199 | 32768 |
+| `SILK_LTP_VQ_2_Q7` | `silk/tables_LTP.c` | `i16` | flattened LTP gain codebook 2, Q7 | 160 | 297113135 | 32768 |
 | `SILK_NLSF_CB1_NB_MB_Q8` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage vectors, Q8 | 320 | 529135816 | 0 |
 | `SILK_NLSF_CB1_NB_MB_WGHT_Q9` | `silk/tables_NLSF_CB_NB_MB.c` | `i16` | NLSF first-stage weights, Q9 | 320 | 666379621 | 32768 |
 | `SILK_NLSF_CB1_ICDF_NB_MB` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage iCDF, `ftb=8` | 64 | 705421896 | 0 |
@@ -82,7 +89,6 @@ The following upstream table families are required for later decoder conformance
 | CELT coarse energy probability model | `celt/quant_bands.c` `e_prob_model`, `pred_coef`, `beta_coef`, `beta_intra` | energy band quantization | `src/opus/celt/quant_bands.uya` | coarse/fine energy decode vectors and hash/shape checks |
 | CELT band decode helper tables | `celt/bands.c` `ordery_table`, `exp2_table8`, `bit_interleave_table`, `bit_deinterleave_table`; `celt/vq.c` `SPREAD_FACTOR` | PVQ band shape decode | `src/opus/celt/quant_bands.uya` or `src/opus/celt/cwrs.uya` | PVQ/band-shape roundtrip and hash/length checks |
 | CELT pitch/deemphasis helper constants | `celt/pitch.c` `second_check`; `celt/celt.c` gain tables; `celt/celt_decoder.c` `sinc_filter` | pitch, deemphasis, PLC-adjacent decode | `src/opus/dsp/pitch.uya`, `src/opus/celt/mode.uya`, or decoder modules | targeted DSP golden tests before decoder integration |
-| SILK LTP codebooks | `silk/tables_LTP.c` | LTP gain decode | `src/opus/silk/tables.uya` plus LTP module | LTP gain vector decode golden tests, table hash/length |
 | SILK gain tables | `silk/tables_gain.c` | gain decode | `src/opus/silk/tables.uya` plus gain module | gain index decode golden tests, table hash/length |
 | SILK pulse shell tables | `silk/tables_pulses_per_block.c`, `silk/shell_coder.c` | pulse decode | `src/opus/silk/tables.uya` plus pulse module | pulse shell decode vectors and iCDF shape checks |
 | SILK pitch estimation tables | `silk/pitch_est_tables.c` | encoder-side or later analysis work | encoder/analysis module, not decoder-first path | defer until encoder quality tasks; hash/length if imported |

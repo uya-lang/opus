@@ -253,7 +253,7 @@
 - [x] 实现 `silk/lpc.uya`。
 - [x] 实现 LPC synthesis。
 - [x] 实现 `silk/ltp.uya`。
-- [ ] 实现 LTP coefficient decode。
+- [x] 实现 LTP coefficient decode。
 - [ ] 实现 LTP synthesis。
 - [ ] 实现 `silk/stereo.uya`。
 - [ ] 测试 shell coder vectors。

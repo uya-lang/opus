@@ -16,6 +16,8 @@ use src.opus.silk.tables.silk_table_len;
 use src.opus.silk.tables.silk_lsf_cos_table_hash;
 use src.opus.silk.tables.silk_shell_table_hash;
 use src.opus.silk.tables.silk_sign_icdf_hash;
+use src.opus.silk.ltp.silk_ltp_table_hash;
+use src.opus.silk.ltp.silk_ltp_table_len;
 use src.opus.silk.nlsf_tables.silk_nlsf_table_hash;
 use src.opus.silk.nlsf_tables.silk_nlsf_table_len;
 
@@ -42,6 +44,13 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(silk_table_len(11) as i32, 17);
     try assert_eq_i32(silk_table_len(12) as i32, 42);
     try assert_eq_i32(silk_table_len(13) as i32, 129);
+    try assert_eq_i32(silk_ltp_table_len(0) as i32, 3);
+    try assert_eq_i32(silk_ltp_table_len(1) as i32, 8);
+    try assert_eq_i32(silk_ltp_table_len(2) as i32, 16);
+    try assert_eq_i32(silk_ltp_table_len(3) as i32, 32);
+    try assert_eq_i32(silk_ltp_table_len(4) as i32, 40);
+    try assert_eq_i32(silk_ltp_table_len(5) as i32, 80);
+    try assert_eq_i32(silk_ltp_table_len(6) as i32, 160);
     try assert_eq_i32(silk_nlsf_table_len(0) as i32, 320);
     try assert_eq_i32(silk_nlsf_table_len(1) as i32, 320);
     try assert_eq_i32(silk_nlsf_table_len(7) as i32, 512);
@@ -61,6 +70,9 @@ test "imported small scalar table hashes match upstream values" {
     try assert_eq_i32(silk_shell_table_hash(4) as i32, 711768652);
     try assert_eq_i32(silk_sign_icdf_hash() as i32, 281612844);
     try assert_eq_i32(silk_lsf_cos_table_hash() as i32, 518643764);
+    try assert_eq_i32(silk_ltp_table_hash(0) as i32, 402142135);
+    try assert_eq_i32(silk_ltp_table_hash(4) as i32, 538968179);
+    try assert_eq_i32(silk_ltp_table_hash(6) as i32, 297113135);
     try assert_eq_i32(silk_nlsf_table_hash(0) as i32, 529135816);
     try assert_eq_i32(silk_nlsf_table_hash(1) as i32, 666379621);
     try assert_eq_i32(silk_nlsf_table_hash(7) as i32, 453859076);

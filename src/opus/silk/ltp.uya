@@ -1,3 +1,8 @@
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_ltp_index;
 use src.opus.silk.state.SILK_MAX_NB_SUBFR;
 use src.opus.silk.state.SILK_MIN_PITCH_LAG_MS;
 use src.opus.silk.state.SILK_MAX_PITCH_LAG_MS;
@@ -10,9 +15,181 @@ export const SILK_LTP_HISTORY_EXTRA_TAPS: usize = SILK_LTP_ORDER / 2;
 export const SILK_LTP_MAX_CHANNELS: usize = SILK_STATE_MAX_CHANNELS;
 export const SILK_LTP_MAX_NB_SUBFR: usize = SILK_MAX_NB_SUBFR;
 export const SILK_LTP_MAX_COEFS: usize = SILK_LTP_MAX_CHANNELS * SILK_LTP_MAX_NB_SUBFR * SILK_LTP_ORDER;
+export const SILK_LTP_NB_CODEBOOKS: usize = 3;
+
+const SILK_LTP_PER_INDEX_ICDF: [byte: 3] = [179, 99, 0];
+const SILK_LTP_GAIN_ICDF_0: [byte: 8] = [71, 56, 43, 30, 21, 12, 6, 0];
+const SILK_LTP_GAIN_ICDF_1: [byte: 16] = [
+    199, 165, 144, 124, 109, 96, 84, 71,
+    61, 51, 42, 32, 23, 15, 8, 0,
+];
+const SILK_LTP_GAIN_ICDF_2: [byte: 32] = [
+    241, 225, 211, 199, 187, 175, 164, 153,
+    142, 132, 123, 114, 105, 96, 88, 80,
+    72, 64, 57, 50, 44, 38, 33, 29,
+    24, 20, 16, 12, 9, 5, 2, 0,
+];
+
+const SILK_LTP_VQ_0_Q7: [i16: 40] = [
+    4, 6, 24, 7, 5,
+    0, 0, 2, 0, 0,
+    12, 28, 41, 13, -4,
+    -9, 15, 42, 25, 14,
+    1, -2, 62, 41, -9,
+    -10, 37, 65, -4, 3,
+    -6, 4, 66, 7, -8,
+    16, 14, 38, -3, 33,
+];
+const SILK_LTP_VQ_1_Q7: [i16: 80] = [
+    13, 22, 39, 23, 12,
+    -1, 36, 64, 27, -6,
+    -7, 10, 55, 43, 17,
+    1, 1, 8, 1, 1,
+    6, -11, 74, 53, -9,
+    -12, 55, 76, -12, 8,
+    -3, 3, 93, 27, -4,
+    26, 39, 59, 3, -8,
+    2, 0, 77, 11, 9,
+    -8, 22, 44, -6, 7,
+    40, 9, 26, 3, 9,
+    -7, 20, 101, -7, 4,
+    3, -8, 42, 26, 0,
+    -15, 33, 68, 2, 23,
+    -2, 55, 46, -2, 15,
+    3, -1, 21, 16, 41,
+];
+const SILK_LTP_VQ_2_Q7: [i16: 160] = [
+    -6, 27, 61, 39, 5,
+    -11, 42, 88, 4, 1,
+    -2, 60, 65, 6, -4,
+    -1, -5, 73, 56, 1,
+    -9, 19, 94, 29, -9,
+    0, 12, 99, 6, 4,
+    8, -19, 102, 46, -13,
+    3, 2, 13, 3, 2,
+    9, -21, 84, 72, -18,
+    -11, 46, 104, -22, 8,
+    18, 38, 48, 23, 0,
+    -16, 70, 83, -21, 11,
+    5, -11, 117, 22, -8,
+    -6, 23, 117, -12, 3,
+    3, -8, 95, 28, 4,
+    -10, 15, 77, 60, -15,
+    -1, 4, 124, 2, -4,
+    3, 38, 84, 24, -25,
+    2, 13, 42, 13, 31,
+    21, -4, 56, 46, -1,
+    -1, 35, 79, -13, 19,
+    -7, 65, 88, -9, -14,
+    20, 4, 81, 49, -29,
+    20, 0, 75, 3, -17,
+    5, -9, 44, 92, -8,
+    1, -3, 22, 69, 31,
+    -6, 95, 41, -12, 5,
+    39, 67, 16, -4, 1,
+    0, -6, 120, 55, -36,
+    -13, 44, 122, 4, -24,
+    81, 5, 11, 3, 7,
+    2, 0, 9, 10, 88,
+];
 
 fn smulww_i32(a: i32, b: i32) i32 {
     return (((a as i64) * (b as i64)) >> 16) as i32;
+}
+
+fn silk_ltp_codebook_size(periodicity_index: i32) i32 {
+    if periodicity_index == 0 { return 8; }
+    if periodicity_index == 1 { return 16; }
+    if periodicity_index == 2 { return 32; }
+    return 0;
+}
+
+fn silk_ltp_hash_value(table: i32, index: usize) u64 {
+    if table == 0 { return SILK_LTP_PER_INDEX_ICDF[index] as u64; }
+    if table == 1 { return SILK_LTP_GAIN_ICDF_0[index] as u64; }
+    if table == 2 { return SILK_LTP_GAIN_ICDF_1[index] as u64; }
+    if table == 3 { return SILK_LTP_GAIN_ICDF_2[index] as u64; }
+    if table == 4 { return SILK_LTP_VQ_0_Q7[index] as u64; }
+    if table == 5 { return SILK_LTP_VQ_1_Q7[index] as u64; }
+    if table == 6 { return SILK_LTP_VQ_2_Q7[index] as u64; }
+    return 0;
+}
+
+export fn silk_ltp_table_len(table: i32) usize {
+    if table == 0 { return 3; }
+    if table == 1 { return 8; }
+    if table == 2 { return 16; }
+    if table == 3 { return 32; }
+    if table == 4 { return 40; }
+    if table == 5 { return 80; }
+    if table == 6 { return 160; }
+    return 0 as usize;
+}
+
+export fn silk_ltp_table_hash(table: i32) u32 {
+    const len: usize = silk_ltp_table_len(table);
+    var offset: u64 = 0;
+    if table >= 4 && table <= 6 {
+        offset = 32768;
+    }
+    const mod: u64 = 1000000007;
+    var h: u64 = (2166136261 as u64) % mod;
+    var i: usize = 0;
+    while i < len {
+        h = (h * (131 as u64) + silk_ltp_hash_value(table, i) + offset + (1 as u64)) % mod;
+        i = i + 1;
+    }
+    return h as u32;
+}
+
+export fn silk_ltp_per_index_icdf_value(index: usize) byte {
+    if index >= 3 {
+        return 0;
+    }
+    return SILK_LTP_PER_INDEX_ICDF[index];
+}
+
+export fn silk_ltp_gain_icdf_value(periodicity_index: i32, index: usize) byte {
+    if periodicity_index == 0 && index < 8 { return SILK_LTP_GAIN_ICDF_0[index]; }
+    if periodicity_index == 1 && index < 16 { return SILK_LTP_GAIN_ICDF_1[index]; }
+    if periodicity_index == 2 && index < 32 { return SILK_LTP_GAIN_ICDF_2[index]; }
+    return 0;
+}
+
+export fn silk_ltp_vq_q7(periodicity_index: i32, codebook_index: i32, tap: i32) i16 {
+    const size: i32 = silk_ltp_codebook_size(periodicity_index);
+    if size == 0 || codebook_index < 0 || codebook_index >= size || tap < 0 || tap >= (SILK_LTP_ORDER as i32) {
+        return 0;
+    }
+    const index: usize = ((codebook_index as usize) * SILK_LTP_ORDER) + (tap as usize);
+    if periodicity_index == 0 { return SILK_LTP_VQ_0_Q7[index]; }
+    if periodicity_index == 1 { return SILK_LTP_VQ_1_Q7[index]; }
+    return SILK_LTP_VQ_2_Q7[index];
+}
+
+fn fill_ltp_gain_icdf(out: &[byte], periodicity_index: i32) !void {
+    const size: i32 = silk_ltp_codebook_size(periodicity_index);
+    if size == 0 || out.len < (size as usize) {
+        return error.SilkLtpError;
+    }
+    var i: usize = 0;
+    while i < (size as usize) {
+        out.ptr[i] = silk_ltp_gain_icdf_value(periodicity_index, i);
+        i = i + 1;
+    }
+}
+
+export fn silk_ltp_decode_codebook_vector_q14(out_q14: &[i16], periodicity_index: i32, codebook_index: i32) !void {
+    const size: i32 = silk_ltp_codebook_size(periodicity_index);
+    if size == 0 || codebook_index < 0 || codebook_index >= size || out_q14.len < SILK_LTP_ORDER {
+        return error.SilkLtpError;
+    }
+
+    var tap: usize = 0;
+    while tap < SILK_LTP_ORDER {
+        out_q14.ptr[tap] = ((silk_ltp_vq_q7(periodicity_index, codebook_index, tap as i32) as i32) << 7) as i16;
+        tap = tap + 1;
+    }
 }
 
 export fn silk_ltp_validate_fs_khz(fs_khz: i32) !void {
@@ -65,4 +242,41 @@ export fn silk_ltp_scale_history_q15(history_q15: &[i32], len: i32, gain_adj_q16
         history_q15.ptr[i] = smulww_i32(gain_adj_q16, history_q15.ptr[i]);
         i = i + 1;
     }
+}
+
+export fn silk_ltp_decode_coefficients_q14(dec: &EcDec, control: &SilkDecoderControl, channel: i32) !i32 {
+    if control.signal_type != SILK_SIGNAL_TYPE_VOICED || channel < 0 || channel >= control.channels {
+        return error.SilkLtpError;
+    }
+
+    var per_icdf: [byte: 3] = [0: 3];
+    var per_i: usize = 0;
+    while per_i < 3 {
+        per_icdf[per_i] = SILK_LTP_PER_INDEX_ICDF[per_i];
+        per_i = per_i + 1;
+    }
+    const periodicity_index: i32 = ec_dec_icdf(dec, &per_icdf[0:3], 8);
+    if periodicity_index < 0 || periodicity_index >= (SILK_LTP_NB_CODEBOOKS as i32) {
+        return error.SilkLtpError;
+    }
+
+    var gain_icdf: [byte: 32] = [0: 32];
+    try fill_ltp_gain_icdf(&gain_icdf[0:32], periodicity_index);
+    const cb_size: i32 = silk_ltp_codebook_size(periodicity_index);
+    var subframe: i32 = 0;
+    while subframe < control.nb_subframes {
+        const codebook_index: i32 = ec_dec_icdf(dec, &gain_icdf[0:(cb_size as usize)], 8);
+        if codebook_index < 0 || codebook_index >= cb_size {
+            return error.SilkLtpError;
+        }
+        var tap: i32 = 0;
+        while tap < (SILK_LTP_ORDER as i32) {
+            const out_index: usize = try silk_decoder_control_ltp_index(control, channel, subframe, tap);
+            control.ltp_coef_q14[out_index] = ((silk_ltp_vq_q7(periodicity_index, codebook_index, tap) as i32) << 7) as i16;
+            tap = tap + 1;
+        }
+        subframe = subframe + 1;
+    }
+
+    return periodicity_index;
 }

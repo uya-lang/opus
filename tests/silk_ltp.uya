@@ -1,15 +1,52 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
+use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
 use src.opus.silk.ltp.SILK_LTP_HISTORY_EXTRA_TAPS;
 use src.opus.silk.ltp.SILK_LTP_ORDER;
+use src.opus.silk.ltp.silk_ltp_decode_codebook_vector_q14;
+use src.opus.silk.ltp.silk_ltp_decode_coefficients_q14;
+use src.opus.silk.ltp.silk_ltp_gain_icdf_value;
+use src.opus.silk.ltp.silk_ltp_table_hash;
+use src.opus.silk.ltp.silk_ltp_table_len;
+use src.opus.silk.ltp.silk_ltp_vq_q7;
 use src.opus.silk.ltp.silk_ltp_history_index;
+use src.opus.silk.ltp.silk_ltp_per_index_icdf_value;
 use src.opus.silk.ltp.silk_ltp_scale_history_q15;
 use src.opus.silk.ltp.silk_ltp_tap_index;
 use src.opus.silk.ltp.silk_ltp_validate_pitch_lag;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
 
 test "silk ltp exposes order and history constants" {
     try assert_eq_i32(SILK_LTP_ORDER as i32, 5);
     try assert_eq_i32(SILK_LTP_HISTORY_EXTRA_TAPS as i32, 2);
+}
+
+test "silk ltp codebook tables match upstream lengths and hashes" {
+    try assert_eq_i32(silk_ltp_table_len(0) as i32, 3);
+    try assert_eq_i32(silk_ltp_table_len(1) as i32, 8);
+    try assert_eq_i32(silk_ltp_table_len(2) as i32, 16);
+    try assert_eq_i32(silk_ltp_table_len(3) as i32, 32);
+    try assert_eq_i32(silk_ltp_table_len(4) as i32, 40);
+    try assert_eq_i32(silk_ltp_table_len(5) as i32, 80);
+    try assert_eq_i32(silk_ltp_table_len(6) as i32, 160);
+    try assert_eq_i32(silk_ltp_per_index_icdf_value(0) as i32, 179);
+    try assert_eq_i32(silk_ltp_gain_icdf_value(2, 31) as i32, 0);
+    try assert_eq_i32(silk_ltp_vq_q7(0, 0, 2) as i32, 24);
+    try assert_eq_i32(silk_ltp_vq_q7(1, 11, 2) as i32, 101);
+    try assert_eq_i32(silk_ltp_vq_q7(2, 29, 4) as i32, -24);
+    try assert_eq_i32(silk_ltp_table_hash(0) as i32, 402142135);
+    try assert_eq_i32(silk_ltp_table_hash(4) as i32, 538968179);
+    try assert_eq_i32(silk_ltp_table_hash(6) as i32, 297113135);
 }
 
 test "silk ltp validates pitch lags against decoder sampling rate" {
@@ -62,4 +99,88 @@ test "silk ltp scales q15 history by q16 gain adjustment" {
     try assert_eq_i32(history_q15[1], -16384);
     try assert_eq_i32(history_q15[2], 8192);
     try assert_eq_i32(history_q15[5], -1024);
+}
+
+test "silk ltp decodes codebook vectors to q14 taps" {
+    var out_q14: [i16: 5] = [0: 5];
+    try silk_ltp_decode_codebook_vector_q14(&out_q14[0:5], 2, 30);
+
+    try assert_eq_i32(out_q14[0] as i32, 10368);
+    try assert_eq_i32(out_q14[1] as i32, 640);
+    try assert_eq_i32(out_q14[2] as i32, 1408);
+    try assert_eq_i32(out_q14[3] as i32, 384);
+    try assert_eq_i32(out_q14[4] as i32, 896);
+
+    const bad_periodicity: !void = silk_ltp_decode_codebook_vector_q14(&out_q14[0:5], 3, 0);
+    match bad_periodicity {
+        error.SilkLtpError => {}
+        else => { try assert(false, "invalid LTP periodicity index must fail"); }
+    }
+
+    const bad_index: !void = silk_ltp_decode_codebook_vector_q14(&out_q14[0:5], 0, 8);
+    match bad_index {
+        error.SilkLtpError => {}
+        else => { try assert(false, "codebook index past selected LTP table must fail"); }
+    }
+}
+
+test "silk ltp decodes entropy-coded coefficients into decoder control" {
+    var packet: [byte: 64] = [0: 64];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:64]);
+    var per_icdf: [byte: 3] = [0: 3];
+    var gain_icdf: [byte: 32] = [0: 32];
+    var i: usize = 0;
+    while i < 3 {
+        per_icdf[i] = silk_ltp_per_index_icdf_value(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < 32 {
+        gain_icdf[i] = silk_ltp_gain_icdf_value(2, i);
+        i = i + 1;
+    }
+
+    ec_enc_icdf(&enc, 2, &per_icdf[0:3], 8);
+    ec_enc_icdf(&enc, 0, &gain_icdf[0:32], 8);
+    ec_enc_icdf(&enc, 7, &gain_icdf[0:32], 8);
+    ec_enc_icdf(&enc, 18, &gain_icdf[0:32], 8);
+    ec_enc_icdf(&enc, 31, &gain_icdf[0:32], 8);
+    _ = try ec_enc_done(&enc);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 2, 16000, 20);
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try silk_decoder_control_init_from_state(&control, &state);
+    control.signal_type = SILK_SIGNAL_TYPE_VOICED;
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:64]);
+    const periodicity_index: i32 = try silk_ltp_decode_coefficients_q14(&dec, &control, 1);
+
+    try assert_eq_i32(periodicity_index, 2);
+    try assert_eq_i32(control.ltp_coef_q14[20] as i32, -768);
+    try assert_eq_i32(control.ltp_coef_q14[22] as i32, 7808);
+    try assert_eq_i32(control.ltp_coef_q14[25] as i32, 384);
+    try assert_eq_i32(control.ltp_coef_q14[27] as i32, 1664);
+    try assert_eq_i32(control.ltp_coef_q14[32] as i32, 5376);
+    try assert_eq_i32(control.ltp_coef_q14[39] as i32, 11264);
+    try assert_eq_i32(control.ltp_coef_q14[0] as i32, 0);
+}
+
+test "silk ltp coefficient decode rejects unvoiced control" {
+    var packet: [byte: 8] = [0: 8];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:8]);
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 8000, 20);
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    try silk_decoder_control_init_from_state(&control, &state);
+    control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+
+    const result: !i32 = silk_ltp_decode_coefficients_q14(&dec, &control, 0);
+    match result {
+        error.SilkLtpError => {}
+        else => { try assert(false, "LTP coefficient decode is only valid for voiced frames"); }
+    }
 }
