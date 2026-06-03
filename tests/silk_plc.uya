@@ -1,0 +1,100 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.plc.SILK_PLC_MAX_LOSS_COUNT;
+use src.opus.silk.plc.SilkPlcContext;
+use src.opus.silk.plc.silk_plc_context_from_state;
+use src.opus.silk.plc.silk_plc_mark_lost_frame;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+
+test "silk plc context captures configured decoder state" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 2, 16000, 20);
+    state.loss_count = 3;
+    state.prev_signal_type = SILK_SIGNAL_TYPE_VOICED;
+    state.prev_lag = 96;
+    state.prev_gain_q16[0] = 65536;
+    state.prev_gain_q16[1] = 32768;
+    state.rng = 17;
+
+    var context: SilkPlcContext = SilkPlcContext{};
+    try silk_plc_context_from_state(&context, &state);
+
+    try assert_eq_i32(context.channels, 2);
+    try assert_eq_i32(context.fs_khz, 16);
+    try assert_eq_i32(context.frame_length, 320);
+    try assert_eq_i32(context.subframe_length, 80);
+    try assert_eq_i32(context.nb_subframes, 4);
+    try assert_eq_i32(context.lpc_order, 16);
+    try assert_eq_i32(context.loss_count, 3);
+    try assert(context.voiced, "voiced PLC context must preserve a valid previous lag");
+    try assert_eq_i32(context.pitch_lag, 96);
+    try assert_eq_i32(context.gain_q16[0], 65536);
+    try assert_eq_i32(context.gain_q16[1], 32768);
+    try assert_eq_i32(context.rng as i32, 17);
+}
+
+test "silk plc context treats unvoiced frames as no pitch predictor" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 8000, 10);
+    state.prev_signal_type = SILK_SIGNAL_TYPE_UNVOICED;
+    state.prev_lag = 64;
+    state.prev_gain_q16[0] = 4096;
+
+    var context: SilkPlcContext = SilkPlcContext{};
+    try silk_plc_context_from_state(&context, &state);
+
+    try assert(!context.voiced, "unvoiced PLC context must not advertise a pitch lag");
+    try assert_eq_i32(context.pitch_lag, 0);
+    try assert_eq_i32(context.frame_length, 80);
+    try assert_eq_i32(context.nb_subframes, 2);
+    try assert_eq_i32(context.gain_q16[0], 4096);
+}
+
+test "silk plc rejects unconfigured and inconsistent decoder state" {
+    var unconfigured: SilkDecoderState = SilkDecoderState{};
+    var context: SilkPlcContext = SilkPlcContext{};
+    const empty_result: !void = silk_plc_context_from_state(&context, &unconfigured);
+    match empty_result {
+        error.SilkPlcError => {}
+        else => { try assert(false, "PLC context must reject an unconfigured state"); }
+    }
+
+    var bad_lag: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&bad_lag, 1, 16000, 20);
+    bad_lag.prev_signal_type = SILK_SIGNAL_TYPE_VOICED;
+    bad_lag.prev_lag = 31;
+    const lag_result: !void = silk_plc_context_from_state(&context, &bad_lag);
+    match lag_result {
+        error.SilkPlcError => {}
+        else => { try assert(false, "voiced PLC context must reject pitch lag below the SILK range"); }
+    }
+
+    var bad_count: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&bad_count, 1, 12000, 20);
+    bad_count.loss_count = SILK_PLC_MAX_LOSS_COUNT + 1;
+    const count_result: !void = silk_plc_context_from_state(&context, &bad_count);
+    match count_result {
+        error.SilkPlcError => {}
+        else => { try assert(false, "PLC context must reject loss counters outside the tracked range"); }
+    }
+}
+
+test "silk plc lost-frame marker saturates count and advances rng" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.rng = 17;
+    state.history_q14[304] = 1234;
+
+    try silk_plc_mark_lost_frame(&state);
+
+    try assert_eq_i32(state.loss_count, 1);
+    try assert(state.rng != 17, "lost-frame marker must advance the SILK PLC rng");
+    try assert_eq_i32(state.history_q14[304], 1234);
+
+    state.loss_count = SILK_PLC_MAX_LOSS_COUNT;
+    try silk_plc_mark_lost_frame(&state);
+    try assert_eq_i32(state.loss_count, SILK_PLC_MAX_LOSS_COUNT);
+}

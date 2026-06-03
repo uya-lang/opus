@@ -302,7 +302,7 @@
 
 ## 11. PLC 和 FEC
 
-- [ ] 实现 `silk/plc.uya`。
+- [x] 实现 `silk/plc.uya`。
 - [ ] 实现 SILK lost-frame concealment。
 - [ ] 实现 SILK energy decay。
 - [ ] 实现 SILK pitch extrapolation。

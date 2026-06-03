@@ -1,0 +1,117 @@
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
+use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SILK_NB_LPC_ORDER;
+use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.state.SilkDecoderState;
+
+export error SilkPlcError;
+
+export const SILK_PLC_MAX_LOSS_COUNT: i32 = 127;
+
+export struct SilkPlcContext {
+    channels: i32,
+    fs_khz: i32,
+    frame_length: i32,
+    subframe_length: i32,
+    nb_subframes: i32,
+    lpc_order: i32,
+    loss_count: i32,
+    voiced: bool,
+    pitch_lag: i32,
+    gain_q16: [i32: SILK_STATE_MAX_CHANNELS],
+    rng: u32,
+}
+
+fn silk_plc_lpc_order_for_fs_khz(fs_khz: i32) !i32 {
+    if fs_khz == 8 || fs_khz == 12 {
+        return SILK_NB_LPC_ORDER as i32;
+    }
+    if fs_khz == 16 {
+        return SILK_MAX_LPC_ORDER as i32;
+    }
+    return error.SilkPlcError;
+}
+
+fn silk_plc_validate_state(state: &const SilkDecoderState) !void {
+    if state.channels < 1 || state.channels > (SILK_STATE_MAX_CHANNELS as i32) {
+        return error.SilkPlcError;
+    }
+    if state.fs_khz != 8 && state.fs_khz != 12 && state.fs_khz != 16 {
+        return error.SilkPlcError;
+    }
+    if state.frame_ms != 10 && state.frame_ms != 20 {
+        return error.SilkPlcError;
+    }
+    if state.nb_subframes != state.frame_ms / 5 {
+        return error.SilkPlcError;
+    }
+    if state.frame_length <= 0 || state.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkPlcError;
+    }
+    if state.frame_length != state.fs_khz * state.frame_ms {
+        return error.SilkPlcError;
+    }
+    if state.subframe_length <= 0 || state.subframe_length * state.nb_subframes != state.frame_length {
+        return error.SilkPlcError;
+    }
+
+    const expected_lpc_order: i32 = try silk_plc_lpc_order_for_fs_khz(state.fs_khz);
+    if state.lpc_order != expected_lpc_order {
+        return error.SilkPlcError;
+    }
+    if state.min_pitch_lag != state.fs_khz * 2 || state.max_pitch_lag != state.fs_khz * 18 {
+        return error.SilkPlcError;
+    }
+    if state.loss_count < 0 || state.loss_count > SILK_PLC_MAX_LOSS_COUNT {
+        return error.SilkPlcError;
+    }
+    if state.prev_signal_type != SILK_SIGNAL_TYPE_UNVOICED && state.prev_signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkPlcError;
+    }
+    if state.prev_signal_type == SILK_SIGNAL_TYPE_VOICED {
+        if state.prev_lag < state.min_pitch_lag || state.prev_lag > state.max_pitch_lag {
+            return error.SilkPlcError;
+        }
+    }
+}
+
+export fn silk_plc_context_from_state(context: &SilkPlcContext, state: &const SilkDecoderState) !void {
+    try silk_plc_validate_state(state);
+
+    context.channels = state.channels;
+    context.fs_khz = state.fs_khz;
+    context.frame_length = state.frame_length;
+    context.subframe_length = state.subframe_length;
+    context.nb_subframes = state.nb_subframes;
+    context.lpc_order = state.lpc_order;
+    context.loss_count = state.loss_count;
+    context.rng = state.rng;
+    context.voiced = false;
+    context.pitch_lag = 0;
+    if state.prev_signal_type == SILK_SIGNAL_TYPE_VOICED {
+        context.voiced = true;
+        context.pitch_lag = state.prev_lag;
+    }
+
+    var channel: usize = 0;
+    while channel < SILK_STATE_MAX_CHANNELS {
+        if channel < (state.channels as usize) {
+            context.gain_q16[channel] = state.prev_gain_q16[channel];
+        } else {
+            context.gain_q16[channel] = 0;
+        }
+        channel = channel + 1;
+    }
+}
+
+export fn silk_plc_mark_lost_frame(state: &SilkDecoderState) !void {
+    try silk_plc_validate_state(state);
+
+    if state.loss_count < SILK_PLC_MAX_LOSS_COUNT {
+        state.loss_count = state.loss_count + 1;
+    }
+    state.rng = state.rng * 1664525 + 1013904223 + (state.loss_count as u32);
+    state.first_frame_after_reset = false;
+}
