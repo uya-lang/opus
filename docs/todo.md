@@ -274,7 +274,7 @@
 - [x] 解码 signal type。
 - [x] 解码 quantization offset。
 - [x] 解码 gains。
-- [ ] 解码 NLSF indices。
+- [x] 解码 NLSF indices。
 - [ ] 解码 pitch lag。
 - [ ] 解码 pitch contour。
 - [ ] 解码 LTP coefficients。

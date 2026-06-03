@@ -347,6 +347,20 @@ export fn silk_delta_gain_icdf_value(index: usize) byte {
     return SILK_DELTA_GAIN_ICDF[index];
 }
 
+export fn silk_nlsf_interpolation_factor_icdf_value(index: usize) byte {
+    if index >= 5 {
+        return 0;
+    }
+    return SILK_NLSF_INTERPOLATION_FACTOR_ICDF[index];
+}
+
+export fn silk_nlsf_ext_icdf_value(index: usize) byte {
+    if index >= 7 {
+        return 0;
+    }
+    return SILK_NLSF_EXT_ICDF[index];
+}
+
 export fn silk_uniform3_icdf_value(index: usize) byte {
     if index >= 3 {
         return 0;
@@ -411,5 +425,7 @@ export fn silk_table_len(table: i32) usize {
     if table == 17 { return 2; }
     if table == 18 { return 24; }
     if table == 19 { return 41; }
+    if table == 20 { return 5; }
+    if table == 21 { return 7; }
     return 0 as usize;
 }

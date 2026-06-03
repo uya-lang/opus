@@ -11,11 +11,13 @@ use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_NB_SUBFR;
+use src.opus.silk.entropy_decode.SILK_ENTROPY_NLSF_INDEX_CAPACITY;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
 use src.opus.silk.entropy_decode.silk_entropy_decode_gains;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_nlsf_indices;
 use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
@@ -23,11 +25,21 @@ use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_gain_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_nlsf_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_NB_MB;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+use src.opus.silk.tables.silk_nlsf_ext_icdf_value;
+use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
 use src.opus.silk.tables.silk_table_len;
 use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
@@ -221,6 +233,107 @@ fn encode_conditional_gains_payload(packet: &[byte], type_offset_symbol: i32, va
     while subframe < nb_subframes {
         ec_enc_icdf(&enc, delta_symbols.ptr[subframe as usize], &delta_icdf[0:41], 8);
         subframe = subframe + 1;
+    }
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fill_nlsf_cb1_icdf(out: &[byte], codebook: i32, signal_type: i32) !void {
+    if out.len < 32 || signal_type < 0 || signal_type > 1 {
+        try assert(false, "test NLSF CB1 helper needs one 32-entry signal row");
+    }
+    const base: usize = (signal_type as usize) * 32;
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_nlsf_cb1_icdf(codebook, base + i);
+        i = i + 1;
+    }
+}
+
+fn fill_nlsf_cb2_icdf(out: &[byte], codebook: i32, ec_ix: i16) !void {
+    if out.len < 9 || ec_ix < 0 {
+        try assert(false, "test NLSF CB2 helper needs one 9-entry row");
+    }
+    const base: usize = ec_ix as usize;
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_nlsf_cb2_icdf(codebook, base + i);
+        i = i + 1;
+    }
+}
+
+fn fill_nlsf_ext_icdf(out: &[byte]) !void {
+    if out.len < 7 {
+        try assert(false, "test NLSF extension helper needs 7 entries");
+    }
+    var i: usize = 0;
+    while i < 7 {
+        out.ptr[i] = silk_nlsf_ext_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_nlsf_interpolation_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        try assert(false, "test NLSF interpolation helper needs 5 entries");
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_nlsf_interpolation_factor_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn encode_nlsf_residual(enc: &EcEnc, codebook: i32, ec_ix: i16, residual_index: i16) !void {
+    var raw_symbol: i32 = (residual_index as i32) + SILK_NLSF_QUANT_MAX_AMPLITUDE;
+    var ext_symbol: i32 = 0;
+    if raw_symbol < 0 {
+        ext_symbol = -raw_symbol;
+        raw_symbol = 0;
+    } else if raw_symbol > 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE {
+        ext_symbol = raw_symbol - 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE;
+        raw_symbol = 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE;
+    }
+    if ext_symbol < 0 || ext_symbol > 6 {
+        try assert(false, "test NLSF residual is outside upstream extension range");
+    }
+
+    var cb2_icdf: [byte: 9] = [0: 9];
+    try fill_nlsf_cb2_icdf(&cb2_icdf[0:9], codebook, ec_ix);
+    ec_enc_icdf(enc, raw_symbol, &cb2_icdf[0:9], 8);
+    if raw_symbol == 0 || raw_symbol == 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE {
+        var ext_icdf: [byte: 7] = [0: 7];
+        try fill_nlsf_ext_icdf(&ext_icdf[0:7]);
+        ec_enc_icdf(enc, ext_symbol, &ext_icdf[0:7], 8);
+    }
+}
+
+fn encode_nlsf_payload(packet: &[byte], type_offset_symbol: i32, vad: bool, codebook: i32, signal_type: i32, cb1_index: i32, residual_indices: &[i16], interpolation_symbol: i32, nb_subframes: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], vad);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+
+    var cb1_icdf: [byte: 32] = [0: 32];
+    try fill_nlsf_cb1_icdf(&cb1_icdf[0:32], codebook, signal_type);
+    ec_enc_icdf(&enc, cb1_index, &cb1_icdf[0:32], 8);
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], codebook, cb1_index);
+    var i: usize = 0;
+    while i < residual_indices.len {
+        try encode_nlsf_residual(&enc, codebook, ec_ix[i], residual_indices.ptr[i]);
+        i = i + 1;
+    }
+
+    if nb_subframes == (SILK_ENTROPY_MAX_NB_SUBFR as i32) {
+        var interpolation_icdf: [byte: 5] = [0: 5];
+        try fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
+        ec_enc_icdf(&enc, interpolation_symbol, &interpolation_icdf[0:5], 8);
     }
 
     _ = try ec_enc_done(&enc);
@@ -556,4 +669,85 @@ test "silk entropy decoder decodes conditionally coded gains" {
     try assert_eq_i32(control.gains_q16[0], 464896);
     try assert_eq_i32(control.gains_q16[1], 464896);
     try silk_entropy_decoder_check(&dec);
+}
+
+test "silk entropy decoder exposes nlsf entropy tables" {
+    try assert_eq_i32(SILK_ENTROPY_NLSF_INDEX_CAPACITY as i32, 408);
+    try assert_eq_i32(silk_table_len(20) as i32, 5);
+    try assert_eq_i32(silk_table_len(21) as i32, 7);
+    try assert_eq_i32(silk_nlsf_interpolation_factor_icdf_value(0) as i32, 243);
+    try assert_eq_i32(silk_nlsf_interpolation_factor_icdf_value(4) as i32, 0);
+    try assert_eq_i32(silk_nlsf_ext_icdf_value(0) as i32, 100);
+    try assert_eq_i32(silk_nlsf_ext_icdf_value(6) as i32, 0);
+}
+
+test "silk entropy decoder decodes narrowband nlsf indices into q15 control" {
+    var residuals: [i16: 10] = [0: 10];
+    var packet: [byte: 64] = [0: 64];
+    try encode_nlsf_payload(&packet[0:64], 1, false, SILK_NLSF_CODEBOOK_NB_MB, SILK_SIGNAL_TYPE_UNVOICED, 0, &residuals[0:10], 0, 2);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:64], 1, 1);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 8;
+    control.frame_length = 160;
+    control.subframe_length = 80;
+    control.nb_subframes = 2;
+    control.lpc_order = 10;
+    try silk_entropy_decode_nlsf_indices(&dec, &control, 0, 0);
+
+    try assert(dec.nlsf_valid[0], "NLSF indices for frame 0 are cached");
+    try assert_eq_i32((try silk_entropy_decoder_nlsf_index(&dec, 0, 0, 0)) as i32, 0);
+    try assert_eq_i32((try silk_entropy_decoder_nlsf_index(&dec, 0, 0, 10)) as i32, 10);
+    try assert_eq_i32(dec.nlsf_indices[0] as i32, 0);
+    try assert_eq_i32(dec.nlsf_indices[10] as i32, 0);
+    try assert_eq_i32(dec.nlsf_interp_q2[0], 4);
+    try assert_eq_i32(control.nlsf_q15[0] as i32, 1536);
+    try assert_eq_i32(control.nlsf_q15[4] as i32, 13824);
+    try assert_eq_i32(control.nlsf_q15[9] as i32, 29184);
+    try silk_entropy_decoder_check(&dec);
+}
+
+test "silk entropy decoder decodes wideband nlsf extensions and interpolation" {
+    var residuals: [i16: 16] = [0: 16];
+    residuals[0] = -5;
+    residuals[1] = 5;
+    residuals[2] = -4;
+    residuals[3] = 4;
+    var packet: [byte: 80] = [0: 80];
+    try encode_nlsf_payload(&packet[0:80], 2, true, SILK_NLSF_CODEBOOK_WB, SILK_SIGNAL_TYPE_VOICED, 31, &residuals[0:16], 2, 4);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:80], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_nlsf_indices(&dec, &control, 0, 0);
+
+    try assert_eq_i32(dec.nlsf_indices[0] as i32, 31);
+    try assert_eq_i32(dec.nlsf_indices[1] as i32, -5);
+    try assert_eq_i32(dec.nlsf_indices[2] as i32, 5);
+    try assert_eq_i32(dec.nlsf_indices[3] as i32, -4);
+    try assert_eq_i32(dec.nlsf_indices[4] as i32, 4);
+    try assert_eq_i32(dec.nlsf_interp_q2[0], 2);
+    try assert(control.nlsf_q15[0] > 0, "wideband NLSF decode writes Q15 control coefficients");
+    try assert(control.nlsf_q15[15] > 0, "wideband NLSF decode writes the last coefficient");
+
+    var uncached_dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&uncached_dec, &packet[0:80], 1, 1);
+    const uncached: !void = silk_entropy_decode_nlsf_indices(&uncached_dec, &control, 0, 0);
+    match uncached {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "NLSF index decode must require a cached signal type"); }
+    }
 }
