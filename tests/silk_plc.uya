@@ -4,6 +4,7 @@ use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.plc.SILK_PLC_MAX_LOSS_COUNT;
 use src.opus.silk.plc.SilkPlcContext;
+use src.opus.silk.plc.silk_plc_conceal_frame_q14;
 use src.opus.silk.plc.silk_plc_context_from_state;
 use src.opus.silk.plc.silk_plc_mark_lost_frame;
 use src.opus.silk.state.SilkDecoderState;
@@ -97,4 +98,49 @@ test "silk plc lost-frame marker saturates count and advances rng" {
     state.loss_count = SILK_PLC_MAX_LOSS_COUNT;
     try silk_plc_mark_lost_frame(&state);
     try assert_eq_i32(state.loss_count, SILK_PLC_MAX_LOSS_COUNT);
+}
+
+test "silk plc conceals one lost frame from previous excitation history" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.rng = 17;
+
+    var i: usize = 0;
+    while i < 320 {
+        state.history_q14[304 + i] = ((i as i32) + 1) * 10;
+        i = i + 1;
+    }
+
+    var out_q14: [i32: 320] = [0: 320];
+    const decoded: usize = try silk_plc_conceal_frame_q14(&state, 0, &out_q14[0:320]);
+
+    try assert_eq_i32(decoded as i32, 320);
+    try assert_eq_i32(out_q14[0], 10);
+    try assert_eq_i32(out_q14[15], 160);
+    try assert_eq_i32(out_q14[319], 3200);
+    try assert_eq_i32(state.loss_count, 1);
+    try assert(!state.first_frame_after_reset, "PLC concealment consumes the reset marker");
+    try assert(state.rng != 17, "PLC concealment must advance the deterministic rng");
+    try assert_eq_i32(state.history_q14[0], 170);
+    try assert_eq_i32(state.history_q14[303], 3200);
+    try assert_eq_i32(state.history_q14[304], 10);
+    try assert_eq_i32(state.history_q14[623], 3200);
+}
+
+test "silk plc concealment validates channel and output bounds" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    var out_q14: [i32: 320] = [0: 320];
+
+    const bad_channel: !usize = silk_plc_conceal_frame_q14(&state, 1, &out_q14[0:320]);
+    match bad_channel {
+        error.SilkPlcError => {}
+        else => { try assert(false, "PLC concealment must reject channels outside state layout"); }
+    }
+
+    const short_output: !usize = silk_plc_conceal_frame_q14(&state, 0, &out_q14[0:319]);
+    match short_output {
+        error.SilkPlcError => {}
+        else => { try assert(false, "PLC concealment must reject output shorter than one SILK frame"); }
+    }
 }

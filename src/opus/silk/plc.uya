@@ -3,12 +3,16 @@ use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_MAX_LPC_ORDER;
 use src.opus.silk.state.SILK_NB_LPC_ORDER;
+use src.opus.silk.state.SILK_CHANNEL_HISTORY_LEN;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.state.SILK_STATE_HISTORY_LEN;
 use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_history_index;
 
 export error SilkPlcError;
 
 export const SILK_PLC_MAX_LOSS_COUNT: i32 = 127;
+export const SILK_PLC_HISTORY_WRITE_INDEX: usize = 304;
 
 export struct SilkPlcContext {
     channels: i32,
@@ -114,4 +118,119 @@ export fn silk_plc_mark_lost_frame(state: &SilkDecoderState) !void {
     }
     state.rng = state.rng * 1664525 + 1013904223 + (state.loss_count as u32);
     state.first_frame_after_reset = false;
+}
+
+fn silk_plc_state_history_index(state: &const SilkDecoderState, channel: i32, sample: usize) !usize {
+    if sample >= SILK_STATE_HISTORY_LEN {
+        return error.SilkPlcError;
+    }
+    const index: usize = silk_state_history_index(state, channel, sample as i32) catch {
+        return error.SilkPlcError;
+    };
+    if index >= SILK_CHANNEL_HISTORY_LEN {
+        return error.SilkPlcError;
+    }
+    return index;
+}
+
+fn silk_plc_copy_previous_frame_q14(state: &const SilkDecoderState, channel: i32, out_q14: &[i32], frame_len: usize) !void {
+    if out_q14.len < frame_len || SILK_PLC_HISTORY_WRITE_INDEX + frame_len > SILK_STATE_HISTORY_LEN {
+        return error.SilkPlcError;
+    }
+
+    var i: usize = 0;
+    while i < frame_len {
+        const state_index: usize = silk_plc_state_history_index(state, channel, SILK_PLC_HISTORY_WRITE_INDEX + i) catch {
+            return error.SilkPlcError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkPlcError;
+        }
+        out_q14.ptr[i] = state.history_q14[state_index];
+        i = i + 1;
+    }
+}
+
+fn silk_plc_update_history_q14(state: &SilkDecoderState, channel: i32, frame_q14: &[i32], frame_len: usize) !void {
+    if frame_q14.len < frame_len || SILK_PLC_HISTORY_WRITE_INDEX + frame_len > SILK_STATE_HISTORY_LEN {
+        return error.SilkPlcError;
+    }
+
+    var next_history_q14: [i32: SILK_STATE_HISTORY_LEN] = [0: SILK_STATE_HISTORY_LEN];
+    var i: usize = 0;
+    while i < SILK_PLC_HISTORY_WRITE_INDEX {
+        const source: usize = frame_len + i;
+        if source < SILK_PLC_HISTORY_WRITE_INDEX {
+            const source_index: usize = silk_plc_state_history_index(state, channel, source) catch {
+                return error.SilkPlcError;
+            };
+            if source_index >= SILK_CHANNEL_HISTORY_LEN {
+                return error.SilkPlcError;
+            }
+            next_history_q14[i] = state.history_q14[source_index];
+        } else {
+            const frame_index: usize = source - SILK_PLC_HISTORY_WRITE_INDEX;
+            if frame_index >= frame_len {
+                return error.SilkPlcError;
+            }
+            next_history_q14[i] = frame_q14.ptr[frame_index];
+        }
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < SILK_PLC_HISTORY_WRITE_INDEX {
+        const state_index: usize = silk_plc_state_history_index(state, channel, i) catch {
+            return error.SilkPlcError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkPlcError;
+        }
+        state.history_q14[state_index] = next_history_q14[i];
+        i = i + 1;
+    }
+
+    i = 0;
+    while i < frame_len {
+        const state_index: usize = silk_plc_state_history_index(state, channel, SILK_PLC_HISTORY_WRITE_INDEX + i) catch {
+            return error.SilkPlcError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkPlcError;
+        }
+        state.history_q14[state_index] = frame_q14.ptr[i];
+        i = i + 1;
+    }
+
+    i = SILK_PLC_HISTORY_WRITE_INDEX + frame_len;
+    while i < SILK_STATE_HISTORY_LEN {
+        const state_index: usize = silk_plc_state_history_index(state, channel, i) catch {
+            return error.SilkPlcError;
+        };
+        if state_index >= SILK_CHANNEL_HISTORY_LEN {
+            return error.SilkPlcError;
+        }
+        state.history_q14[state_index] = 0;
+        i = i + 1;
+    }
+}
+
+export fn silk_plc_conceal_frame_q14(state: &SilkDecoderState, channel: i32, out_q14: &[i32]) !usize {
+    var context: SilkPlcContext = SilkPlcContext{};
+    try silk_plc_context_from_state(&context, state);
+    if channel < 0 || channel >= context.channels {
+        return error.SilkPlcError;
+    }
+    if context.frame_length <= 0 || context.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkPlcError;
+    }
+    const frame_len: usize = context.frame_length as usize;
+    if out_q14.len < frame_len {
+        return error.SilkPlcError;
+    }
+
+    try silk_plc_copy_previous_frame_q14(state, channel, &out_q14[0:frame_len], frame_len);
+    try silk_plc_update_history_q14(state, channel, &out_q14[0:frame_len], frame_len);
+    try silk_plc_mark_lost_frame(state);
+    return frame_len;
 }
