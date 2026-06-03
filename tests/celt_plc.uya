@@ -1,0 +1,124 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.plc.CELT_PLC_MAX_LOSS_COUNT;
+use src.opus.celt.plc.CeltPlcContext;
+use src.opus.celt.plc.celt_plc_conceal_i16;
+use src.opus.celt.plc.celt_plc_context_from_state;
+use src.opus.celt.state.CELT_DECODE_MEM;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+
+test "celt plc context captures configured decoder state" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+    state.loss_count = 3;
+    state.rng = 17;
+
+    var context: CeltPlcContext = CeltPlcContext{};
+    try celt_plc_context_from_state(&context, &state);
+
+    try assert_eq_i32(context.channels, 2);
+    try assert_eq_i32(context.frame_size, 480);
+    try assert_eq_i32(context.overlap, 120);
+    try assert_eq_i32(context.start_band, 0);
+    try assert_eq_i32(context.end_band, 21);
+    try assert_eq_i32(context.loss_count, 3);
+    try assert_eq_i32(context.rng as i32, 17);
+    try assert_eq_i32(CELT_PLC_MAX_LOSS_COUNT, 127);
+}
+
+test "celt plc conceals mono frame from decode history and updates state" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 480, 0, 21);
+    const tail: usize = CELT_DECODE_MEM - 480;
+    state.decode_mem[tail] = 3000;
+    state.decode_mem[tail + 1] = -2000;
+    state.decode_mem[tail + 479] = 900;
+    state.old_ebands_q8[0] = 80;
+    state.rng = 7;
+
+    var pcm: [i16: 480] = [0: 480];
+    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:480]);
+
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(pcm[0] as i32, 3000);
+    try assert_eq_i32(pcm[1] as i32, -2000);
+    try assert_eq_i32(pcm[479] as i32, 900);
+    try assert_eq_i32(state.loss_count, 1);
+    try assert(state.rng != 7, "CELT PLC must advance the state rng");
+    try assert_eq_i32(state.old_ebands_q8[0] as i32, 40);
+    try assert_eq_i32(state.decode_mem[tail], 3000);
+}
+
+test "celt plc applies decay across consecutive losses" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+    const tail: usize = CELT_DECODE_MEM - 120;
+    state.decode_mem[tail] = 8000;
+    state.decode_mem[tail + 1] = -8000;
+
+    var first: [i16: 120] = [0: 120];
+    var second: [i16: 120] = [0: 120];
+    _ = try celt_plc_conceal_i16(&state, &first[0:120]);
+    _ = try celt_plc_conceal_i16(&state, &second[0:120]);
+
+    try assert_eq_i32(first[0] as i32, 8000);
+    try assert_eq_i32(first[1] as i32, -8000);
+    try assert_eq_i32(second[0] as i32, 4000);
+    try assert_eq_i32(second[1] as i32, -4000);
+    try assert_eq_i32(state.loss_count, 2);
+    try assert_eq_i32(state.decode_mem[tail], 4000);
+}
+
+test "celt plc supports stereo interleaved output and overlap fallback" {
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 2);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+    const left_tail: usize = CELT_DECODE_MEM - 120;
+    const right_tail: usize = CELT_DECODE_MEM + CELT_DECODE_MEM - 120;
+    state.decode_mem[left_tail] = 111;
+    state.decode_mem[right_tail] = -222;
+    state.overlap_mem_q15[1] = 333;
+    state.overlap_mem_q15[121] = -444;
+
+    var pcm: [i16: 240] = [0: 240];
+    const decoded: usize = try celt_plc_conceal_i16(&state, &pcm[0:240]);
+
+    try assert_eq_i32(decoded as i32, 120);
+    try assert_eq_i32(pcm[0] as i32, 111);
+    try assert_eq_i32(pcm[1] as i32, -222);
+    try assert_eq_i32(pcm[2] as i32, 333);
+    try assert_eq_i32(pcm[3] as i32, -444);
+    try assert_eq_i32(state.loss_count, 1);
+}
+
+test "celt plc validates state and output bounds" {
+    var empty: CeltDecoderState = CeltDecoderState{};
+    var context: CeltPlcContext = CeltPlcContext{};
+    const empty_result: !void = celt_plc_context_from_state(&context, &empty);
+    match empty_result {
+        error.CeltPlcError => {}
+        else => { try assert(false, "CELT PLC context must reject an unconfigured state"); }
+    }
+
+    var state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&state, 1);
+    try celt_state_configure_frame(&state, 120, 0, 21);
+    var pcm: [i16: 120] = [0: 120];
+    const short_output: !usize = celt_plc_conceal_i16(&state, &pcm[0:119]);
+    match short_output {
+        error.CeltPlcError => {}
+        else => { try assert(false, "CELT PLC must reject short PCM output"); }
+    }
+
+    state.loss_count = CELT_PLC_MAX_LOSS_COUNT + 1;
+    const bad_loss_count: !usize = celt_plc_conceal_i16(&state, &pcm[0:120]);
+    match bad_loss_count {
+        error.CeltPlcError => {}
+        else => { try assert(false, "CELT PLC must reject invalid loss counters"); }
+    }
+}
