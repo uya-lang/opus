@@ -271,7 +271,7 @@
 - [x] 实现 `silk/entropy_decode.uya`。
 - [x] 解码 VAD flags。
 - [x] 解码 LBRR flags。
-- [ ] 解码 signal type。
+- [x] 解码 signal type。
 - [ ] 解码 quantization offset。
 - [ ] 解码 gains。
 - [ ] 解码 NLSF indices。

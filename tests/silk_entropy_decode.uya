@@ -6,11 +6,14 @@ use src.opus.entropy.range_enc.ec_enc_check;
 use src.opus.entropy.range_enc.ec_enc_done;
 use src.opus.entropy.range_enc.ec_enc_icdf;
 use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
 use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
@@ -19,6 +22,8 @@ use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 use src.opus.silk.tables.silk_table_len;
+use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 
 fn encode_test_payload(packet: &[byte]) !void {
     const icdf: [byte: 4] = [200, 100, 40, 0];
@@ -85,6 +90,43 @@ fn encode_lbrr_payload(packet: &[byte], channel_flags: &[bool], frame_symbols: &
             var icdf: [byte: 7] = [0: 7];
             try fill_lbrr_icdf(&icdf[0:7], frames_per_packet);
             ec_enc_icdf(&enc, frame_symbols.ptr[channel as usize] - 1, &icdf[0:(((1 << frames_per_packet) - 1) as usize)], 8);
+        }
+        channel = channel + 1;
+    }
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fill_type_offset_icdf(out: &[byte], vad: bool) usize {
+    if vad {
+        var i: usize = 0;
+        while i < 4 {
+            out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+            i = i + 1;
+        }
+        return 4 as usize;
+    }
+
+    var j: usize = 0;
+    while j < 2 {
+        out.ptr[j] = silk_type_offset_no_vad_icdf_value(j);
+        j = j + 1;
+    }
+    return 2 as usize;
+}
+
+fn encode_type_offset_payload(packet: &[byte], symbols: &[i32], vad_flags: &[bool], channels: i32, frames_per_packet: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    var channel: i32 = 0;
+    while channel < channels {
+        var frame: i32 = 0;
+        while frame < frames_per_packet {
+            const index: usize = (channel as usize) * SILK_ENTROPY_MAX_FRAMES_PER_PACKET + (frame as usize);
+            var icdf: [byte: 4] = [0: 4];
+            const icdf_len: usize = fill_type_offset_icdf(&icdf[0:4], vad_flags.ptr[index]);
+            ec_enc_icdf(&enc, symbols.ptr[index], &icdf[0:icdf_len], 8);
+            frame = frame + 1;
         }
         channel = channel + 1;
     }
@@ -258,5 +300,47 @@ test "silk entropy decoder rejects LBRR masks without a supported table" {
     match result {
         error.SilkEntropyDecodeError => {}
         else => { try assert(false, "LBRR masks above 3 frames need an explicit table"); }
+    }
+}
+
+test "silk entropy decoder exposes type offset tables" {
+    try assert_eq_i32(silk_table_len(16) as i32, 4);
+    try assert_eq_i32(silk_table_len(17) as i32, 2);
+    try assert_eq_i32(silk_type_offset_vad_icdf_value(0) as i32, 232);
+    try assert_eq_i32(silk_type_offset_vad_icdf_value(3) as i32, 0);
+    try assert_eq_i32(silk_type_offset_no_vad_icdf_value(0) as i32, 230);
+    try assert_eq_i32(silk_type_offset_no_vad_icdf_value(1) as i32, 0);
+}
+
+test "silk entropy decoder decodes signal type from cached VAD flags" {
+    var symbols: [i32: 24] = [0: 24];
+    var vad: [bool: 24] = [false: 24];
+    vad[0] = true;
+    symbols[0] = 3;
+    symbols[1] = 1;
+
+    var packet: [byte: 32] = [0: 32];
+    try encode_type_offset_payload(&packet[0:32], &symbols[0:24], &vad[0:24], 1, 2);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 1, 2);
+    dec.vad_flags[0] = true;
+    dec.vad_flags[1] = false;
+
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(dec.signal_types[0], SILK_SIGNAL_TYPE_VOICED);
+    try assert_eq_i32(dec.type_offset_symbols[0], 3);
+    try assert(dec.type_offset_valid[0], "type offset symbol for frame 0 is cached");
+
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 1), SILK_SIGNAL_TYPE_UNVOICED);
+    try assert_eq_i32(dec.signal_types[1], SILK_SIGNAL_TYPE_UNVOICED);
+    try assert_eq_i32(dec.type_offset_symbols[1], 1);
+    try assert(dec.type_offset_valid[1], "type offset symbol for frame 1 is cached");
+    try silk_entropy_decoder_check(&dec);
+
+    const bad_channel: !i32 = silk_entropy_decode_signal_type(&dec, 1, 0);
+    match bad_channel {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "signal type decode must reject inactive channels"); }
     }
 }

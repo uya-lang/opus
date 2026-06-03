@@ -4,9 +4,13 @@ use src.opus.entropy.range_dec.ec_dec_bit_logp;
 use src.opus.entropy.range_dec.ec_dec_check;
 use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 
 export error SilkEntropyDecodeError;
 
@@ -23,12 +27,23 @@ export struct SilkEntropyDecoder {
     vad_flags: [bool: SILK_ENTROPY_FLAG_CAPACITY],
     lbrr_channel_flags: [bool: SILK_ENTROPY_MAX_CHANNELS],
     lbrr_flags: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    signal_types: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    type_offset_symbols: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    type_offset_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
 }
 
 fn clear_bool(values: &[bool]) void {
     var i: usize = 0;
     while i < values.len {
         values.ptr[i] = false;
+        i = i + 1;
+    }
+}
+
+fn clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
         i = i + 1;
     }
 }
@@ -68,6 +83,24 @@ fn fill_lbrr_flags_icdf(out: &[byte], frames_per_packet: i32) !usize {
     return error.SilkEntropyDecodeError;
 }
 
+fn fill_type_offset_icdf(out: &[byte], vad: bool) usize {
+    if vad {
+        var i: usize = 0;
+        while i < 4 {
+            out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+            i = i + 1;
+        }
+        return 4 as usize;
+    }
+
+    var j: usize = 0;
+    while j < 2 {
+        out.ptr[j] = silk_type_offset_no_vad_icdf_value(j);
+        j = j + 1;
+    }
+    return 2 as usize;
+}
+
 export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byte], channels: i32, frames_per_packet: i32) !void {
     try silk_entropy_validate_layout(channels, frames_per_packet);
     if payload.len == 0 {
@@ -81,6 +114,9 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_bool(&decoder.vad_flags[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_bool(&decoder.lbrr_channel_flags[0:SILK_ENTROPY_MAX_CHANNELS]);
     clear_bool(&decoder.lbrr_flags[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.signal_types[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.type_offset_symbols[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.type_offset_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -159,6 +195,27 @@ export fn silk_entropy_decode_lbrr_flags(decoder: &SilkEntropyDecoder) !void {
         channel = channel + 1;
     }
     try silk_entropy_decoder_check(decoder);
+}
+
+export fn silk_entropy_decode_signal_type(decoder: &SilkEntropyDecoder, channel: i32, frame_index: i32) !i32 {
+    const index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    var icdf: [byte: 4] = [0: 4];
+    const vad: bool = decoder.vad_flags[index];
+    const icdf_len: usize = fill_type_offset_icdf(&icdf[0:4], vad);
+    const type_offset: i32 = try silk_entropy_decode_icdf(decoder, &icdf[0:icdf_len], 8);
+    const signal_type: i32 = type_offset >> 1;
+    if signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkEntropyDecodeError;
+    }
+
+    decoder.type_offset_symbols[index] = type_offset;
+    decoder.type_offset_valid[index] = true;
+    decoder.signal_types[index] = signal_type;
+    try silk_entropy_decoder_check(decoder);
+    return signal_type;
 }
 
 export fn silk_entropy_decoder_check(decoder: &const SilkEntropyDecoder) !void {

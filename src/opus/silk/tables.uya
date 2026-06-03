@@ -306,6 +306,20 @@ export fn silk_lbrr_flags_3_icdf_value(index: usize) byte {
     return SILK_LBRR_FLAGS_3_ICDF[index];
 }
 
+export fn silk_type_offset_vad_icdf_value(index: usize) byte {
+    if index >= 4 {
+        return 0;
+    }
+    return SILK_TYPE_OFFSET_VAD_ICDF[index];
+}
+
+export fn silk_type_offset_no_vad_icdf_value(index: usize) byte {
+    if index >= 2 {
+        return 0;
+    }
+    return SILK_TYPE_OFFSET_NO_VAD_ICDF[index];
+}
+
 export fn silk_uniform3_icdf_value(index: usize) byte {
     if index >= 3 {
         return 0;
@@ -359,5 +373,7 @@ export fn silk_table_len(table: i32) usize {
     if table == 13 { return 129; }
     if table == 14 { return 3; }
     if table == 15 { return 7; }
+    if table == 16 { return 4; }
+    if table == 17 { return 2; }
     return 0 as usize;
 }

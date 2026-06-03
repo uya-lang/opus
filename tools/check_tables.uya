@@ -18,6 +18,8 @@ use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
 use src.opus.silk.tables.silk_lsf_cos_table_hash;
 use src.opus.silk.tables.silk_shell_table_hash;
 use src.opus.silk.tables.silk_sign_icdf_hash;
+use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 use src.opus.silk.ltp.silk_ltp_table_hash;
 use src.opus.silk.ltp.silk_ltp_table_len;
 use src.opus.silk.nlsf_tables.silk_nlsf_table_hash;
@@ -48,6 +50,8 @@ test "imported table lengths match upstream inventory" {
     try assert_eq_i32(silk_table_len(13) as i32, 129);
     try assert_eq_i32(silk_table_len(14) as i32, 3);
     try assert_eq_i32(silk_table_len(15) as i32, 7);
+    try assert_eq_i32(silk_table_len(16) as i32, 4);
+    try assert_eq_i32(silk_table_len(17) as i32, 2);
     try assert_eq_i32(silk_ltp_table_len(0) as i32, 3);
     try assert_eq_i32(silk_ltp_table_len(1) as i32, 8);
     try assert_eq_i32(silk_ltp_table_len(2) as i32, 16);
@@ -90,6 +94,10 @@ test "imported critical-band and window tables keep expected boundaries" {
     try assert_eq_i32(silk_lbrr_flags_2_icdf_value(2) as i32, 0);
     try assert_eq_i32(silk_lbrr_flags_3_icdf_value(0) as i32, 215);
     try assert_eq_i32(silk_lbrr_flags_3_icdf_value(6) as i32, 0);
+    try assert_eq_i32(silk_type_offset_vad_icdf_value(0) as i32, 232);
+    try assert_eq_i32(silk_type_offset_vad_icdf_value(3) as i32, 0);
+    try assert_eq_i32(silk_type_offset_no_vad_icdf_value(0) as i32, 230);
+    try assert_eq_i32(silk_type_offset_no_vad_icdf_value(1) as i32, 0);
     try assert_eq_i32(celt_eband_5ms_boundary(0) as i32, 0);
     try assert_eq_i32(celt_eband_5ms_boundary(21) as i32, 100);
     try assert_eq_i32(celt_window_120_q15_boundary(0) as i32, 2);
