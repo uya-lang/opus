@@ -287,7 +287,7 @@
 - [x] 实现 stereo mid/side reconstruction。
 - [x] 支持 NB。
 - [x] 支持 MB。
-- [ ] 支持 WB。
+- [x] 支持 WB。
 - [ ] 支持 10ms。
 - [ ] 支持 20ms。
 - [ ] 支持 40ms。
