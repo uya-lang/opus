@@ -473,6 +473,33 @@ test "silk delayed fec decodes recoverable mono LBRR frame" {
     try assert(state.rng != 0, "delayed FEC decode must consume encoded random seed side info");
 }
 
+test "silk delayed fec recovers previous lost frame from next packet LBRR" {
+    var packet: [byte: 384] = [0: 384];
+    try encode_wb20_lbrr_unvoiced_packet(&packet[0:384]);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.loss_count = 1;
+    var i: usize = 0;
+    while i < 320 {
+        state.history_q14[304 + i] = 20000 + (i as i32);
+        i = i + 1;
+    }
+
+    var out_q14: [i32: 320] = [0: 320];
+    var result: SilkDelayedFecResult = SilkDelayedFecResult{};
+    try silk_fec_decode_delayed_mono_q14(&result, &state, &packet[0:384], 0, &out_q14[0:320]);
+
+    try assert(result.used_fec, "next packet LBRR must recover the previous lost frame");
+    try assert(!result.used_plc, "available LBRR must not use PLC for the previous frame");
+    try assert_eq_i32(result.decoded_samples as i32, 320);
+    try assert_eq_i32(result.plan.frame_index, 0);
+    try assert(!result.plan.needs_plc, "recoverable previous frame must retain a non-PLC plan");
+    try assert_eq_i32(state.loss_count, 0);
+    try assert(out_q14[0] != 20000, "FEC output must not be a PLC copy of the previous history");
+    try assert(out_q14[319] != 20319, "FEC output must not copy the end of the previous history");
+}
+
 test "silk delayed fec falls back to plc when LBRR is absent" {
     var packet: [byte: 33] = [0: 33];
     packet[0] = 72;
