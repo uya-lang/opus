@@ -1,4 +1,3012 @@
 {
   "format": "uopus.decoder-vectors.v1",
-  "cases": []
+  "source": {
+    "name": "Post-RFC8251 Opus decoder test vectors",
+    "url": "https://opus-codec.org/static/testvectors/opus_testvectors-rfc8251.tar.gz",
+    "archive_sha256": "6b26a22f9ba87b2b836906a9bb7afec5f8e54d49553b1200382520ee6fedfa55",
+    "archive_root": "opus_newvectors/",
+    "imported_root": "rfc8251/"
+  },
+  "cases": [
+    {
+      "id": "rfc8251-testvector01-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector01-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector01.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector01.dec",
+          "sha256": "c4b8b31ede5a2f32e0daf445073d2765533a93e45656a8eb36bc288f05bafd34",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector01m.dec",
+          "sha256": "43ed3123cf34d9c45c784a6e2658c75a934783d13f4708fbe32922e1755a167a",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector02-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector02.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector02.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector02m.dec",
+          "sha256": "4ad3b7aeaea242acc96cafebee69edb0914abc2e46c0c884f812ce10bbee4dbc",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector03-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector03.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector03.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector03m.dec",
+          "sha256": "e00f4ee27f007d849fb67f4386db93254631d2ff31b580394d854819560f1bc7",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector04-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector04.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector04.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector04m.dec",
+          "sha256": "ce7450716f4911284332e76dab66518dcfd5c84e320c0a8a54014e658f5c6908",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector05-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector05.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector05.dec",
+          "sha256": "21a63bd7b9eefc228cf18c312f9fbe144e02a8d696306cb93575ece97e05ea0f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector05m.dec",
+          "sha256": "2dccbba51402ffae88e68a060a18bf719c3becbbb745cdc4b19faccc49ca2bf3",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector06-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector06.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector06.dec",
+          "sha256": "e216d2a721c74d01ae9d1147c75178800b865b3388efcc6b2bb5db96d50a64e8",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector06m.dec",
+          "sha256": "7a593d17e0702184c30fd2db9240d0fffc03ddbf2e6e6a3847e360158c5d4a4e",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector07-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector07.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector07.dec",
+          "sha256": "e0161343bef57f81f07183ba58f336c7845246553bdf4e6d64fe6f5af46d48bd",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector07m.dec",
+          "sha256": "09faeaa61c70fe451dfd05e34f7a796ecdb12f786964dcbb617e75aaffd27cda",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector08-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector08.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector08.dec",
+          "sha256": "8b8435b88ea5f8c5fc1b6ed355454324cd7c5e81d7ab3ba055511979be6c6358",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector08m.dec",
+          "sha256": "8b6ded1b08cf40e8e377c65ddd7ae21245045ee4b146540be21aac7dcceafc43",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector09-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector09.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector09.dec",
+          "sha256": "9baedeac28470f1b275c3a1b6a89725ed9a00370460dd4ab03cdaac09387049f",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector09m.dec",
+          "sha256": "026a3961c57e96aeab19026de0d0dd113162675bf404b56b6abbbad35933492f",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector10-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector10.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector10.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector10m.dec",
+          "sha256": "8529af01c64acf8a1a10cc9f1664a78508c392078ac165f77da6a3846f6b1d48",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector11-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector11.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector11.dec",
+          "sha256": "4f3e16ddef55e84a7776469cba161e0ed647dadc1e36271fad1bc43a70112813",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector11m.dec",
+          "sha256": "d8e0595a896cb134bf3d4a5ac1138354981222e476b985e01459f7bae9f98896",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-8000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-8000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 8000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-12000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-12000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 12000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-16000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-16000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 16000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-24000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-24000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 24000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-48000-mono",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 1,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "mono"
+      ]
+    },
+    {
+      "id": "rfc8251-testvector12-48000-stereo",
+      "enabled": false,
+      "blocked_by": "actual decode generation path is not implemented yet",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "bitstream": "rfc8251/testvector12.bit",
+      "references": [
+        {
+          "path": "rfc8251/testvector12.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-reference"
+        },
+        {
+          "path": "rfc8251/testvector12m.dec",
+          "sha256": "bd7f89a4cb02fb8dcb8fca4425bbcfdbdb3487beed9cd9d49883beb0960e617b",
+          "label": "official-m-reference"
+        }
+      ],
+      "tags": [
+        "rfc8251",
+        "official",
+        "stereo"
+      ]
+    }
+  ]
 }

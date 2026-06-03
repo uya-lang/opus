@@ -67,6 +67,58 @@ class VectorRunnerTests(unittest.TestCase):
             self.assertEqual(cases[0].channels, 1)
             self.assertEqual(cases[0].frame_size, 120)
             self.assertEqual(cases[0].packets, ("packets/silence.opus",))
+            self.assertEqual(len(cases[0].references), 1)
+            self.assertEqual(cases[0].references[0].path, "pcm/silence.s16le")
+
+    def test_load_manifest_accepts_disabled_bitstream_with_alternate_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "rfc8251").mkdir()
+            (root / "rfc8251" / "testvector01.bit").write_bytes(bytes([0x01, 0x02, 0x03]))
+            ref_a = pcm_bytes([1, 2, 3])
+            ref_b = pcm_bytes([1, 2, 4])
+            (root / "rfc8251" / "testvector01.dec").write_bytes(ref_a)
+            (root / "rfc8251" / "testvector01m.dec").write_bytes(ref_b)
+            manifest = self.write_manifest(
+                root,
+                {
+                    "format": "uopus.decoder-vectors.v1",
+                    "cases": [
+                        {
+                            "id": "rfc8251-01-48000-mono",
+                            "enabled": False,
+                            "blocked_by": "actual decode path is not wired yet",
+                            "sample_rate_hz": 48000,
+                            "channels": 1,
+                            "bitstream": "rfc8251/testvector01.bit",
+                            "references": [
+                                {
+                                    "path": "rfc8251/testvector01.dec",
+                                    "sha256": hashlib.sha256(ref_a).hexdigest(),
+                                    "label": "stereo-reference",
+                                },
+                                {
+                                    "path": "rfc8251/testvector01m.dec",
+                                    "sha256": hashlib.sha256(ref_b).hexdigest(),
+                                    "label": "mono-reference",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            cases = load_manifest(manifest)
+            validate_manifest_files(cases, root)
+            results = run_diff(manifest, root / "missing-actual")
+
+            self.assertEqual(len(cases), 1)
+            self.assertFalse(cases[0].enabled)
+            self.assertEqual(cases[0].bitstream, "rfc8251/testvector01.bit")
+            self.assertEqual(cases[0].packets, ())
+            self.assertEqual(cases[0].frame_size, 0)
+            self.assertEqual(len(cases[0].references), 2)
+            self.assertEqual(results, [])
 
     def test_manifest_rejects_unsafe_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +192,45 @@ class VectorRunnerTests(unittest.TestCase):
 
             self.assertEqual(len(results), 1)
             self.assertTrue(results[0].stats.passed)
+
+    def test_run_diff_accepts_any_declared_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packets").mkdir()
+            (root / "pcm").mkdir()
+            (root / "packets" / "packet.opus").write_bytes(bytes([0x80, 0x00]))
+            ref_a = pcm_bytes([0, 1, -1])
+            ref_b = pcm_bytes([9, 8, 7])
+            (root / "pcm" / "a.s16le").write_bytes(ref_a)
+            (root / "pcm" / "b.s16le").write_bytes(ref_b)
+            manifest = self.write_manifest(
+                root,
+                {
+                    "format": "uopus.decoder-vectors.v1",
+                    "cases": [
+                        {
+                            "id": "alternate-reference",
+                            "sample_rate_hz": 48000,
+                            "channels": 1,
+                            "frame_size": 120,
+                            "packets": ["packets/packet.opus"],
+                            "references": [
+                                {"path": "pcm/a.s16le", "sha256": hashlib.sha256(ref_a).hexdigest()},
+                                {"path": "pcm/b.s16le", "sha256": hashlib.sha256(ref_b).hexdigest()},
+                            ],
+                        }
+                    ],
+                },
+            )
+            actual_dir = root / "actual"
+            actual_dir.mkdir()
+            (actual_dir / "alternate-reference.s16le").write_bytes(ref_b)
+
+            results = run_diff(manifest, actual_dir)
+
+            self.assertEqual(len(results), 1)
+            self.assertTrue(results[0].stats.passed)
+            self.assertEqual(results[0].matched_reference, "pcm/b.s16le")
 
 
 if __name__ == "__main__":

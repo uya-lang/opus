@@ -348,8 +348,8 @@
   - [x] 接入 `make conformance`，调用 `make test` 和 decoder vector diff。
   - Full decoder vector corpus 导入和 diff（拆分执行）。
     - [x] 记录 RFC/upstream decoder vector 来源和获取命令。
-    - [ ] 导入/整理 decoder vector corpus 到 `tests/vectors/manifest.json`。
-    - [ ] 生成并记录 reference PCM hash。
+    - [x] 导入/整理 decoder vector corpus 到 `tests/vectors/manifest.json`。
+    - [x] 生成并记录 reference PCM hash。
     - [ ] 补齐 actual decode 生成路径并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
@@ -532,12 +532,12 @@
 
 ## 21. Conformance 和 Differential
 
-- [ ] 获取/整理 RFC/upstream decoder vectors。
+- [x] 获取/整理 RFC/upstream decoder vectors。
 - [x] 定义 vector manifest 格式。
 - [x] 实现 vector runner。
-- [ ] 记录 PCM hash。
+- [x] 记录 PCM hash。
 - [ ] 支持逐样本 diff 输出。
-- [ ] 支持误差统计。
+- [x] 支持误差统计。
 - [x] 实现 `tools/diff_decode.sh`。
 - [ ] 实现 `tools/diff_encode_decode.sh`。
 - [ ] 实现 corpus 批量 decode。

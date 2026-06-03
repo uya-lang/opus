@@ -56,6 +56,30 @@ class DiffDecodeScriptTests(unittest.TestCase):
         self.write_manifest(root, [case])
         return case
 
+    def create_disabled_case_corpus(self, root: Path, reference: bytes) -> None:
+        (root / "rfc8251").mkdir()
+        (root / "rfc8251" / "testvector01.bit").write_bytes(bytes([0x01, 0x02, 0x03]))
+        (root / "rfc8251" / "testvector01.dec").write_bytes(reference)
+        self.write_manifest(
+            root,
+            [
+                {
+                    "id": "rfc8251-01-48000-mono",
+                    "enabled": False,
+                    "blocked_by": "actual decode path is not wired yet",
+                    "sample_rate_hz": 48000,
+                    "channels": 1,
+                    "bitstream": "rfc8251/testvector01.bit",
+                    "references": [
+                        {
+                            "path": "rfc8251/testvector01.dec",
+                            "sha256": hashlib.sha256(reference).hexdigest(),
+                        }
+                    ],
+                }
+            ],
+        )
+
     def test_missing_manifest_reports_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             result = self.run_script(Path(tmp))
@@ -72,6 +96,17 @@ class DiffDecodeScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             self.assertIn("has 0 decoder vector case(s)", result.stdout)
+            self.assertIn("empty decoder vector corpus", result.stdout)
+
+    def test_disabled_corpus_is_successful_noop_until_decode_path_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus = Path(tmp)
+            self.create_disabled_case_corpus(corpus, pcm_bytes([0, 1, -1]))
+
+            result = self.run_script(corpus)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("has 1 decoder vector case(s), 0 enabled", result.stdout)
             self.assertIn("empty decoder vector corpus", result.stdout)
 
     def test_nonempty_corpus_requires_actual_pcm_directory(self) -> None:

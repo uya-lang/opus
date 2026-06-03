@@ -68,13 +68,19 @@ without importing codec internals.
   "cases": [
     {
       "id": "example-celt-fb-20ms-mono",
+      "enabled": true,
       "sample_rate_hz": 48000,
       "channels": 1,
       "frame_size": 960,
       "decode_fec": false,
       "packets": ["packets/example.opus"],
-      "reference_pcm": "pcm/example.s16le",
-      "reference_sha256": "64 lowercase hex characters",
+      "references": [
+        {
+          "path": "pcm/example.s16le",
+          "sha256": "64 lowercase hex characters",
+          "label": "bit-exact"
+        }
+      ],
       "tolerance": {
         "max_abs_error": 0,
         "max_total_abs_error": 0
@@ -85,13 +91,43 @@ without importing codec internals.
 }
 ```
 
+Official opus_demo bitstream vectors use `bitstream` instead of `packets`:
+
+```json
+{
+  "id": "rfc8251-testvector01-48000-stereo",
+  "enabled": false,
+  "blocked_by": "actual decode generation path is not implemented yet",
+  "sample_rate_hz": 48000,
+  "channels": 2,
+  "bitstream": "rfc8251/testvector01.bit",
+  "references": [
+    {
+      "path": "rfc8251/testvector01.dec",
+      "sha256": "64 lowercase hex characters",
+      "label": "official-reference"
+    },
+    {
+      "path": "rfc8251/testvector01m.dec",
+      "sha256": "64 lowercase hex characters",
+      "label": "official-m-reference"
+    }
+  ]
+}
+```
+
 Rules enforced by `tools/vector_runner.py`:
 
 - `id` values are unique and safe for filenames.
+- disabled cases must set `enabled: false` and record `blocked_by`.
 - `sample_rate_hz` is one of 8000, 12000, 16000, 24000, or 48000.
 - `channels` is 1 or 2.
-- `packets` and `reference_pcm` are relative paths inside the corpus root.
-- `reference_sha256` must match the reference s16le PCM file.
+- exactly one of `packets` or `bitstream` is required.
+- all source paths and reference paths are relative paths inside the corpus
+  root.
+- every `references[].sha256` must match the referenced s16le PCM file.
+- enabled cases are listed and diffed by default; disabled cases are validated
+  for file/hash integrity but skipped by `list` and `diff`.
 - Omitted `tolerance` means bit-exact comparison.
 
 The runner contract is:
@@ -103,15 +139,16 @@ python3 tools/vector_runner.py diff tests/vectors/manifest.json --actual-dir bui
 ```
 
 `diff` compares files named `<case id>.s16le` in the actual directory against
-the manifest reference PCM. Producing those actual files from the Uya decoder is
-the responsibility of `tools/diff_decode.sh`.
+the manifest references. A case passes when any declared reference passes the
+configured tolerance. Producing those actual files from the Uya decoder is the
+responsibility of `tools/diff_decode.sh`.
 
 `tools/diff_decode.sh tests/vectors` validates `tests/vectors/manifest.json`.
-An empty manifest is a successful no-op, which keeps the command usable before
-the external corpus is imported. For non-empty manifests, the current script
-expects `UOPUS_DIFF_ACTUAL_DIR` to point at pre-generated `<case id>.s16le`
-files; wiring that directory to a raw packet decoder command is tracked as a
-later conformance task.
+An empty enabled case set is a successful no-op, which keeps the command usable
+while imported external corpus cases remain disabled. When enabled cases exist,
+the current script expects `UOPUS_DIFF_ACTUAL_DIR` to point at pre-generated
+`<case id>.s16le` files; wiring that directory to a raw packet decoder command
+is tracked as a later conformance task.
 
 ## Acceptance Commands
 

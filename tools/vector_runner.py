@@ -25,6 +25,13 @@ class ManifestError(Exception):
 
 
 @dataclass(frozen=True)
+class ReferencePcm:
+    path: str
+    sha256: str
+    label: str = ""
+
+
+@dataclass(frozen=True)
 class VectorCase:
     id: str
     sample_rate_hz: int
@@ -32,8 +39,10 @@ class VectorCase:
     frame_size: int
     decode_fec: bool
     packets: tuple[str, ...]
-    reference_pcm: str
-    reference_sha256: str
+    bitstream: str | None
+    references: tuple[ReferencePcm, ...]
+    enabled: bool = True
+    blocked_by: str = ""
     max_abs_error: int = 0
     max_total_abs_error: int = 0
     tags: tuple[str, ...] = ()
@@ -56,6 +65,7 @@ class DiffResult:
     case: VectorCase
     actual_pcm: Path
     stats: PcmDiffStats
+    matched_reference: str | None = None
 
 
 def _require_object(value: Any, name: str) -> dict[str, Any]:
@@ -112,6 +122,43 @@ def _parse_packets(value: Any, case_id: str) -> tuple[str, ...]:
     return tuple(_safe_relative_path(item, f"case {case_id}: packets[]") for item in value)
 
 
+def _parse_source_paths(case_obj: dict[str, Any], case_id: str) -> tuple[tuple[str, ...], str | None]:
+    packets_value = case_obj.get("packets")
+    bitstream_value = case_obj.get("bitstream")
+    has_packets = packets_value is not None
+    has_bitstream = bitstream_value is not None
+    if has_packets == has_bitstream:
+        raise ManifestError(f"case {case_id}: exactly one of packets or bitstream is required")
+    if has_packets:
+        return _parse_packets(packets_value, case_id), None
+    return (), _safe_relative_path(bitstream_value, f"case {case_id}: bitstream")
+
+
+def _parse_reference_object(value: Any, case_id: str) -> ReferencePcm:
+    ref_obj = _require_object(value, f"case {case_id}: references[]")
+    path = _safe_relative_path(ref_obj.get("path"), f"case {case_id}: references[].path")
+    sha256 = _require_str(ref_obj.get("sha256"), f"case {case_id}: references[].sha256").lower()
+    if not SHA256_RE.match(sha256):
+        raise ManifestError(f"case {case_id}: reference sha256 must be 64 hex characters")
+    label_value = ref_obj.get("label", "")
+    label = "" if label_value == "" else _require_str(label_value, f"case {case_id}: references[].label")
+    return ReferencePcm(path=path, sha256=sha256, label=label)
+
+
+def _parse_references(case_obj: dict[str, Any], case_id: str) -> tuple[ReferencePcm, ...]:
+    refs_value = case_obj.get("references")
+    if refs_value is not None:
+        if not isinstance(refs_value, list) or not refs_value:
+            raise ManifestError(f"case {case_id}: references must be a non-empty list")
+        return tuple(_parse_reference_object(item, case_id) for item in refs_value)
+
+    reference_pcm = _safe_relative_path(case_obj.get("reference_pcm"), f"case {case_id}: reference_pcm")
+    reference_sha256 = _require_str(case_obj.get("reference_sha256"), f"case {case_id}: reference_sha256").lower()
+    if not SHA256_RE.match(reference_sha256):
+        raise ManifestError(f"case {case_id}: reference_sha256 must be 64 hex characters")
+    return (ReferencePcm(path=reference_pcm, sha256=reference_sha256),)
+
+
 def _parse_tags(value: Any, case_id: str) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -157,13 +204,20 @@ def _parse_case(value: Any, seen_ids: set[str]) -> VectorCase:
     if channels not in {1, 2}:
         raise ManifestError(f"case {case_id}: channels must be 1 or 2")
 
-    frame_size = _require_int(case_obj.get("frame_size"), f"case {case_id}: frame_size", 1)
+    enabled = _require_bool(case_obj.get("enabled"), f"case {case_id}: enabled", True)
+    blocked_by = ""
+    if case_obj.get("blocked_by") is not None:
+        blocked_by = _require_str(case_obj.get("blocked_by"), f"case {case_id}: blocked_by")
+    if not enabled and not blocked_by:
+        raise ManifestError(f"case {case_id}: disabled cases must record blocked_by")
+
+    packets, bitstream = _parse_source_paths(case_obj, case_id)
+    if bitstream is None:
+        frame_size = _require_int(case_obj.get("frame_size"), f"case {case_id}: frame_size", 1)
+    else:
+        frame_size = _require_int(case_obj.get("frame_size", 0), f"case {case_id}: frame_size", 0)
     decode_fec = _require_bool(case_obj.get("decode_fec"), f"case {case_id}: decode_fec", False)
-    packets = _parse_packets(case_obj.get("packets"), case_id)
-    reference_pcm = _safe_relative_path(case_obj.get("reference_pcm"), f"case {case_id}: reference_pcm")
-    reference_sha256 = _require_str(case_obj.get("reference_sha256"), f"case {case_id}: reference_sha256").lower()
-    if not SHA256_RE.match(reference_sha256):
-        raise ManifestError(f"case {case_id}: reference_sha256 must be 64 hex characters")
+    references = _parse_references(case_obj, case_id)
 
     max_abs, max_total = _parse_tolerance(case_obj, case_id)
     tags = _parse_tags(case_obj.get("tags"), case_id)
@@ -175,8 +229,10 @@ def _parse_case(value: Any, seen_ids: set[str]) -> VectorCase:
         frame_size=frame_size,
         decode_fec=decode_fec,
         packets=packets,
-        reference_pcm=reference_pcm,
-        reference_sha256=reference_sha256,
+        bitstream=bitstream,
+        references=references,
+        enabled=enabled,
+        blocked_by=blocked_by,
         max_abs_error=max_abs,
         max_total_abs_error=max_total,
         tags=tags,
@@ -203,21 +259,34 @@ def load_manifest(manifest_path: Path) -> list[VectorCase]:
 
 
 def validate_manifest_files(cases: Iterable[VectorCase], corpus_root: Path) -> None:
+    hash_cache: dict[Path, str] = {}
+
+    def file_sha256(path: Path) -> str:
+        if path not in hash_cache:
+            hash_cache[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return hash_cache[path]
+
     for case in cases:
         for packet_rel in case.packets:
             packet_path = _resolve_corpus_path(corpus_root, packet_rel)
             if not packet_path.is_file():
                 raise ManifestError(f"case {case.id}: missing packet file: {packet_rel}")
 
-        ref_path = _resolve_corpus_path(corpus_root, case.reference_pcm)
-        if not ref_path.is_file():
-            raise ManifestError(f"case {case.id}: missing reference PCM: {case.reference_pcm}")
-        digest = hashlib.sha256(ref_path.read_bytes()).hexdigest()
-        if digest != case.reference_sha256:
-            raise ManifestError(
-                f"case {case.id}: reference PCM sha256 mismatch: "
-                f"expected {case.reference_sha256}, got {digest}"
-            )
+        if case.bitstream is not None:
+            bitstream_path = _resolve_corpus_path(corpus_root, case.bitstream)
+            if not bitstream_path.is_file():
+                raise ManifestError(f"case {case.id}: missing bitstream file: {case.bitstream}")
+
+        for reference in case.references:
+            ref_path = _resolve_corpus_path(corpus_root, reference.path)
+            if not ref_path.is_file():
+                raise ManifestError(f"case {case.id}: missing reference PCM: {reference.path}")
+            digest = file_sha256(ref_path)
+            if digest != reference.sha256:
+                raise ManifestError(
+                    f"case {case.id}: reference PCM sha256 mismatch for {reference.path}: "
+                    f"expected {reference.sha256}, got {digest}"
+                )
 
 
 def _read_i16le(data: bytes, sample_index: int) -> int:
@@ -296,30 +365,76 @@ def compare_pcm_i16le(
     )
 
 
+def _enabled_cases(cases: Iterable[VectorCase]) -> list[VectorCase]:
+    return [case for case in cases if case.enabled]
+
+
+def _best_failed_stats(stats_values: list[PcmDiffStats]) -> PcmDiffStats:
+    if not stats_values:
+        return PcmDiffStats(
+            passed=False,
+            sample_count=0,
+            mismatch_count=0,
+            max_abs_error=0,
+            total_abs_error=0,
+            first_diff_sample=None,
+            reason="no reference PCM declared",
+        )
+    return min(
+        stats_values,
+        key=lambda stats: (
+            stats.length_mismatch,
+            stats.max_abs_error,
+            stats.total_abs_error,
+            stats.mismatch_count,
+        ),
+    )
+
+
 def run_diff(manifest_path: Path, actual_dir: Path, corpus_root: Path | None = None) -> list[DiffResult]:
     cases = load_manifest(manifest_path)
     root = corpus_root if corpus_root is not None else manifest_path.parent
     validate_manifest_files(cases, root)
 
     results: list[DiffResult] = []
-    for case in cases:
-        ref_path = _resolve_corpus_path(root, case.reference_pcm)
+    for case in _enabled_cases(cases):
         actual_path = actual_dir / f"{case.id}.s16le"
         if not actual_path.is_file():
             raise ManifestError(f"case {case.id}: missing actual PCM: {actual_path}")
-        stats = compare_pcm_i16le(
-            ref_path.read_bytes(),
-            actual_path.read_bytes(),
-            max_abs_error=case.max_abs_error,
-            max_total_abs_error=case.max_total_abs_error,
+        actual_bytes = actual_path.read_bytes()
+        failed_stats: list[PcmDiffStats] = []
+        matched_reference: str | None = None
+        matched_stats: PcmDiffStats | None = None
+        for reference in case.references:
+            ref_path = _resolve_corpus_path(root, reference.path)
+            stats = compare_pcm_i16le(
+                ref_path.read_bytes(),
+                actual_bytes,
+                max_abs_error=case.max_abs_error,
+                max_total_abs_error=case.max_total_abs_error,
+            )
+            if stats.passed:
+                matched_reference = reference.path
+                matched_stats = stats
+                break
+            failed_stats.append(stats)
+        if matched_stats is None:
+            matched_stats = _best_failed_stats(failed_stats)
+        results.append(
+            DiffResult(
+                case=case,
+                actual_pcm=actual_path,
+                stats=matched_stats,
+                matched_reference=matched_reference,
+            )
         )
-        results.append(DiffResult(case=case, actual_pcm=actual_path, stats=stats))
     return results
 
 
-def _print_case_list(cases: Iterable[VectorCase]) -> None:
-    for case in cases:
-        packets = ",".join(case.packets)
+def _print_case_list(cases: Iterable[VectorCase], include_disabled: bool = False) -> None:
+    listed_cases = list(cases if include_disabled else _enabled_cases(cases))
+    for case in listed_cases:
+        source = case.bitstream if case.bitstream is not None else ",".join(case.packets)
         print(
             "\t".join(
                 [
@@ -328,7 +443,7 @@ def _print_case_list(cases: Iterable[VectorCase]) -> None:
                     str(case.channels),
                     str(case.frame_size),
                     "1" if case.decode_fec else "0",
-                    packets,
+                    source,
                 ]
             )
         )
@@ -337,13 +452,14 @@ def _print_case_list(cases: Iterable[VectorCase]) -> None:
 def _cmd_validate(args: argparse.Namespace) -> int:
     cases = load_manifest(args.manifest)
     validate_manifest_files(cases, args.corpus_root or args.manifest.parent)
-    print(f"ok: {args.manifest} has {len(cases)} decoder vector case(s)")
+    enabled_count = len(_enabled_cases(cases))
+    print(f"ok: {args.manifest} has {len(cases)} decoder vector case(s), {enabled_count} enabled")
     return 0
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
     cases = load_manifest(args.manifest)
-    _print_case_list(cases)
+    _print_case_list(cases, include_disabled=args.all)
     return 0
 
 
@@ -359,6 +475,8 @@ def _cmd_diff(args: argparse.Namespace) -> int:
         )
         if stats.reason:
             detail = f"{detail} reason={stats.reason}"
+        if result.matched_reference is not None:
+            detail = f"{detail} reference={result.matched_reference}"
         print(f"{status}: {result.case.id}: {detail}")
         if not stats.passed:
             failed += 1
@@ -380,6 +498,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     list_cmd = subparsers.add_parser("list", help="print decoder jobs as tab-separated rows")
     list_cmd.add_argument("manifest", type=Path)
+    list_cmd.add_argument("--all", action="store_true", help="include disabled cases")
     list_cmd.set_defaults(func=_cmd_list)
 
     diff = subparsers.add_parser("diff", help="compare actual PCM files named <case id>.s16le")
