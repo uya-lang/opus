@@ -1,4 +1,5 @@
 use src.opus.silk.state.SILK_MAX_LPC_ORDER;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_MAX_NB_SUBFR;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
 use src.opus.silk.state.SilkDecoderState;
@@ -9,9 +10,11 @@ export const SILK_CONTROL_MAX_CHANNELS: usize = SILK_STATE_MAX_CHANNELS;
 export const SILK_CONTROL_MAX_NB_SUBFR: usize = SILK_MAX_NB_SUBFR;
 export const SILK_CONTROL_MAX_LPC_ORDER: usize = SILK_MAX_LPC_ORDER;
 export const SILK_CONTROL_LTP_ORDER: usize = 5;
+export const SILK_CONTROL_MAX_FRAME_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES;
 export const SILK_CONTROL_GAIN_LEN: usize = SILK_CONTROL_MAX_CHANNELS * SILK_CONTROL_MAX_NB_SUBFR;
 export const SILK_CONTROL_NLSF_LEN: usize = SILK_CONTROL_MAX_CHANNELS * SILK_CONTROL_MAX_LPC_ORDER;
 export const SILK_CONTROL_LTP_LEN: usize = SILK_CONTROL_MAX_CHANNELS * SILK_CONTROL_MAX_NB_SUBFR * SILK_CONTROL_LTP_ORDER;
+export const SILK_CONTROL_PULSE_LEN: usize = SILK_CONTROL_MAX_CHANNELS * SILK_CONTROL_MAX_FRAME_SAMPLES;
 
 export const SILK_SIGNAL_TYPE_UNVOICED: i32 = 0;
 export const SILK_SIGNAL_TYPE_VOICED: i32 = 1;
@@ -34,6 +37,7 @@ export struct SilkDecoderControl {
     pred_coef_q12: [i32: SILK_CONTROL_NLSF_LEN],
     ltp_coef_q14: [i16: SILK_CONTROL_LTP_LEN],
     ltp_scale_q14: i16,
+    pulses: [i16: SILK_CONTROL_PULSE_LEN],
 }
 
 fn clear_i16(values: &[i16]) void {
@@ -65,7 +69,7 @@ fn silk_decoder_control_validate_layout(control: &const SilkDecoderControl) !voi
     if control.fs_khz != 8 && control.fs_khz != 12 && control.fs_khz != 16 {
         return error.SilkDecoderControlError;
     }
-    if control.frame_length <= 0 || control.subframe_length <= 0 {
+    if control.frame_length <= 0 || control.frame_length > (SILK_CONTROL_MAX_FRAME_SAMPLES as i32) || control.subframe_length <= 0 {
         return error.SilkDecoderControlError;
     }
 }
@@ -76,6 +80,7 @@ export fn silk_decoder_control_reset(control: &SilkDecoderControl) void {
     clear_i16(&control.nlsf_q15[0:SILK_CONTROL_NLSF_LEN]);
     clear_i32(&control.pred_coef_q12[0:SILK_CONTROL_NLSF_LEN]);
     clear_i16(&control.ltp_coef_q14[0:SILK_CONTROL_LTP_LEN]);
+    clear_i16(&control.pulses[0:SILK_CONTROL_PULSE_LEN]);
     control.ltp_scale_q14 = 0;
     control.signal_type = SILK_SIGNAL_TYPE_UNVOICED;
     control.quant_offset_type = 0;
@@ -136,4 +141,12 @@ export fn silk_decoder_control_ltp_index(control: &const SilkDecoderControl, cha
     return (channel as usize) * SILK_CONTROL_MAX_NB_SUBFR * SILK_CONTROL_LTP_ORDER
         + (subframe as usize) * SILK_CONTROL_LTP_ORDER
         + (tap as usize);
+}
+
+export fn silk_decoder_control_pulse_index(control: &const SilkDecoderControl, channel: i32, sample: i32) !usize {
+    try silk_decoder_control_validate_layout(control);
+    if channel < 0 || channel >= control.channels || sample < 0 || sample >= (SILK_CONTROL_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkDecoderControlError;
+    }
+    return (channel as usize) * SILK_CONTROL_MAX_FRAME_SAMPLES + (sample as usize);
 }

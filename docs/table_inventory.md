@@ -48,6 +48,10 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_PITCH_CONTOUR_OFFSETS` | `silk/pitch_est_tables.c` | `i16` | decoder contour offsets, flattened by subframe | 210 | checked by boundary decode tests | 32768 |
 | `SILK_TRANSITION_LP_B_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][3]` | 15 | 258613290 | 2147483648 |
 | `SILK_TRANSITION_LP_A_Q28` | `silk/tables_other.c` | `i32` | Q28, flattened `[5][2]` | 10 | 268602790 | 2147483648 |
+| `SILK_LSB_ICDF` | `silk/tables_other.c` | `byte` | iCDF, `ftb=8` | 2 | 64130662 | 0 |
+| `SILK_MAX_PULSES_TABLE` | `silk/tables_pulses_per_block.c` | `byte` | max pulses per rate group | 4 | 294670020 | 0 |
+| `SILK_PULSES_PER_BLOCK_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | iCDF, `ftb=8`, flattened `[10][18]` | 180 | 400107309 | 0 |
+| `SILK_RATE_LEVELS_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | iCDF, `ftb=8`, flattened `[2][9]` | 18 | 217345873 | 0 |
 | `SILK_SHELL_CODE_TABLE0` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 635112220 | 0 |
 | `SILK_SHELL_CODE_TABLE1` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 794520531 | 0 |
 | `SILK_SHELL_CODE_TABLE2` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 611988706 | 0 |

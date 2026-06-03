@@ -1,8 +1,10 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
 use src.opus.silk.decoder_control.SILK_CONTROL_MAX_LPC_ORDER;
 use src.opus.silk.decoder_control.SILK_CONTROL_MAX_NB_SUBFR;
 use src.opus.silk.decoder_control.SILK_CONTROL_MAX_CHANNELS;
+use src.opus.silk.decoder_control.SILK_CONTROL_PULSE_LEN;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SilkDecoderControl;
@@ -11,6 +13,7 @@ use src.opus.silk.decoder_control.silk_decoder_control_init_from_state;
 use src.opus.silk.decoder_control.silk_decoder_control_lpc_index;
 use src.opus.silk.decoder_control.silk_decoder_control_ltp_index;
 use src.opus.silk.decoder_control.silk_decoder_control_pitch_index;
+use src.opus.silk.decoder_control.silk_decoder_control_pulse_index;
 use src.opus.silk.decoder_control.silk_decoder_control_reset;
 use src.opus.silk.decoder_control.silk_decoder_control_set_signal;
 use src.opus.silk.state.SilkDecoderState;
@@ -32,6 +35,8 @@ test "silk decoder control initializes frame layout from decoder state" {
     try assert_eq_i32(SILK_CONTROL_MAX_CHANNELS as i32, 2);
     try assert_eq_i32(SILK_CONTROL_MAX_NB_SUBFR as i32, 4);
     try assert_eq_i32(SILK_CONTROL_MAX_LPC_ORDER as i32, 16);
+    try assert_eq_i32(SILK_CONTROL_MAX_FRAME_SAMPLES as i32, 320);
+    try assert_eq_i32(SILK_CONTROL_PULSE_LEN as i32, 640);
     try assert_eq_i32(control.signal_type, SILK_SIGNAL_TYPE_UNVOICED);
     try assert_eq_i32(control.quant_offset_type, 0);
     try assert_eq_i32(control.seed, 0);
@@ -39,6 +44,7 @@ test "silk decoder control initializes frame layout from decoder state" {
     try assert_eq_i32(control.nlsf_q15[31] as i32, 0);
     try assert_eq_i32(control.pred_coef_q12[31], 0);
     try assert_eq_i32(control.ltp_coef_q14[39] as i32, 0);
+    try assert_eq_i32(control.pulses[639] as i32, 0);
 }
 
 test "silk decoder control maps channel and subframe arrays" {
@@ -53,6 +59,8 @@ test "silk decoder control maps channel and subframe arrays" {
     try assert_eq_i32((try silk_decoder_control_lpc_index(&control, 1, 15)) as i32, 31);
     try assert_eq_i32((try silk_decoder_control_pitch_index(&control, 3)) as i32, 3);
     try assert_eq_i32((try silk_decoder_control_ltp_index(&control, 1, 3, 4)) as i32, 39);
+    try assert_eq_i32((try silk_decoder_control_pulse_index(&control, 0, 0)) as i32, 0);
+    try assert_eq_i32((try silk_decoder_control_pulse_index(&control, 1, 319)) as i32, 639);
 
     const bad_gain: !usize = silk_decoder_control_gain_index(&control, 1, 4);
     match bad_gain {
@@ -70,6 +78,12 @@ test "silk decoder control maps channel and subframe arrays" {
     match bad_ltp {
         error.SilkDecoderControlError => {}
         else => { try assert(false, "LTP index past active channels must fail"); }
+    }
+
+    const bad_pulse: !usize = silk_decoder_control_pulse_index(&control, 0, 320);
+    match bad_pulse {
+        error.SilkDecoderControlError => {}
+        else => { try assert(false, "pulse index past maximum SILK frame samples must fail"); }
     }
 }
 
@@ -110,6 +124,7 @@ test "silk decoder control reset clears side information but keeps frame layout"
     control.nlsf_q15[31] = 99;
     control.pred_coef_q12[31] = -12;
     control.ltp_coef_q14[39] = 3;
+    control.pulses[639] = -17;
 
     silk_decoder_control_reset(&control);
 
@@ -125,4 +140,5 @@ test "silk decoder control reset clears side information but keeps frame layout"
     try assert_eq_i32(control.nlsf_q15[31] as i32, 0);
     try assert_eq_i32(control.pred_coef_q12[31], 0);
     try assert_eq_i32(control.ltp_coef_q14[39] as i32, 0);
+    try assert_eq_i32(control.pulses[639] as i32, 0);
 }
