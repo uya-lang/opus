@@ -1,5 +1,14 @@
 use src.opus.silk.state.SILK_MAX_LPC_ORDER;
 use src.opus.silk.state.SILK_NB_LPC_ORDER;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_NB_MB;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_VECTORS;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_nlsf_q8;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_weight_q9;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_select;
+use src.opus.silk.nlsf_tables.silk_nlsf_codebook_order;
+use src.opus.silk.nlsf_tables.silk_nlsf_codebook_quant_step_q16;
+use src.opus.silk.nlsf_tables.silk_nlsf_pred_q8;
 
 export error SilkNlsfError;
 
@@ -7,6 +16,8 @@ export const SILK_NLSF_Q15_ONE: i32 = 32768;
 export const SILK_NLSF_NB_ORDER: usize = SILK_NB_LPC_ORDER;
 export const SILK_NLSF_MAX_ORDER: usize = SILK_MAX_LPC_ORDER;
 export const SILK_NLSF_MAX_INTERPOLATION_Q2: i32 = 4;
+export const SILK_NLSF_QUANT_MAX_AMPLITUDE: i32 = 4;
+export const SILK_NLSF_QUANT_LEVEL_ADJ_Q10: i32 = 102;
 
 export fn silk_nlsf_validate_order(order: i32) !void {
     if order != (SILK_NLSF_NB_ORDER as i32) && order != (SILK_NLSF_MAX_ORDER as i32) {
@@ -94,6 +105,91 @@ export fn silk_nlsf_interpolate_q15(out_q15: &[i16], current_q15: &[i16], previo
             return error.SilkNlsfError;
         }
         out_q15.ptr[i] = interpolated as i16;
+        i = i + 1;
+    }
+}
+
+fn validate_codebook(codebook: i32) !i32 {
+    if codebook != SILK_NLSF_CODEBOOK_NB_MB && codebook != SILK_NLSF_CODEBOOK_WB {
+        return error.SilkNlsfError;
+    }
+    const order: i32 = silk_nlsf_codebook_order(codebook);
+    try silk_nlsf_validate_order(order);
+    return order;
+}
+
+export fn silk_nlsf_unpack_ec_tables(ec_ix: &[i16], pred_q8: &[byte], codebook: i32, cb1_index: i32) !void {
+    const order: i32 = try validate_codebook(codebook);
+    if cb1_index < 0 || cb1_index >= SILK_NLSF_CODEBOOK_VECTORS || ec_ix.len < (order as usize) || pred_q8.len < (order as usize) {
+        return error.SilkNlsfError;
+    }
+
+    var selector_index: usize = ((cb1_index as usize) * (order as usize)) / 2;
+    var i: usize = 0;
+    while i < (order as usize) {
+        const entry: i32 = silk_nlsf_cb2_select(codebook, selector_index) as i32;
+        selector_index = selector_index + 1;
+        ec_ix.ptr[i] = (((entry >> 1) & 7) * (2 * SILK_NLSF_QUANT_MAX_AMPLITUDE + 1)) as i16;
+        pred_q8.ptr[i] = silk_nlsf_pred_q8(codebook, i + ((entry & 1) as usize) * ((order as usize) - 1));
+        ec_ix.ptr[i + 1] = (((entry >> 5) & 7) * (2 * SILK_NLSF_QUANT_MAX_AMPLITUDE + 1)) as i16;
+        pred_q8.ptr[i + 1] = silk_nlsf_pred_q8(codebook, i + (((entry >> 4) & 1) as usize) * ((order as usize) - 1) + 1);
+        i = i + 2;
+    }
+}
+
+fn silk_nlsf_residual_dequant_q10(res_q10: &[i32], indices: &[i16], pred_q8: &[byte], quant_step_size_q16: i32, order: i32) !void {
+    if res_q10.len < (order as usize) || indices.len < (order as usize) || pred_q8.len < (order as usize) || quant_step_size_q16 <= 0 {
+        return error.SilkNlsfError;
+    }
+
+    var out_q10: i32 = 0;
+    var pos: i32 = order;
+    while pos > 0 {
+        pos = pos - 1;
+        const i: usize = pos as usize;
+        const pred_q10: i32 = (out_q10 * (pred_q8.ptr[i] as i32)) >> 8;
+        out_q10 = (indices.ptr[i] as i32) << 10;
+        if out_q10 > 0 {
+            out_q10 = out_q10 - SILK_NLSF_QUANT_LEVEL_ADJ_Q10;
+        } else if out_q10 < 0 {
+            out_q10 = out_q10 + SILK_NLSF_QUANT_LEVEL_ADJ_Q10;
+        }
+        out_q10 = pred_q10 + ((out_q10 * quant_step_size_q16) >> 16);
+        res_q10.ptr[i] = out_q10;
+    }
+}
+
+export fn silk_nlsf_decode_q15(out_q15: &[i16], indices: &[i16], codebook: i32) !void {
+    const order: i32 = try validate_codebook(codebook);
+    if out_q15.len < (order as usize) || indices.len < ((order as usize) + 1) {
+        return error.SilkNlsfError;
+    }
+    const cb1_index: i32 = indices.ptr[0] as i32;
+    if cb1_index < 0 || cb1_index >= SILK_NLSF_CODEBOOK_VECTORS {
+        return error.SilkNlsfError;
+    }
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var res_q10: [i32: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], codebook, cb1_index);
+    try silk_nlsf_residual_dequant_q10(&res_q10[0:SILK_NLSF_MAX_ORDER], &indices[1:(order as usize)], &pred_q8[0:SILK_NLSF_MAX_ORDER], silk_nlsf_codebook_quant_step_q16(codebook), order);
+
+    var i: usize = 0;
+    while i < (order as usize) {
+        const table_index: usize = (cb1_index as usize) * (order as usize) + i;
+        const weight_q9: i32 = silk_nlsf_cb1_weight_q9(codebook, table_index) as i32;
+        if weight_q9 <= 0 {
+            return error.SilkNlsfError;
+        }
+        var value_q15: i32 = ((res_q10[i] << 14) / weight_q9) + ((silk_nlsf_cb1_nlsf_q8(codebook, table_index) as i32) << 7);
+        if value_q15 < 0 {
+            value_q15 = 0;
+        }
+        if value_q15 > 32767 {
+            value_q15 = 32767;
+        }
+        out_q15.ptr[i] = value_q15 as i16;
         i = i + 1;
     }
 }

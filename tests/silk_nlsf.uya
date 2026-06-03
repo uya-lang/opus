@@ -4,10 +4,16 @@ use src.opus.silk.nlsf.SILK_NLSF_MAX_INTERPOLATION_Q2;
 use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_NB_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_Q15_ONE;
+use src.opus.silk.nlsf.silk_nlsf_decode_q15;
 use src.opus.silk.nlsf.silk_nlsf_interpolate_q15;
 use src.opus.silk.nlsf.silk_nlsf_is_sorted_q15;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
 use src.opus.silk.nlsf.silk_nlsf_validate_order;
 use src.opus.silk.nlsf.silk_nlsf_validate_stable_q15;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_NB_MB;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_table_hash;
+use src.opus.silk.nlsf_tables.silk_nlsf_table_len;
 
 test "silk nlsf exposes q15 and order constants" {
     try assert_eq_i32(SILK_NLSF_Q15_ONE, 32768);
@@ -72,5 +78,64 @@ test "silk nlsf interpolation follows upstream q2 factor semantics" {
     match bad_coef {
         error.SilkNlsfError => {}
         else => { try assert(false, "interpolation factor is Q2 and must be in 0..4"); }
+    }
+}
+
+test "silk nlsf codebook tables match upstream lengths and hashes" {
+    try assert_eq_i32(silk_nlsf_table_len(0) as i32, 320);
+    try assert_eq_i32(silk_nlsf_table_len(1) as i32, 320);
+    try assert_eq_i32(silk_nlsf_table_len(2) as i32, 64);
+    try assert_eq_i32(silk_nlsf_table_len(3) as i32, 160);
+    try assert_eq_i32(silk_nlsf_table_len(4) as i32, 72);
+    try assert_eq_i32(silk_nlsf_table_len(5) as i32, 18);
+    try assert_eq_i32(silk_nlsf_table_len(6) as i32, 11);
+    try assert_eq_i32(silk_nlsf_table_len(7) as i32, 512);
+    try assert_eq_i32(silk_nlsf_table_len(8) as i32, 512);
+    try assert_eq_i32(silk_nlsf_table_len(9) as i32, 64);
+    try assert_eq_i32(silk_nlsf_table_len(10) as i32, 256);
+    try assert_eq_i32(silk_nlsf_table_len(11) as i32, 72);
+    try assert_eq_i32(silk_nlsf_table_len(12) as i32, 30);
+    try assert_eq_i32(silk_nlsf_table_len(13) as i32, 17);
+    try assert_eq_i32(silk_nlsf_table_hash(0) as i32, 529135816);
+    try assert_eq_i32(silk_nlsf_table_hash(1) as i32, 666379621);
+    try assert_eq_i32(silk_nlsf_table_hash(7) as i32, 453859076);
+    try assert_eq_i32(silk_nlsf_table_hash(8) as i32, 749453744);
+    try assert_eq_i32(silk_nlsf_table_hash(13) as i32, 6214487);
+}
+
+test "silk nlsf unpack exposes entropy offsets and predictors" {
+    var ec_ix: [i16: 16] = [0: 16];
+    var pred_q8: [byte: 16] = [0: 16];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:16], &pred_q8[0:16], SILK_NLSF_CODEBOOK_WB, 31);
+
+    try assert_eq_i32(ec_ix[0] as i32, 18);
+    try assert_eq_i32(ec_ix[1] as i32, 27);
+    try assert_eq_i32(ec_ix[11] as i32, 54);
+    try assert_eq_i32(pred_q8[0] as i32, 175);
+    try assert_eq_i32(pred_q8[2] as i32, 66);
+    try assert_eq_i32(pred_q8[15] as i32, 68);
+}
+
+test "silk nlsf decode reconstructs q15 vectors from decoded indices" {
+    var nb_indices: [i16: 11] = [0: 11];
+    var nb_out: [i16: 10] = [0: 10];
+    try silk_nlsf_decode_q15(&nb_out[0:10], &nb_indices[0:11], SILK_NLSF_CODEBOOK_NB_MB);
+    try assert_eq_i32(nb_out[0] as i32, 1536);
+    try assert_eq_i32(nb_out[4] as i32, 13824);
+    try assert_eq_i32(nb_out[9] as i32, 29184);
+
+    var wb_indices: [i16: 17] = [31, 1, -1, 2, -2, 3, -3, 4, -4, 1, -1, 2, -2, 3, -3, 4, -4];
+    var wb_out: [i16: 16] = [0: 16];
+    try silk_nlsf_decode_q15(&wb_out[0:16], &wb_indices[0:17], SILK_NLSF_CODEBOOK_WB);
+    try assert_eq_i32(wb_out[0] as i32, 2530);
+    try assert_eq_i32(wb_out[5] as i32, 8035);
+    try assert_eq_i32(wb_out[10] as i32, 17416);
+    try assert_eq_i32(wb_out[15] as i32, 26566);
+
+    var bad_indices: [i16: 17] = [32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const bad_cb1: !void = silk_nlsf_decode_q15(&wb_out[0:16], &bad_indices[0:17], SILK_NLSF_CODEBOOK_WB);
+    match bad_cb1 {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "NLSF decode must reject missing first-stage index"); }
     }
 }

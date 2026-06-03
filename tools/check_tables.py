@@ -61,6 +61,20 @@ TABLES = [
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE3", 152, 524016143, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SHELL_CODE_TABLE_OFFSETS", 17, 711768652, 0, None),
     ("src/opus/silk/tables.uya", "SILK_SIGN_ICDF", 42, 281612844, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_NB_MB_Q8", 320, 529135816, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_NB_MB_WGHT_Q9", 320, 666379621, 32768, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_ICDF_NB_MB", 64, 705421896, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB2_SELECT_NB_MB", 160, 799560836, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB2_ICDF_NB_MB", 72, 768604607, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_PRED_NB_MB_Q8", 18, 790540935, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_DELTA_MIN_NB_MB_Q15", 11, 421289952, 32768, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_WB_Q8", 512, 453859076, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_WB_WGHT_Q9", 512, 749453744, 32768, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB1_ICDF_WB", 64, 455523979, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB2_SELECT_WB", 256, 872852904, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_CB2_ICDF_WB", 72, 988960415, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_PRED_WB_Q8", 30, 95660651, 0, None),
+    ("src/opus/silk/nlsf_tables.uya", "SILK_NLSF_DELTA_MIN_WB_Q15", 17, 6214487, 32768, None),
 ]
 
 EXTRA_ICDFS = [

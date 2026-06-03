@@ -53,6 +53,20 @@ Hash format: `tools/check_tables.py` rolling hash, modulo `1_000_000_007`, multi
 | `SILK_SHELL_CODE_TABLE3` | `silk/tables_pulses_per_block.c` | `byte` | iCDF split table, `ftb=8` | 152 | 524016143 | 0 |
 | `SILK_SHELL_CODE_TABLE_OFFSETS` | `silk/tables_pulses_per_block.c` | `usize` | offsets by total pulse count | 17 | 711768652 | 0 |
 | `SILK_SIGN_ICDF` | `silk/tables_pulses_per_block.c` | `byte` | sign iCDF, `ftb=8`, flattened `[6][7]` | 42 | 281612844 | 0 |
+| `SILK_NLSF_CB1_NB_MB_Q8` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage vectors, Q8 | 320 | 529135816 | 0 |
+| `SILK_NLSF_CB1_NB_MB_WGHT_Q9` | `silk/tables_NLSF_CB_NB_MB.c` | `i16` | NLSF first-stage weights, Q9 | 320 | 666379621 | 32768 |
+| `SILK_NLSF_CB1_ICDF_NB_MB` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | NLSF first-stage iCDF, `ftb=8` | 64 | 705421896 | 0 |
+| `SILK_NLSF_CB2_SELECT_NB_MB` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | packed residual predictor/table selectors | 160 | 799560836 | 0 |
+| `SILK_NLSF_CB2_ICDF_NB_MB` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | residual iCDF rows, `ftb=8` | 72 | 768604607 | 0 |
+| `SILK_NLSF_PRED_NB_MB_Q8` | `silk/tables_NLSF_CB_NB_MB.c` | `byte` | residual predictor coefficients, Q8 | 18 | 790540935 | 0 |
+| `SILK_NLSF_DELTA_MIN_NB_MB_Q15` | `silk/tables_NLSF_CB_NB_MB.c` | `i16` | minimum NLSF spacing, Q15 | 11 | 421289952 | 32768 |
+| `SILK_NLSF_CB1_WB_Q8` | `silk/tables_NLSF_CB_WB.c` | `byte` | NLSF first-stage vectors, Q8 | 512 | 453859076 | 0 |
+| `SILK_NLSF_CB1_WB_WGHT_Q9` | `silk/tables_NLSF_CB_WB.c` | `i16` | NLSF first-stage weights, Q9 | 512 | 749453744 | 32768 |
+| `SILK_NLSF_CB1_ICDF_WB` | `silk/tables_NLSF_CB_WB.c` | `byte` | NLSF first-stage iCDF, `ftb=8` | 64 | 455523979 | 0 |
+| `SILK_NLSF_CB2_SELECT_WB` | `silk/tables_NLSF_CB_WB.c` | `byte` | packed residual predictor/table selectors | 256 | 872852904 | 0 |
+| `SILK_NLSF_CB2_ICDF_WB` | `silk/tables_NLSF_CB_WB.c` | `byte` | residual iCDF rows, `ftb=8` | 72 | 988960415 | 0 |
+| `SILK_NLSF_PRED_WB_Q8` | `silk/tables_NLSF_CB_WB.c` | `byte` | residual predictor coefficients, Q8 | 30 | 95660651 | 0 |
+| `SILK_NLSF_DELTA_MIN_WB_Q15` | `silk/tables_NLSF_CB_WB.c` | `i16` | minimum NLSF spacing, Q15 | 17 | 6214487 | 32768 |
 
 ## Deferred Table Families
 
@@ -67,8 +81,6 @@ The following upstream table families are required for later decoder conformance
 | CELT coarse energy probability model | `celt/quant_bands.c` `e_prob_model`, `pred_coef`, `beta_coef`, `beta_intra` | energy band quantization | `src/opus/celt/quant_bands.uya` | coarse/fine energy decode vectors and hash/shape checks |
 | CELT band decode helper tables | `celt/bands.c` `ordery_table`, `exp2_table8`, `bit_interleave_table`, `bit_deinterleave_table`; `celt/vq.c` `SPREAD_FACTOR` | PVQ band shape decode | `src/opus/celt/quant_bands.uya` or `src/opus/celt/cwrs.uya` | PVQ/band-shape roundtrip and hash/length checks |
 | CELT pitch/deemphasis helper constants | `celt/pitch.c` `second_check`; `celt/celt.c` gain tables; `celt/celt_decoder.c` `sinc_filter` | pitch, deemphasis, PLC-adjacent decode | `src/opus/dsp/pitch.uya`, `src/opus/celt/mode.uya`, or decoder modules | targeted DSP golden tests before decoder integration |
-| SILK NLSF NB/MB codebooks | `silk/tables_NLSF_CB_NB_MB.c` | SILK NLSF decode | `src/opus/silk/tables.uya` plus NLSF module | NLSF unpack/decode golden tests, table hash/length |
-| SILK NLSF WB codebooks | `silk/tables_NLSF_CB_WB.c` | SILK NLSF decode | `src/opus/silk/tables.uya` plus NLSF module | NLSF unpack/decode golden tests, table hash/length |
 | SILK LTP codebooks | `silk/tables_LTP.c` | LTP gain decode | `src/opus/silk/tables.uya` plus LTP module | LTP gain vector decode golden tests, table hash/length |
 | SILK gain tables | `silk/tables_gain.c` | gain decode | `src/opus/silk/tables.uya` plus gain module | gain index decode golden tests, table hash/length |
 | SILK pulse shell tables | `silk/tables_pulses_per_block.c`, `silk/shell_coder.c` | pulse decode | `src/opus/silk/tables.uya` plus pulse module | pulse shell decode vectors and iCDF shape checks |
