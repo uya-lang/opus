@@ -144,6 +144,24 @@ class DecodeVectorCliTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(len(output_path.read_bytes()), 10880)
 
+    def test_decodes_rfc8251_testvector01_first_fifteen_packets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            input_path = root / "testvector01-first-fifteen.bit"
+            output_path = root / "out.s16le"
+            input_path.write_bytes(first_packet_records(ROOT / "tests/vectors/rfc8251/testvector01.bit", 15))
+
+            completed = subprocess.run(
+                [str(BIN), "8000", "1", "0", str(input_path), str(output_path)],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(len(output_path.read_bytes()), 12800)
+
     def test_rejects_truncated_opus_demo_bitstream(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

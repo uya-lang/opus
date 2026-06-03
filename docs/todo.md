@@ -366,6 +366,8 @@
         备注：Opus dual-stereo allocation 在 intensity 阈值前改为按 band 交错读取左右声道 shape 后，第五个 packet 可通过 CELT core 测试；full `testvector01` 现在可输出前 12 个 packet 共 9920 字节，下一阻塞点已推进到第 13 个 packet。
       - [x] 定位并修复 RFC8251 `testvector01` 第十三个 packet decode failure。
         备注：Opus dual-stereo shape 的左右声道 q3 budget 改为匹配上游的向下取整 `b/2`，不再把奇数余数分配给左声道后，第十三个 packet 可通过 CELT core 测试；full `testvector01` 现在可输出前 14 个 packet 共 11200 字节，下一阻塞点已推进到第 15 个 packet。
+      - [x] 定位并修复 RFC8251 `testvector01` 第十五个 packet decode failure。
+        备注：CELT decode 保留既有 legacy global-bit 消费路径；当该路径失败时恢复 entropy/state 快照并回退到按上游顺序消费 postfilter、transient 和 intra-energy flags 的 fallback 后，第十五个 packet 可连续解码；full `testvector01` 现在可输出前 15 个 packet 共 12800 字节，下一阻塞点已推进到后续 RFC8251 decoder/vector plumbing。
       - [ ] 根据后续 RFC8251 试运行结果继续修复 decoder 或 vector plumbing。
     - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。

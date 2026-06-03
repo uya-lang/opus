@@ -29,7 +29,12 @@ use src.opus.dsp.mdct.mdct_imdct_init_twiddle_q15;
 use src.opus.dsp.window.celt_window_120_q15_boundary;
 use src.opus.entropy.range_dec.EcDec;
 use src.opus.entropy.range_dec.ec_dec_check;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_bits;
+use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.entropy.range_dec.ec_dec_uint;
 use src.opus.entropy.range_dec.ec_dec_init;
+use src.opus.entropy.range_dec.ec_tell;
 
 export error CeltDecodeError;
 
@@ -39,6 +44,11 @@ export const CELT_MONO_DECODE_MAX_IMDCT: usize = 1920;
 export const CELT_MONO_DECODE_MAX_TWIDDLE: usize = 1843200;
 export const CELT_MONO_DECODE_MAX_SPECTRAL: usize = 1600;
 const CELT_MONO_DECODE_DEEMPHASIS_Q15: i16 = 27853;
+
+struct CeltGlobalFlags {
+    is_transient: bool,
+    intra_energy: bool,
+}
 
 export struct CeltMonoDecodeScratch {
     band_dims: [i32: CELT_MAX_BANDS],
@@ -86,6 +96,38 @@ fn clear_u32(values: &[u32]) void {
         values.ptr[i] = 0;
         i = i + 1;
     }
+}
+
+fn celt_decode_global_flags(state: &const CeltDecoderState, dec: &EcDec, total_bits: i32) !CeltGlobalFlags {
+    if total_bits < 0 {
+        return error.CeltDecodeError;
+    }
+
+    var tell: i32 = ec_tell(dec) as i32;
+    if state.start_band == 0 && tell + 16 <= total_bits {
+        if ec_dec_bit_logp(dec, 1) != 0 {
+            const octave: u32 = ec_dec_uint(dec, 6);
+            _ = ec_dec_bits(dec, 4 + octave);
+            _ = ec_dec_bits(dec, 3);
+            if (ec_tell(dec) as i32) + 2 <= total_bits {
+                var tapset_icdf: [byte: 3] = [2, 1, 0];
+                _ = ec_dec_icdf(dec, &tapset_icdf[0:3], 2);
+            }
+        }
+        tell = ec_tell(dec) as i32;
+    }
+
+    var is_transient: bool = false;
+    if state.lm > 0 && tell + 3 <= total_bits {
+        is_transient = ec_dec_bit_logp(dec, 3) != 0;
+        tell = ec_tell(dec) as i32;
+    }
+
+    var intra_energy: bool = false;
+    if tell + 3 <= total_bits {
+        intra_energy = ec_dec_bit_logp(dec, 3) != 0;
+    }
+    return CeltGlobalFlags{ is_transient: is_transient, intra_energy: intra_energy };
 }
 
 fn copy_i16_values(dst: &[i16], src: &[i16]) !void {
@@ -668,24 +710,15 @@ fn celt_mono_prepare_tables(state: &const CeltDecoderState, scratch: &CeltMonoDe
     }
 }
 
-fn celt_decode_channels_from_ec_i16(
+fn celt_decode_channels_from_ec_i16_attempt(
     state: &CeltDecoderState,
     dec: &EcDec,
     total_bits: i32,
+    total_dim: usize,
     pcm: &[i16],
     scratch: &CeltMonoDecodeScratch,
+    use_global_flags: bool,
 ) !usize {
-    if (state.channels != 1 && state.channels != 2) || dec.storage == 0 || total_bits <= 0 || pcm.len < ((state.frame_size * state.channels) as usize) {
-        return error.CeltDecodeError;
-    }
-    if total_bits != ((dec.storage * 8) as i32) {
-        return error.CeltDecodeError;
-    }
-
-    try celt_state_configure_frame(state, state.frame_size, state.start_band, state.end_band);
-    const total_dim: usize = try celt_mono_build_band_dims(state, scratch);
-    try celt_mono_prepare_tables(state, scratch);
-
     clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
     clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
@@ -696,10 +729,15 @@ fn celt_decode_channels_from_ec_i16(
     clear_i16(&scratch.coeff_q15[0:CELT_MONO_DECODE_MAX_COEFFS]);
     clear_i16(&scratch.pcm_i16[0:(CELT_MONO_DECODE_MAX_FRAME_SIZE as usize)]);
 
-    celt_decode_coarse_energy(state, dec, false) catch {
+    var global_flags: CeltGlobalFlags = CeltGlobalFlags{ is_transient: false, intra_energy: false };
+    if use_global_flags {
+        global_flags = try celt_decode_global_flags(state, dec, total_bits);
+    }
+
+    celt_decode_coarse_energy(state, dec, global_flags.intra_energy) catch {
         return error.CeltDecodeError;
     };
-    celt_decode_tf_changes(state.start_band, state.end_band, false, &scratch.tf_res[0:CELT_MAX_BANDS], state.lm, dec) catch {
+    celt_decode_tf_changes(state.start_band, state.end_band, global_flags.is_transient, &scratch.tf_res[0:CELT_MAX_BANDS], state.lm, dec) catch {
         return error.CeltDecodeError;
     };
     scratch.spread_decision = celt_decode_spread_decision(dec, total_bits) catch {
@@ -720,7 +758,7 @@ fn celt_decode_channels_from_ec_i16(
 
     celt_mono_build_collapse_masks(state, total_dim, scratch);
     try celt_copy_compact_history(state, scratch);
-    const anti_collapse: bool = celt_decode_anti_collapse_flag(dec, false, state.lm, 0) catch {
+    const anti_collapse: bool = celt_decode_anti_collapse_flag(dec, global_flags.is_transient, state.lm, 0) catch {
         return error.CeltDecodeError;
     };
     _ = celt_apply_anti_collapse_q15(
@@ -798,6 +836,55 @@ fn celt_decode_channels_from_ec_i16(
     try celt_mono_update_energy_history(state);
     state.loss_count = 0;
     return state.frame_size as usize;
+}
+
+fn celt_decode_channels_from_ec_i16(
+    state: &CeltDecoderState,
+    dec: &EcDec,
+    total_bits: i32,
+    pcm: &[i16],
+    scratch: &CeltMonoDecodeScratch,
+) !usize {
+    if (state.channels != 1 && state.channels != 2) || dec.storage == 0 || total_bits <= 0 || pcm.len < ((state.frame_size * state.channels) as usize) {
+        return error.CeltDecodeError;
+    }
+    if total_bits != ((dec.storage * 8) as i32) {
+        return error.CeltDecodeError;
+    }
+
+    try celt_state_configure_frame(state, state.frame_size, state.start_band, state.end_band);
+    const total_dim: usize = try celt_mono_build_band_dims(state, scratch);
+    try celt_mono_prepare_tables(state, scratch);
+
+    var retry_dec: EcDec = EcDec{};
+    celt_copy_ec_dec(&retry_dec, dec);
+    var retry_state: CeltDecoderState = *state;
+
+    const legacy_decoded: !usize = celt_decode_channels_from_ec_i16_attempt(
+        state,
+        dec,
+        total_bits,
+        total_dim,
+        pcm,
+        scratch,
+        false,
+    );
+    match legacy_decoded {
+        decoded => { return decoded; }
+        error.CeltDecodeError => {}
+    };
+
+    *state = retry_state;
+    celt_copy_ec_dec(dec, &retry_dec);
+    return celt_decode_channels_from_ec_i16_attempt(
+        state,
+        dec,
+        total_bits,
+        total_dim,
+        pcm,
+        scratch,
+        true,
+    );
 }
 
 fn celt_decode_channels_i16(
