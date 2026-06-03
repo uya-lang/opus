@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use std.testing.assert_eq_u64;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusMode;
@@ -48,6 +49,47 @@ fn assert_i16_slice_eq(actual: &[i16], expected: &[i16]) !void {
         try assert_eq_i32(actual.ptr[i] as i32, expected.ptr[i] as i32);
         i = i + 1;
     }
+}
+
+fn hybrid_conformance_checksum_i16(pcm: &[i16]) !u64 {
+    var checksum: u64 = 1469598103934665603;
+    var i: usize = 0;
+    while i < pcm.len {
+        const sample_value: u64 = try (((pcm.ptr[i] as i64) + 32768L) as! u64);
+        checksum = checksum * 1099511628211 + sample_value + (i as u64);
+        i = i + 1;
+    }
+    return checksum;
+}
+
+fn hybrid_conformance_case_checksum(
+    bandwidth: OpusBandwidth,
+    duration_us: u32,
+    lowband_samples: usize,
+    frame_samples: usize,
+    frame_bytes: usize,
+) !u64 {
+    var frame: [byte: 640] = [0: 640];
+    _ = try hybrid_test_encode_wb_lowband_payload(&frame[0:640], lowband_samples as i32);
+
+    var info: PacketInfo = hybrid_decoder_packet_info(bandwidth, 1, duration_us);
+    var hybrid_state: HybridDecoderState = HybridDecoderState{};
+    var silk_state: SilkDecoderState = SilkDecoderState{};
+    var celt_state: CeltDecoderState = CeltDecoderState{};
+    var scratch: HybridDecoderScratch = HybridDecoderScratch{};
+    var pcm: [i16: 960] = [0: 960];
+    const result: HybridDecodeResult = try hybrid_decode_i16(
+        &hybrid_state,
+        &silk_state,
+        &celt_state,
+        &info,
+        &frame[0:frame_bytes],
+        &pcm[0:frame_samples],
+        &scratch,
+    );
+    try assert_eq_i32(result.decoded_samples_48k, frame_samples as i32);
+    try assert_eq_i32(result.lowband_samples_16k, lowband_samples as i32);
+    return try hybrid_conformance_checksum_i16(&pcm[0:frame_samples]);
 }
 
 fn expect_hybrid_decoder_matches_manual_pipeline(
@@ -130,6 +172,20 @@ test "hybrid decoder supports mono FB 10ms frame pipeline" {
 
 test "hybrid decoder supports mono FB 20ms frame pipeline" {
     try expect_hybrid_decoder_matches_manual_pipeline(OpusBandwidth.FULLBAND, 20000, 320, 960, 511, HYBRID_CELT_FB_END_BAND);
+}
+
+test "hybrid conformance vectors lock mono checksum matrix" {
+    const swb10: u64 = try hybrid_conformance_case_checksum(OpusBandwidth.SUPERWIDEBAND, 10000, 160, 480, 255);
+    const swb20: u64 = try hybrid_conformance_case_checksum(OpusBandwidth.SUPERWIDEBAND, 20000, 320, 960, 511);
+    const fb10: u64 = try hybrid_conformance_case_checksum(OpusBandwidth.FULLBAND, 10000, 160, 480, 255);
+    const fb20: u64 = try hybrid_conformance_case_checksum(OpusBandwidth.FULLBAND, 20000, 320, 960, 511);
+
+    var matrix_digest: u64 = 1469598103934665603;
+    matrix_digest = matrix_digest * 1099511628211 + swb10;
+    matrix_digest = matrix_digest * 1099511628211 + swb20;
+    matrix_digest = matrix_digest * 1099511628211 + fb10;
+    matrix_digest = matrix_digest * 1099511628211 + fb20;
+    try assert_eq_u64(matrix_digest, 2742343121582165872);
 }
 
 test "hybrid decoder SWB 10ms path validates active layout and buffers" {

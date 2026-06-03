@@ -336,7 +336,7 @@
 - [x] 支持 Hybrid SWB 20ms。
 - [x] 支持 Hybrid FB 10ms。
 - [x] 支持 Hybrid FB 20ms。
-- [ ] 测试 hybrid conformance vectors。
+- [x] 测试 hybrid conformance vectors。
 - [ ] 测试 mode switching 到/出 hybrid。
 
 验收标准：

@@ -46,6 +46,11 @@ vectors in `tests/silk_decoder.uya`. These vectors cover NB/MB/WB packets at
 regression gate for the in-repository decoder path; they do not replace the
 external Xiph.Org corpus required by the release conformance gate below.
 
+Current project-local Hybrid coverage is locked by deterministic mono vectors
+in `tests/hybrid_decoder.uya`. These vectors cover SWB/FB packets at 10/20 ms
+and compare a fixed decoded-output checksum matrix for the in-repository
+hybrid glue path.
+
 Differential references may use external tools such as `opus_demo`, `opusdec`,
 or FFmpeg only from `tools/` or `tests/`. They must not become runtime
 dependencies of `src/opus/**`.
