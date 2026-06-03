@@ -50,7 +50,7 @@ test "silk frame params derive mediumband and wideband 20ms stereo layout" {
     try assert_eq_i32(mb.frame_length, 240);
     try assert_eq_i32(mb.subframe_length, 60);
     try assert_eq_i32(mb.nb_subframes, 4);
-    try assert_eq_i32(mb.lpc_order, 16);
+    try assert_eq_i32(mb.lpc_order, 10);
     try assert_eq_i32(mb.frames_per_packet, 2);
 
     const wb_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 2, 1, 20000);

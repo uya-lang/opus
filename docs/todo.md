@@ -286,7 +286,7 @@
 - [x] 实现 mono decode。
 - [x] 实现 stereo mid/side reconstruction。
 - [x] 支持 NB。
-- [ ] 支持 MB。
+- [x] 支持 MB。
 - [ ] 支持 WB。
 - [ ] 支持 10ms。
 - [ ] 支持 20ms。

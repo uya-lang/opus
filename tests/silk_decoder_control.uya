@@ -56,7 +56,8 @@ test "silk decoder control maps channel and subframe arrays" {
 
     try assert_eq_i32((try silk_decoder_control_gain_index(&control, 0, 0)) as i32, 0);
     try assert_eq_i32((try silk_decoder_control_gain_index(&control, 1, 3)) as i32, 7);
-    try assert_eq_i32((try silk_decoder_control_lpc_index(&control, 1, 15)) as i32, 31);
+    try assert_eq_i32(control.lpc_order, 10);
+    try assert_eq_i32((try silk_decoder_control_lpc_index(&control, 1, 9)) as i32, 25);
     try assert_eq_i32((try silk_decoder_control_pitch_index(&control, 3)) as i32, 3);
     try assert_eq_i32((try silk_decoder_control_ltp_index(&control, 1, 3, 4)) as i32, 39);
     try assert_eq_i32((try silk_decoder_control_pulse_index(&control, 0, 0)) as i32, 0);
@@ -68,7 +69,7 @@ test "silk decoder control maps channel and subframe arrays" {
         else => { try assert(false, "gain index past active subframes must fail"); }
     }
 
-    const bad_lpc: !usize = silk_decoder_control_lpc_index(&control, 0, 16);
+    const bad_lpc: !usize = silk_decoder_control_lpc_index(&control, 0, 10);
     match bad_lpc {
         error.SilkDecoderControlError => {}
         else => { try assert(false, "LPC index past active order must fail"); }

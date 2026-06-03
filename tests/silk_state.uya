@@ -58,7 +58,7 @@ test "silk state derives narrowband and mediumband frame parameters" {
     try assert_eq_i32(mb.frame_length, 240);
     try assert_eq_i32(mb.subframe_length, 60);
     try assert_eq_i32(mb.nb_subframes, 4);
-    try assert_eq_i32(mb.lpc_order, 16);
+    try assert_eq_i32(mb.lpc_order, 10);
 }
 
 test "silk state validates channels rates and frame duration" {
@@ -116,6 +116,14 @@ test "silk state maps channel histories and lpc state with active lpc order" {
     match inactive_lpc {
         error.SilkStateError => {}
         else => { try assert(false, "narrowband state must expose only ten LPC coefficients"); }
+    }
+
+    var mb: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&mb, 1, 12000, 20);
+    const inactive_mb_lpc: !usize = silk_state_lpc_index(&mb, 0, 10);
+    match inactive_mb_lpc {
+        error.SilkStateError => {}
+        else => { try assert(false, "mediumband state must use the ten-coefficient NB/MB LPC layout"); }
     }
 }
 

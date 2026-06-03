@@ -352,9 +352,9 @@ fn test_decoder_encode_pulse_blocks(enc: &EcEnc, signed_pulses: &[i16], frame_le
     try test_decoder_encode_pulse_signs(enc, signed_pulses, &encoded_totals[0:blocks], SILK_SIGNAL_TYPE_UNVOICED, quant_offset_type);
 }
 
-fn encode_simple_nb_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
-    if frame_length != 80 && frame_length != 160 {
-        try assert(false, "simple NB payload helper only covers 10ms and 20ms frames");
+fn encode_simple_nb_mb_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
+    if frame_length != 80 && frame_length != 120 && frame_length != 160 && frame_length != 240 {
+        try assert(false, "simple NB/MB payload helper only covers 10ms and 20ms frames");
     }
     const nb_subframes: i32 = frame_length / 40;
     var enc: EcEnc = EcEnc{};
@@ -429,7 +429,7 @@ fn encode_simple_nb_unvoiced_payload(payload: &[byte], frame_length: i32) !usize
 }
 
 fn encode_simple_nb_10ms_unvoiced_payload(payload: &[byte]) !usize {
-    return encode_simple_nb_unvoiced_payload(payload, 80);
+    return encode_simple_nb_mb_unvoiced_payload(payload, 80);
 }
 
 fn test_decoder_checksum_i32(values: &[i32]) i32 {
@@ -466,7 +466,7 @@ test "silk mono packet decoder decodes one narrowband 10ms packet" {
 test "silk mono packet decoder supports narrowband 20ms packets" {
     var packet: [byte: 192] = [0: 192];
     packet[0] = 8;
-    _ = try encode_simple_nb_unvoiced_payload(&packet[1:191], 160);
+    _ = try encode_simple_nb_mb_unvoiced_payload(&packet[1:191], 160);
     const packet_len: usize = 192;
 
     var state: SilkDecoderState = SilkDecoderState{};
@@ -483,6 +483,29 @@ test "silk mono packet decoder supports narrowband 20ms packets" {
     try assert(!state.first_frame_after_reset, "NB 20ms decode must advance SILK state");
     try assert(state.rng != 0, "NB 20ms decode must advance the SILK random seed");
     try assert(test_decoder_checksum_i32(&out_q14[0:160]) != 0, "NB 20ms decode must produce synthesized output");
+}
+
+test "silk mono packet decoder supports mediumband 20ms packets" {
+    var packet: [byte: 256] = [0: 256];
+    packet[0] = 40;
+    _ = try encode_simple_nb_mb_unvoiced_payload(&packet[1:255], 240);
+    const packet_len: usize = 256;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 240] = [0: 240];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:240]);
+
+    try assert_eq_i32(decoded as i32, 240);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 12);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 240);
+    try assert_eq_i32(state.subframe_length, 60);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "MB 20ms decode must advance SILK state");
+    try assert(state.rng != 0, "MB 20ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:240]) != 0, "MB 20ms decode must produce synthesized output");
 }
 
 test "silk mono packet decoder rejects stereo packets and short output" {

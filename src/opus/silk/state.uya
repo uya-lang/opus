@@ -77,10 +77,10 @@ export fn silk_state_fs_khz_for_rate(sample_rate_hz: i32) !i32 {
 }
 
 export fn silk_state_lpc_order_for_fs_khz(fs_khz: i32) !i32 {
-    if fs_khz == 8 {
+    if fs_khz == 8 || fs_khz == 12 {
         return SILK_NB_LPC_ORDER as i32;
     }
-    if fs_khz == 12 || fs_khz == 16 {
+    if fs_khz == 16 {
         return SILK_MAX_LPC_ORDER as i32;
     }
     return error.SilkStateError;
