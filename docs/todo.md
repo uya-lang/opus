@@ -321,7 +321,7 @@
 验收标准：
 
 - [x] 丢包不会破坏后续正常 packet decode。
-- [ ] PLC/FEC 路径不越界写 PCM。
+- [x] PLC/FEC 路径不越界写 PCM。
 
 ## 12. Hybrid Decoder
 

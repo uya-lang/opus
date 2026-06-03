@@ -187,6 +187,52 @@ test "decoder api decode_fec falls back to plc without consuming celt packet" {
     try assert_eq_i32(decoder.celt.loss_count, 0);
 }
 
+test "decoder api plc and fec fallback only write requested pcm slice" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+    const tail: usize = CELT_DECODE_MEM - 120;
+    decoder.celt.decode_mem[tail] = 3210;
+
+    var empty_packet: [byte: 1] = [0];
+    var plc_guarded: [i16: 128] = [0: 128];
+    var i: usize = 0;
+    while i < 128 {
+        plc_guarded[i] = -12345;
+        i = i + 1;
+    }
+
+    const plc_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &plc_guarded[4:120], 120, false);
+    try assert_eq_i32(plc_decoded, 120);
+    try assert_eq_i32(plc_guarded[0] as i32, -12345);
+    try assert_eq_i32(plc_guarded[3] as i32, -12345);
+    try assert_eq_i32(plc_guarded[4] as i32, 3210);
+    try assert_eq_i32(plc_guarded[124] as i32, -12345);
+    try assert_eq_i32(plc_guarded[127] as i32, -12345);
+
+    var celt_packet: [byte: 65] = [0: 65];
+    celt_packet[0] = (128 as! byte).value;
+    i = 1;
+    while i < 65 {
+        celt_packet[i] = ((i * 11 + 7) as! byte).value;
+        i = i + 1;
+    }
+
+    var fec_guarded: [i16: 128] = [0: 128];
+    i = 0;
+    while i < 128 {
+        fec_guarded[i] = -23456;
+        i = i + 1;
+    }
+
+    const fec_decoded: i32 = try decoder_decode_i16(&decoder, &celt_packet[0:65], &fec_guarded[4:120], 120, true);
+    try assert_eq_i32(fec_decoded, 120);
+    try assert_eq_i32(fec_guarded[0] as i32, -23456);
+    try assert_eq_i32(fec_guarded[3] as i32, -23456);
+    try assert_eq_i32(fec_guarded[124] as i32, -23456);
+    try assert_eq_i32(fec_guarded[127] as i32, -23456);
+}
+
 test "decoder api empty packet validates pcm bounds" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };

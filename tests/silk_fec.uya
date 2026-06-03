@@ -531,6 +531,63 @@ test "silk delayed fec falls back to plc when LBRR is absent" {
     try assert_eq_i32(state.loss_count, 1);
 }
 
+test "silk delayed fec and plc fallback only write requested output slice" {
+    var fec_packet: [byte: 384] = [0: 384];
+    try encode_wb20_lbrr_unvoiced_packet(&fec_packet[0:384]);
+
+    var fec_state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&fec_state, 1, 16000, 20);
+    fec_state.loss_count = 1;
+
+    var fec_out: [i32: 326] = [0: 326];
+    var i: usize = 0;
+    while i < 326 {
+        fec_out[i] = -77777;
+        i = i + 1;
+    }
+
+    var fec_result: SilkDelayedFecResult = SilkDelayedFecResult{};
+    try silk_fec_decode_delayed_mono_q14(&fec_result, &fec_state, &fec_packet[0:384], 0, &fec_out[3:320]);
+    try assert(fec_result.used_fec, "recoverable LBRR must take the delayed FEC path");
+    try assert_eq_i32(fec_result.decoded_samples as i32, 320);
+    try assert_eq_i32(fec_out[0], -77777);
+    try assert_eq_i32(fec_out[2], -77777);
+    try assert_eq_i32(fec_out[323], -77777);
+    try assert_eq_i32(fec_out[325], -77777);
+
+    var plc_packet: [byte: 33] = [0: 33];
+    plc_packet[0] = 72;
+    var channel_flags: [bool: 1] = [false];
+    var frame_masks: [i32: 1] = [0];
+    try encode_vad_lbrr_payload(&plc_packet[1:32], 1, 1, &channel_flags[0:1], &frame_masks[0:1]);
+
+    var plc_state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&plc_state, 1, 16000, 20);
+    i = 0;
+    while i < 320 {
+        plc_state.history_q14[304 + i] = ((i as i32) + 1) * 5;
+        i = i + 1;
+    }
+
+    var plc_out: [i32: 326] = [0: 326];
+    i = 0;
+    while i < 326 {
+        plc_out[i] = -88888;
+        i = i + 1;
+    }
+
+    var plc_result: SilkDelayedFecResult = SilkDelayedFecResult{};
+    try silk_fec_decode_delayed_mono_q14(&plc_result, &plc_state, &plc_packet[0:33], 0, &plc_out[3:320]);
+    try assert(plc_result.used_plc, "absent LBRR must take the delayed FEC PLC fallback path");
+    try assert_eq_i32(plc_result.decoded_samples as i32, 320);
+    try assert_eq_i32(plc_out[0], -88888);
+    try assert_eq_i32(plc_out[2], -88888);
+    try assert_eq_i32(plc_out[3], 5);
+    try assert_eq_i32(plc_out[322], 1600);
+    try assert_eq_i32(plc_out[323], -88888);
+    try assert_eq_i32(plc_out[325], -88888);
+}
+
 test "silk fec recovery marker clears pending loss state" {
     var state: SilkDecoderState = SilkDecoderState{};
     try silk_state_init(&state, 1, 16000, 20);
