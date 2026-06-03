@@ -9,16 +9,34 @@ use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.fec.SilkFecPlan;
+use src.opus.silk.fec.SilkDelayedFecResult;
+use src.opus.silk.fec.silk_fec_decode_delayed_mono_q14;
 use src.opus.silk.fec.silk_fec_detect_lbrr_packet;
 use src.opus.silk.fec.silk_fec_detect_lbrr_payload;
 use src.opus.silk.fec.silk_fec_has_lbrr;
 use src.opus.silk.fec.silk_fec_mark_recovered;
 use src.opus.silk.fec.silk_fec_plan_from_lbrr_flags;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_init;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
 use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+use src.opus.silk.tables.silk_nlsf_ext_icdf_value;
+use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
+use src.opus.silk.tables.silk_rate_levels_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
 
 fn fill_lbrr_icdf(out: &[byte], frames_per_packet: i32) !usize {
     if frames_per_packet == 2 {
@@ -76,6 +94,222 @@ fn encode_vad_lbrr_payload(payload: &[byte], channels: i32, frames_per_packet: i
             ec_enc_icdf(&enc, mask - 1, &icdf[0:icdf_len], 8);
         }
         channel = channel + 1;
+    }
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn fec_test_fill_type_offset_vad_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "type offset helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_gain_icdf(out: &[byte], signal_table: i32) !void {
+    if out.len < 8 {
+        try assert(false, "gain helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(signal_table, i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        try assert(false, "delta gain helper needs 41 entries");
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "uniform8 helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "uniform4 helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_nlsf_cb1_icdf(out: &[byte], signal_type: i32) !void {
+    if out.len < 32 || signal_type < 0 || signal_type > 1 {
+        try assert(false, "NLSF CB1 helper needs one 32-entry signal row");
+    }
+    const base: usize = (signal_type as usize) * 32;
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_nlsf_cb1_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_nlsf_cb2_icdf(out: &[byte], ec_ix: i16) !void {
+    if out.len < 9 || ec_ix < 0 {
+        try assert(false, "NLSF CB2 helper needs one 9-entry row");
+    }
+    const base: usize = ec_ix as usize;
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_nlsf_cb2_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_nlsf_ext_icdf(out: &[byte]) !void {
+    if out.len < 7 {
+        try assert(false, "NLSF extension helper needs 7 entries");
+    }
+    var i: usize = 0;
+    while i < 7 {
+        out.ptr[i] = silk_nlsf_ext_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_nlsf_interpolation_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        try assert(false, "NLSF interpolation helper needs 5 entries");
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_nlsf_interpolation_factor_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_encode_nlsf_residual(enc: &EcEnc, ec_ix: i16, residual_index: i16) !void {
+    var raw_symbol: i32 = (residual_index as i32) + SILK_NLSF_QUANT_MAX_AMPLITUDE;
+    var ext_symbol: i32 = 0;
+    if raw_symbol < 0 {
+        ext_symbol = -raw_symbol;
+        raw_symbol = 0;
+    } else if raw_symbol > 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE {
+        ext_symbol = raw_symbol - 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE;
+        raw_symbol = 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE;
+    }
+    if ext_symbol < 0 || ext_symbol > 6 {
+        try assert(false, "NLSF residual is outside test extension range");
+    }
+
+    var cb2_icdf: [byte: 9] = [0: 9];
+    try fec_test_fill_nlsf_cb2_icdf(&cb2_icdf[0:9], ec_ix);
+    ec_enc_icdf(enc, raw_symbol, &cb2_icdf[0:9], 8);
+    if raw_symbol == 0 || raw_symbol == 2 * SILK_NLSF_QUANT_MAX_AMPLITUDE {
+        var ext_icdf: [byte: 7] = [0: 7];
+        try fec_test_fill_nlsf_ext_icdf(&ext_icdf[0:7]);
+        ec_enc_icdf(enc, ext_symbol, &ext_icdf[0:7], 8);
+    }
+}
+
+fn fec_test_fill_rate_levels_icdf(out: &[byte], signal_type: i32) !void {
+    if out.len < 9 {
+        try assert(false, "rate levels helper needs 9 entries");
+    }
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_rate_levels_icdf_value(signal_type, i);
+        i = i + 1;
+    }
+}
+
+fn fec_test_fill_pulses_per_block_icdf(out: &[byte], rate_level: i32) !void {
+    if out.len < 18 {
+        try assert(false, "pulses-per-block helper needs 18 entries");
+    }
+    var i: usize = 0;
+    while i < 18 {
+        out.ptr[i] = silk_pulses_per_block_icdf_value(rate_level, i);
+        i = i + 1;
+    }
+}
+
+fn encode_wb20_lbrr_unvoiced_packet(packet: &[byte]) !void {
+    if packet.len < 384 {
+        try assert(false, "wideband delayed FEC helper needs a full TOC plus payload buffer");
+    }
+    packet.ptr[0] = 72;
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[1:383]);
+
+    ec_enc_bit_logp(&enc, 1, 1);
+    ec_enc_bit_logp(&enc, 1, 1);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    try fec_test_fill_type_offset_vad_icdf(&type_icdf[0:4]);
+    ec_enc_icdf(&enc, 1, &type_icdf[0:4], 8);
+
+    var gain_icdf: [byte: 8] = [0: 8];
+    try fec_test_fill_gain_icdf(&gain_icdf[0:8], 1);
+    ec_enc_icdf(&enc, 1, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try fec_test_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    ec_enc_icdf(&enc, 5, &uniform8_icdf[0:8], 8);
+
+    var delta_gain_icdf: [byte: 41] = [0: 41];
+    try fec_test_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
+    var subframe: i32 = 1;
+    while subframe < 4 {
+        ec_enc_icdf(&enc, 4, &delta_gain_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
+    var cb1_icdf: [byte: 32] = [0: 32];
+    try fec_test_fill_nlsf_cb1_icdf(&cb1_icdf[0:32], SILK_SIGNAL_TYPE_UNVOICED);
+    ec_enc_icdf(&enc, 0, &cb1_icdf[0:32], 8);
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], SILK_NLSF_CODEBOOK_WB, 0);
+
+    var order_index: usize = 0;
+    while order_index < 16 {
+        try fec_test_encode_nlsf_residual(&enc, ec_ix[order_index], 0);
+        order_index = order_index + 1;
+    }
+
+    var interpolation_icdf: [byte: 5] = [0: 5];
+    try fec_test_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
+    ec_enc_icdf(&enc, 4, &interpolation_icdf[0:5], 8);
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try fec_test_fill_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(&enc, 2, &seed_icdf[0:4], 8);
+
+    var rate_icdf: [byte: 9] = [0: 9];
+    try fec_test_fill_rate_levels_icdf(&rate_icdf[0:9], SILK_SIGNAL_TYPE_UNVOICED);
+    ec_enc_icdf(&enc, 0, &rate_icdf[0:9], 8);
+
+    var pulse_icdf: [byte: 18] = [0: 18];
+    try fec_test_fill_pulses_per_block_icdf(&pulse_icdf[0:18], 0);
+    var block: i32 = 0;
+    while block < 20 {
+        ec_enc_icdf(&enc, 0, &pulse_icdf[0:18], 8);
+        block = block + 1;
     }
 
     _ = try ec_enc_done(&enc);
@@ -216,6 +450,55 @@ test "silk fec packet detector rejects non-silk packets and bad frame indexes" {
         error.SilkFecError => {}
         else => { try assert(false, "FEC packet detection must reject internal frame indexes outside packet duration"); }
     }
+}
+
+test "silk delayed fec decodes recoverable mono LBRR frame" {
+    var packet: [byte: 384] = [0: 384];
+    try encode_wb20_lbrr_unvoiced_packet(&packet[0:384]);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.loss_count = 1;
+    var out_q14: [i32: 320] = [0: 320];
+    var result: SilkDelayedFecResult = SilkDelayedFecResult{};
+
+    try silk_fec_decode_delayed_mono_q14(&result, &state, &packet[0:384], 0, &out_q14[0:320]);
+
+    try assert(result.used_fec, "available LBRR must use the delayed FEC decode path");
+    try assert(!result.used_plc, "recoverable LBRR must not fall back to PLC");
+    try assert_eq_i32(result.decoded_samples as i32, 320);
+    try assert(result.plan.can_recover, "delayed FEC result must retain the successful LBRR plan");
+    try assert_eq_i32(state.loss_count, 0);
+    try assert(!state.first_frame_after_reset, "delayed FEC decode must advance decoder state like a decoded frame");
+    try assert(state.rng != 0, "delayed FEC decode must consume encoded random seed side info");
+}
+
+test "silk delayed fec falls back to plc when LBRR is absent" {
+    var packet: [byte: 33] = [0: 33];
+    packet[0] = 72;
+    var channel_flags: [bool: 1] = [false];
+    var frame_masks: [i32: 1] = [0];
+    try encode_vad_lbrr_payload(&packet[1:32], 1, 1, &channel_flags[0:1], &frame_masks[0:1]);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    var i: usize = 0;
+    while i < 320 {
+        state.history_q14[304 + i] = ((i as i32) + 1) * 3;
+        i = i + 1;
+    }
+
+    var out_q14: [i32: 320] = [0: 320];
+    var result: SilkDelayedFecResult = SilkDelayedFecResult{};
+    try silk_fec_decode_delayed_mono_q14(&result, &state, &packet[0:33], 0, &out_q14[0:320]);
+
+    try assert(!result.used_fec, "absent LBRR must not report delayed FEC recovery");
+    try assert(result.used_plc, "absent LBRR must use PLC fallback");
+    try assert_eq_i32(result.decoded_samples as i32, 320);
+    try assert(result.plan.needs_plc, "fallback result must retain a PLC plan");
+    try assert_eq_i32(out_q14[0], 3);
+    try assert_eq_i32(out_q14[319], 960);
+    try assert_eq_i32(state.loss_count, 1);
 }
 
 test "silk fec recovery marker clears pending loss state" {

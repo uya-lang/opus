@@ -8,11 +8,14 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.decoder.silk_decoder_decode_mono_frame_q14;
 use src.opus.silk.frame_params.SilkFrameParams;
 use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
+use src.opus.silk.plc.silk_plc_conceal_frame_q14;
 use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
 use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
 
 export error SilkFecError;
 
@@ -24,6 +27,13 @@ export struct SilkFecPlan {
     can_recover: bool,
     needs_plc: bool,
     channel_available: [bool: SILK_STATE_MAX_CHANNELS],
+}
+
+export struct SilkDelayedFecResult {
+    decoded_samples: usize,
+    used_fec: bool,
+    used_plc: bool,
+    plan: SilkFecPlan,
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -63,6 +73,36 @@ export fn silk_fec_plan_reset(plan: &SilkFecPlan) void {
     plan.can_recover = false;
     plan.needs_plc = true;
     clear_bool(&plan.channel_available[0:SILK_STATE_MAX_CHANNELS]);
+}
+
+export fn silk_delayed_fec_result_reset(result: &SilkDelayedFecResult) void {
+    result.decoded_samples = 0 as usize;
+    result.used_fec = false;
+    result.used_plc = false;
+    silk_fec_plan_reset(&result.plan);
+}
+
+fn silk_fec_state_matches_params(state: &const SilkDecoderState, params: &const SilkFrameParams) bool {
+    return state.channels == params.channels
+        && state.sample_rate_hz == params.sample_rate_hz
+        && state.fs_khz == params.fs_khz
+        && state.frame_ms == params.frame_ms
+        && state.frame_length == params.frame_length
+        && state.subframe_length == params.subframe_length
+        && state.nb_subframes == params.nb_subframes
+        && state.lpc_order == params.lpc_order;
+}
+
+fn silk_fec_configure_mono_state(state: &SilkDecoderState, params: &const SilkFrameParams) !void {
+    if params.channels != 1 || params.frames_per_packet < 1 || params.frames_per_packet > 3 {
+        return error.SilkFecError;
+    }
+    if silk_fec_state_matches_params(state, params) {
+        return;
+    }
+    silk_state_init(state, params.channels, params.sample_rate_hz, params.frame_ms) catch {
+        return error.SilkFecError;
+    };
 }
 
 export fn silk_fec_has_lbrr(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !bool {
@@ -151,6 +191,76 @@ export fn silk_fec_detect_lbrr_packet(plan: &SilkFecPlan, packet: &[byte], frame
     silk_fec_detect_lbrr_payload(plan, payload, params.channels, params.frames_per_packet, frame_index) catch {
         return error.SilkFecError;
     };
+}
+
+export fn silk_fec_decode_delayed_mono_q14(result: &SilkDelayedFecResult, state: &SilkDecoderState, packet: &[byte], frame_index: i32, out_q14: &[i32]) !void {
+    silk_delayed_fec_result_reset(result);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.SilkFecError;
+    };
+    if parsed.info.mode != OpusMode.SILK || parsed.info.channels != 1 || parsed.info.frame_count != 1 {
+        return error.SilkFecError;
+    }
+
+    var params: SilkFrameParams = SilkFrameParams{};
+    silk_frame_params_from_packet_info(&parsed.info, &params) catch {
+        return error.SilkFecError;
+    };
+    silk_fec_configure_mono_state(state, &params) catch {
+        return error.SilkFecError;
+    };
+    if state.frame_length <= 0 || state.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkFecError;
+    }
+    const frame_len: usize = state.frame_length as usize;
+    if out_q14.len < frame_len {
+        return error.SilkFecError;
+    }
+
+    var plan: SilkFecPlan = SilkFecPlan{};
+    silk_fec_detect_lbrr_packet(&plan, packet, frame_index) catch {
+        return error.SilkFecError;
+    };
+    const can_recover: bool = plan.can_recover;
+    result.plan = plan;
+
+    if !can_recover {
+        result.decoded_samples = silk_plc_conceal_frame_q14(state, 0, &out_q14[0:frame_len]) catch {
+            return error.SilkFecError;
+        };
+        result.used_plc = true;
+        return;
+    }
+
+    const payload: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    silk_entropy_decoder_init(&entropy, payload, params.channels, params.frames_per_packet) catch {
+        return error.SilkFecError;
+    };
+    silk_entropy_decode_vad_flags(&entropy) catch {
+        return error.SilkFecError;
+    };
+    silk_entropy_decode_lbrr_flags(&entropy) catch {
+        return error.SilkFecError;
+    };
+
+    var scratch_q14: [i32: SILK_MAX_FRAME_SAMPLES] = [0: SILK_MAX_FRAME_SAMPLES];
+    var current_frame: i32 = 0;
+    while current_frame <= frame_index {
+        if current_frame == frame_index {
+            result.decoded_samples = silk_decoder_decode_mono_frame_q14(state, &entropy, current_frame, &out_q14[0:frame_len]) catch {
+                return error.SilkFecError;
+            };
+        } else {
+            _ = silk_decoder_decode_mono_frame_q14(state, &entropy, current_frame, &scratch_q14[0:frame_len]) catch {
+                return error.SilkFecError;
+            };
+        }
+        current_frame = current_frame + 1;
+    }
+    result.used_fec = true;
 }
 
 export fn silk_fec_mark_recovered(state: &SilkDecoderState) !void {
