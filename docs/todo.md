@@ -313,7 +313,7 @@
 - [x] 实现 CELT frequency-domain PLC 初版。
 - [x] 实现 decoder API 中的 empty packet PLC。
 - [x] 实现 `decode_fec` 参数语义。
-- [ ] 测试单包丢失。
+- [x] 测试单包丢失。
 - [ ] 测试连续丢包。
 - [ ] 测试有 FEC 的上一帧恢复。
 - [ ] 测试无 FEC fallback 到 PLC。
