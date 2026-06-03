@@ -132,6 +132,27 @@ test "decoder api 48k output fast path writes directly to caller pcm" {
     try assert_eq_i32(decoder.output_scratch_i16[119] as i32, -2222);
 }
 
+test "decoder api decodes silk-only through native-rate output resampler" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 384] = [0: 384];
+    packet[0] = (72 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&packet[1:383], 320);
+
+    var pcm: [i16: 160] = [0: 160];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:384], &pcm[0:160], 160, false);
+
+    try assert_eq_i32(decoded, 160);
+    try assert(decoder.active_mode == OpusMode.SILK, "SILK-only packet must switch the public decoder into SILK mode");
+    try assert_eq_i32(decoder.silk.sample_rate_hz, 16000);
+    try assert_eq_i32(decoder.silk_resampler.input_rate_hz as i32, 16000);
+    try assert_eq_i32(decoder.silk_resampler.output_rate_hz as i32, 8000);
+    try assert_eq_i32(decoder.last_frame_size_48k, 960);
+    try assert(pcm[0] != 0 || pcm[1] != 0 || pcm[159] != 0, "SILK-only decode must synthesize output samples");
+}
+
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };

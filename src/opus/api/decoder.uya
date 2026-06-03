@@ -27,6 +27,11 @@ use src.opus.hybrid.decoder.HybridDecoderScratch;
 use src.opus.hybrid.decoder.hybrid_decode_i16;
 use src.opus.hybrid.state.HybridDecoderState;
 use src.opus.hybrid.state.hybrid_state_reset;
+use src.opus.silk.decoder.silk_decode_mono_parsed_packet_i16;
+use src.opus.silk.frame_params.SilkFrameParams;
+use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
+use src.opus.silk.state.SILK_MAX_INTERNAL_RATE_HZ;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_reset;
 
@@ -34,18 +39,22 @@ export error DecoderApiError;
 export error DecoderApiUnsupported;
 
 const DECODER_OUTPUT_SCRATCH_SAMPLES: usize = 5760;
+const DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3;
 
 export struct OpusDecoder {
     config: OpusDecoderConfig,
     resampler: ResamplerConfig,
+    silk_resampler: ResamplerConfig,
     active_mode: OpusMode,
     celt: CeltDecoderState,
     celt_scratch: CeltMonoDecodeScratch,
     celt_plc_scratch: CeltPlcScratch,
+    silk: SilkDecoderState,
     hybrid: HybridDecoderState,
     hybrid_silk: SilkDecoderState,
     hybrid_scratch: HybridDecoderScratch,
     output_scratch_i16: [i16: DECODER_OUTPUT_SCRATCH_SAMPLES],
+    silk_scratch_q14: [i32: DECODER_SILK_PACKET_SCRATCH_SAMPLES],
     last_frame_size_48k: i32,
 }
 
@@ -148,9 +157,13 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, config.sample_rate_hz, config.channels as u32, MAX_FRAME_SAMPLES_48K as usize) catch {
         return error.DecoderApiError;
     };
+    decoder.silk_resampler = resampler_config_init(SILK_MAX_INTERNAL_RATE_HZ as u32, config.sample_rate_hz, config.channels as u32, DECODER_SILK_PACKET_SCRATCH_SAMPLES) catch {
+        return error.DecoderApiError;
+    };
     decoder.active_mode = OpusMode.CELT;
     decoder.celt_scratch = CeltMonoDecodeScratch{};
     decoder.celt_plc_scratch = CeltPlcScratch{};
+    decoder.silk = SilkDecoderState{};
     decoder.hybrid = HybridDecoderState{};
     decoder.hybrid_silk = SilkDecoderState{};
     decoder.hybrid_scratch = HybridDecoderScratch{};
@@ -358,6 +371,102 @@ fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], pars
     );
 }
 
+fn decoder_silk_native_samples_per_channel(params: &const SilkFrameParams) !usize {
+    if params.frame_length <= 0 || params.frames_per_packet <= 0 {
+        return error.DecoderApiError;
+    }
+    return (params.frame_length as usize) * (params.frames_per_packet as usize);
+}
+
+fn decoder_prepare_silk_output_i16(decoder: &OpusDecoder, params: &const SilkFrameParams, pcm: &[i16], frame_size: i32) !i32 {
+    if params.sample_rate_hz <= 0 {
+        return error.DecoderApiError;
+    }
+    const native_samples_per_channel: usize = try decoder_silk_native_samples_per_channel(params);
+    decoder.silk_resampler = resampler_config_init(
+        params.sample_rate_hz as u32,
+        decoder.config.sample_rate_hz,
+        decoder.config.channels as u32,
+        native_samples_per_channel,
+    ) catch {
+        return error.DecoderApiError;
+    };
+
+    const output_samples: usize = resampler_output_samples_per_channel(native_samples_per_channel, &decoder.silk_resampler) catch {
+        return error.DecoderApiError;
+    };
+    const output_frame_size: i32 = output_samples as i32;
+    if frame_size < output_frame_size {
+        return error.DecoderApiError;
+    }
+    _ = try decoder_validate_output_frame_request(decoder, pcm, output_frame_size);
+    return output_frame_size;
+}
+
+fn decoder_decode_silk_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16], frame_size: i32) !i32 {
+    if parsed.info.mode != OpusMode.SILK {
+        return error.DecoderApiUnsupported;
+    }
+    if parsed.info.channels != decoder.config.channels {
+        return error.DecoderApiError;
+    }
+    if parsed.info.channels != 1 {
+        return error.DecoderApiUnsupported;
+    }
+
+    var params: SilkFrameParams = SilkFrameParams{};
+    silk_frame_params_from_packet_info(&parsed.info, &params) catch {
+        return error.DecoderApiError;
+    };
+    const output_frame_size: i32 = try decoder_prepare_silk_output_i16(decoder, &params, pcm, frame_size);
+    const native_samples_per_channel: usize = try decoder_silk_native_samples_per_channel(&params);
+    const native_required: usize = native_samples_per_channel * (decoder.config.channels as usize);
+    const output_required: usize = (output_frame_size as usize) * (decoder.config.channels as usize);
+
+    var decoded_native: usize = 0;
+    if resampler_is_identity(&decoder.silk_resampler) {
+        decoded_native = silk_decode_mono_parsed_packet_i16(
+            &decoder.silk,
+            packet,
+            parsed,
+            &pcm[0:native_required],
+            &decoder.silk_scratch_q14[0:DECODER_SILK_PACKET_SCRATCH_SAMPLES],
+        ) catch {
+            return error.DecoderApiError;
+        };
+    } else {
+        decoded_native = silk_decode_mono_parsed_packet_i16(
+            &decoder.silk,
+            packet,
+            parsed,
+            &decoder.output_scratch_i16[0:native_required],
+            &decoder.silk_scratch_q14[0:DECODER_SILK_PACKET_SCRATCH_SAMPLES],
+        ) catch {
+            return error.DecoderApiError;
+        };
+        const written: usize = resampler_process_i16(
+            &decoder.output_scratch_i16[0:native_required],
+            &decoder.silk_resampler,
+            &pcm[0:output_required],
+        ) catch {
+            return error.DecoderApiError;
+        };
+        if written != output_required {
+            return error.DecoderApiError;
+        }
+    }
+
+    if decoded_native != native_samples_per_channel {
+        return error.DecoderApiError;
+    }
+    if decoder.active_mode == OpusMode.HYBRID {
+        decoder_clear_hybrid_transition_state(decoder);
+    }
+    decoder.active_mode = OpusMode.SILK;
+    decoder.last_frame_size_48k = parsed.info.duration_samples_48k as i32;
+    return output_frame_size;
+}
+
 fn decoder_decode_fec_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32) !i32 {
     if packet.len == 0 {
         return decoder_decode_empty_packet_i16(decoder, pcm, frame_size);
@@ -385,6 +494,9 @@ export fn decoder_decode_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16]
     parse_packet(packet, &parsed) catch {
         return error.DecoderApiError;
     };
+    if parsed.info.mode == OpusMode.SILK {
+        return decoder_decode_silk_parsed_i16(decoder, packet, &parsed, pcm, frame_size);
+    }
     if parsed.info.mode == OpusMode.CELT {
         return decoder_decode_celt_parsed_i16(decoder, packet, &parsed, pcm, frame_size);
     }

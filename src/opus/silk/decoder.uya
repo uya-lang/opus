@@ -202,11 +202,7 @@ fn silk_decode_mono_payload_frames_q14(state: &SilkDecoderState, payload: &[byte
     return total_len;
 }
 
-export fn silk_decode_mono_packet_q14(state: &SilkDecoderState, packet: &[byte], out_q14: &[i32]) !usize {
-    var parsed: PacketParseResult = PacketParseResult{};
-    parse_packet(packet, &parsed) catch {
-        return error.SilkDecoderError;
-    };
+export fn silk_decode_mono_parsed_packet_q14(state: &SilkDecoderState, packet: &[byte], parsed: &const PacketParseResult, out_q14: &[i32]) !usize {
     if parsed.info.mode != OpusMode.SILK || parsed.info.channels != 1 || parsed.info.frame_count != 1 {
         return error.SilkDecoderError;
     }
@@ -221,6 +217,14 @@ export fn silk_decode_mono_packet_q14(state: &SilkDecoderState, packet: &[byte],
     return silk_decode_mono_payload_frames_q14(state, payload, params.frames_per_packet, out_q14);
 }
 
+export fn silk_decode_mono_packet_q14(state: &SilkDecoderState, packet: &[byte], out_q14: &[i32]) !usize {
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.SilkDecoderError;
+    };
+    return silk_decode_mono_parsed_packet_q14(state, packet, &parsed, out_q14);
+}
+
 const SILK_DECODER_STEREO_SCRATCH_LEN: usize = SILK_MAX_FRAME_SAMPLES + 2;
 
 fn silk_decoder_q14_to_i16(value_q14: i32) i16 {
@@ -229,6 +233,30 @@ fn silk_decoder_q14_to_i16(value_q14: i32) i16 {
         return sat16(((value + 8192L) >> 14) as i32);
     }
     return sat16((0L - (((0L - value) + 8192L) >> 14)) as i32);
+}
+
+export fn silk_decode_mono_parsed_packet_i16(state: &SilkDecoderState, packet: &[byte], parsed: &const PacketParseResult, out_i16: &[i16], scratch_q14: &[i32]) !usize {
+    const decoded: usize = silk_decode_mono_parsed_packet_q14(state, packet, parsed, scratch_q14) catch {
+        return error.SilkDecoderError;
+    };
+    if out_i16.len < decoded || scratch_q14.len < decoded {
+        return error.SilkDecoderError;
+    }
+
+    var i: usize = 0;
+    while i < decoded {
+        out_i16.ptr[i] = silk_decoder_q14_to_i16(scratch_q14.ptr[i]);
+        i = i + 1;
+    }
+    return decoded;
+}
+
+export fn silk_decode_mono_packet_i16(state: &SilkDecoderState, packet: &[byte], out_i16: &[i16], scratch_q14: &[i32]) !usize {
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.SilkDecoderError;
+    };
+    return silk_decode_mono_parsed_packet_i16(state, packet, &parsed, out_i16, scratch_q14);
 }
 
 export fn silk_decoder_reconstruct_stereo_i16(stereo_state: &SilkStereoState, mid_q14: &[i32], side_q14: &[i32], pred_q13: &[i32], fs_khz: i32, frame_length: i32, out_i16: &[i16]) !usize {
