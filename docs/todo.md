@@ -328,7 +328,7 @@
 - [x] 实现 `hybrid/state.uya`。
 - [x] 实现 `hybrid/delay.uya`。
 - [x] 实现 SILK/CELT budget split。
-- [ ] 实现 SILK lowband decode glue。
+- [x] 实现 SILK lowband decode glue。
 - [ ] 实现 CELT highband decode glue。
 - [ ] 实现 delay compensation。
 - [ ] 实现 high/low band merge。

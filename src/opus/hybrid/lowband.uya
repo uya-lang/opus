@@ -1,0 +1,105 @@
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_refresh_after_silk;
+use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
+use src.opus.silk.decoder.silk_decoder_decode_mono_frame_q14;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init_from_ec;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_store_ec;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+
+export error HybridLowbandError;
+
+export struct HybridLowbandDecodeResult {
+    decoded_samples_16k: i32,
+    decoded_samples_48k: i32,
+    celt_start_bit: i32,
+    celt_budget_bits: i32,
+}
+
+fn hybrid_lowband_frame_ms(duration_us: u32) !i32 {
+    if duration_us == 10000 {
+        return 10;
+    }
+    if duration_us == 20000 {
+        return 20;
+    }
+    return error.HybridLowbandError;
+}
+
+fn hybrid_lowband_frame_samples_16k(duration_us: u32) !i32 {
+    if duration_us == 10000 {
+        return 160;
+    }
+    if duration_us == 20000 {
+        return 320;
+    }
+    return error.HybridLowbandError;
+}
+
+fn hybrid_lowband_state_matches(state: &const SilkDecoderState, frame_ms: i32, frame_len: i32) bool {
+    return state.channels == 1
+        && state.sample_rate_hz == HYBRID_SILK_SAMPLE_RATE_HZ
+        && state.frame_ms == frame_ms
+        && state.frame_length == frame_len;
+}
+
+fn hybrid_lowband_configure_state(state: &SilkDecoderState, frame_ms: i32, frame_len: i32) !void {
+    if hybrid_lowband_state_matches(state, frame_ms, frame_len) {
+        return;
+    }
+    silk_state_init(state, 1, HYBRID_SILK_SAMPLE_RATE_HZ, frame_ms) catch {
+        return error.HybridLowbandError;
+    };
+}
+
+export fn hybrid_lowband_decode_mono_q14(state: &SilkDecoderState, split: &HybridBudgetSplit, out_q14: &[i32]) !HybridLowbandDecodeResult {
+    if split.channels != 1 || split.active_frame_bytes == 0 || split.active_bits <= 0 {
+        return error.HybridLowbandError;
+    }
+
+    const frame_ms: i32 = try hybrid_lowband_frame_ms(split.frame_duration_us);
+    const frame_len: i32 = try hybrid_lowband_frame_samples_16k(split.frame_duration_us);
+    if out_q14.len < (frame_len as usize) {
+        return error.HybridLowbandError;
+    }
+
+    try hybrid_lowband_configure_state(state, frame_ms, frame_len);
+
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    silk_entropy_decoder_init_from_ec(&entropy, &split.dec, 1, 1) catch {
+        return error.HybridLowbandError;
+    };
+    silk_entropy_decode_vad_flags(&entropy) catch {
+        return error.HybridLowbandError;
+    };
+    silk_entropy_decode_lbrr_flags(&entropy) catch {
+        return error.HybridLowbandError;
+    };
+
+    const decoded: usize = silk_decoder_decode_mono_frame_q14(state, &entropy, 0, &out_q14[0:(frame_len as usize)]) catch {
+        return error.HybridLowbandError;
+    };
+    if decoded != (frame_len as usize) {
+        return error.HybridLowbandError;
+    }
+    silk_entropy_decoder_check(&entropy) catch {
+        return error.HybridLowbandError;
+    };
+    silk_entropy_decoder_store_ec(&entropy, &split.dec) catch {
+        return error.HybridLowbandError;
+    };
+    hybrid_budget_refresh_after_silk(split) catch {
+        return error.HybridLowbandError;
+    };
+
+    return HybridLowbandDecodeResult{
+        decoded_samples_16k: decoded as i32,
+        decoded_samples_48k: (decoded as i32) * 3,
+        celt_start_bit: split.celt_start_bit,
+        celt_budget_bits: split.celt_budget_bits,
+    };
+}

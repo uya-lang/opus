@@ -1,0 +1,538 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.PacketInfo;
+use src.opus.entropy.range_dec.ec_tell;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.hybrid.budget.HybridBudgetSplit;
+use src.opus.hybrid.budget.hybrid_budget_init;
+use src.opus.hybrid.lowband.HybridLowbandDecodeResult;
+use src.opus.hybrid.lowband.hybrid_lowband_decode_mono_q14;
+use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
+use src.opus.silk.decoder.silk_decoder_decode_mono_frame_q14;
+use src.opus.silk.decoder_control.SILK_CONTROL_MAX_FRAME_SAMPLES;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
+use src.opus.silk.entropy_decode.silk_entropy_pulse_block_count;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
+use src.opus.silk.shell_coder.SILK_SHELL_CODEC_FRAME_LENGTH;
+use src.opus.silk.shell_coder.SILK_SHELL_MAX_PULSES;
+use src.opus.silk.shell_coder.silk_shell_encoder;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
+use src.opus.silk.tables.silk_lsb_icdf_value;
+use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
+use src.opus.silk.tables.silk_rate_levels_icdf_value;
+use src.opus.silk.tables.silk_sign_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
+
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_packet_info(bandwidth: OpusBandwidth, channels: u8, duration_us: u32) PacketInfo {
+    var duration_samples_48k: i32 = 480;
+    if duration_us == 20000 {
+        duration_samples_48k = 960;
+    }
+    return PacketInfo{
+        mode: OpusMode.HYBRID,
+        bandwidth: bandwidth,
+        channels: channels,
+        frame_count: 1,
+        frame_duration_us: duration_us,
+        duration_samples_48k: duration_samples_48k,
+        payload_offset: 1,
+        payload_len: 0,
+        self_delimited: false,
+        has_padding: false,
+    };
+}
+
+fn hybrid_lowband_test_fill_type_offset_vad_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "type offset helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_gain_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "gain helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(1, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        try assert(false, "delta gain helper needs 41 entries");
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        try assert(false, "uniform8 helper needs 8 entries");
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "uniform4 helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_nlsf_cb1_icdf(out: &[byte]) !void {
+    if out.len < 32 {
+        try assert(false, "NLSF CB1 helper needs 32 entries");
+    }
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_nlsf_cb1_icdf(SILK_NLSF_CODEBOOK_WB, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_nlsf_cb2_icdf(out: &[byte], ec_ix: i16) !void {
+    if out.len < 9 || ec_ix < 0 {
+        try assert(false, "NLSF CB2 helper needs one 9-entry row");
+    }
+    const base: usize = ec_ix as usize;
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_nlsf_cb2_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_nlsf_interpolation_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        try assert(false, "NLSF interpolation helper needs 5 entries");
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_nlsf_interpolation_factor_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_rate_levels_icdf(out: &[byte]) !void {
+    if out.len < 9 {
+        try assert(false, "rate levels helper needs 9 entries");
+    }
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_rate_levels_icdf_value(SILK_SIGNAL_TYPE_UNVOICED, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_pulses_per_block_icdf(out: &[byte]) !void {
+    if out.len < 18 {
+        try assert(false, "pulses-per-block helper needs 18 entries");
+    }
+    var i: usize = 0;
+    while i < 18 {
+        out.ptr[i] = silk_pulses_per_block_icdf_value(5, i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_fill_lsb_icdf(out: &[byte]) !void {
+    if out.len < 2 {
+        try assert(false, "LSB helper needs 2 entries");
+    }
+    var i: usize = 0;
+    while i < 2 {
+        out.ptr[i] = silk_lsb_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_abs_i16_to_i32(value: i16) i32 {
+    if value < 0 {
+        return -(value as i32);
+    }
+    return value as i32;
+}
+
+fn hybrid_lowband_test_shifted_abs_sum(pulses: &[i16], offset: usize, shift: i32) !i32 {
+    if pulses.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH || shift < 0 {
+        try assert(false, "pulse helper needs a full shell block");
+    }
+    var sum: i32 = 0;
+    var i: usize = 0;
+    while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+        sum = sum + (hybrid_lowband_test_abs_i16_to_i32(pulses.ptr[offset + i]) >> shift);
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn hybrid_lowband_test_write_shifted_magnitudes(out: &[i16], input: &[i16], offset: usize, shift: i32) !void {
+    if out.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH || input.len < offset + SILK_SHELL_CODEC_FRAME_LENGTH {
+        try assert(false, "shifted magnitude helper needs a full shell block");
+    }
+    var i: usize = 0;
+    while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+        out.ptr[offset + i] = (hybrid_lowband_test_abs_i16_to_i32(input.ptr[offset + i]) >> shift) as i16;
+        i = i + 1;
+    }
+}
+
+fn hybrid_lowband_test_sign_icdf_value(signal_type: i32, quant_offset_type: i32, pulse_count: i32) byte {
+    var capped: i32 = pulse_count & 31;
+    if capped > 6 {
+        capped = 6;
+    }
+    return silk_sign_icdf_value((7 * (quant_offset_type + 2 * signal_type) + capped) as usize);
+}
+
+fn hybrid_lowband_test_encode_pulse_signs(enc: &EcEnc, pulses: &[i16], block_totals: &[i32], signal_type: i32, quant_offset_type: i32) !void {
+    if pulses.len < block_totals.len * SILK_SHELL_CODEC_FRAME_LENGTH {
+        try assert(false, "pulse sign helper needs one 16-sample block per total");
+    }
+    var block: usize = 0;
+    while block < block_totals.len {
+        const total: i32 = block_totals.ptr[block];
+        if total > 0 {
+            var icdf: [byte: 2] = [hybrid_lowband_test_sign_icdf_value(signal_type, quant_offset_type, total), 0];
+            var i: usize = 0;
+            while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+                const value: i16 = pulses.ptr[block * SILK_SHELL_CODEC_FRAME_LENGTH + i];
+                if value != 0 {
+                    var symbol: i32 = 1;
+                    if value < 0 {
+                        symbol = 0;
+                    }
+                    ec_enc_icdf(enc, symbol, &icdf[0:2], 8);
+                }
+                i = i + 1;
+            }
+        }
+        block = block + 1;
+    }
+}
+
+fn hybrid_lowband_test_encode_pulse_blocks(enc: &EcEnc, signed_pulses: &[i16], frame_length: i32, rate_level: i32, quant_offset_type: i32, encoded_totals: &[i32]) !void {
+    const blocks_i32: i32 = try silk_entropy_pulse_block_count(frame_length);
+    const blocks: usize = blocks_i32 as usize;
+    const rounded_len: usize = blocks * SILK_SHELL_CODEC_FRAME_LENGTH;
+    if signed_pulses.len < rounded_len || encoded_totals.len < blocks {
+        try assert(false, "pulse block helper needs rounded frame pulse storage");
+    }
+
+    var rate_icdf: [byte: 9] = [0: 9];
+    try hybrid_lowband_test_fill_rate_levels_icdf(&rate_icdf[0:9]);
+    ec_enc_icdf(enc, rate_level, &rate_icdf[0:9], 8);
+
+    var shell_totals: [i32: 20] = [0: 20];
+    var lshifts: [i32: 20] = [0: 20];
+    var magnitudes: [i16: SILK_CONTROL_MAX_FRAME_SAMPLES] = [0: SILK_CONTROL_MAX_FRAME_SAMPLES];
+
+    var pulse_icdf: [byte: 18] = [0: 18];
+    try hybrid_lowband_test_fill_pulses_per_block_icdf(&pulse_icdf[0:18]);
+    var escape_icdf: [byte: 18] = [0: 18];
+    var escape_i: usize = 0;
+    while escape_i < 18 {
+        escape_icdf[escape_i] = silk_pulses_per_block_icdf_value(9, escape_i);
+        escape_i = escape_i + 1;
+    }
+
+    var block: usize = 0;
+    while block < blocks {
+        const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+        var shift: i32 = 0;
+        var shifted_sum: i32 = try hybrid_lowband_test_shifted_abs_sum(signed_pulses, offset, shift);
+        while shifted_sum > SILK_SHELL_MAX_PULSES {
+            shift = shift + 1;
+            if shift > 10 {
+                try assert(false, "test pulse magnitudes require too many LSB shifts");
+            }
+            shifted_sum = try hybrid_lowband_test_shifted_abs_sum(signed_pulses, offset, shift);
+        }
+
+        shell_totals[block] = shifted_sum;
+        lshifts[block] = shift;
+        encoded_totals.ptr[block] = shifted_sum;
+        if shift > 0 {
+            encoded_totals.ptr[block] = shifted_sum | (shift << 5);
+            ec_enc_icdf(enc, SILK_SHELL_MAX_PULSES + 1, &pulse_icdf[0:18], 8);
+
+            var repeat_shift: i32 = 1;
+            while repeat_shift < shift {
+                ec_enc_icdf(enc, SILK_SHELL_MAX_PULSES + 1, &escape_icdf[0:18], 8);
+                repeat_shift = repeat_shift + 1;
+            }
+
+            if shift == 10 {
+                ec_enc_icdf(enc, shifted_sum, &escape_icdf[1:17], 8);
+            } else {
+                ec_enc_icdf(enc, shifted_sum, &escape_icdf[0:18], 8);
+            }
+        } else {
+            ec_enc_icdf(enc, shifted_sum, &pulse_icdf[0:18], 8);
+        }
+
+        try hybrid_lowband_test_write_shifted_magnitudes(&magnitudes[0:SILK_CONTROL_MAX_FRAME_SAMPLES], signed_pulses, offset, shift);
+        block = block + 1;
+    }
+
+    block = 0;
+    while block < blocks {
+        if shell_totals[block] > 0 {
+            const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+            const total: i32 = try silk_shell_encoder(enc, &magnitudes[offset:SILK_SHELL_CODEC_FRAME_LENGTH]);
+            try assert_eq_i32(total, shell_totals[block]);
+        }
+        block = block + 1;
+    }
+
+    var lsb_icdf: [byte: 2] = [0: 2];
+    try hybrid_lowband_test_fill_lsb_icdf(&lsb_icdf[0:2]);
+    block = 0;
+    while block < blocks {
+        const shift: i32 = lshifts[block];
+        if shift > 0 {
+            const offset: usize = block * SILK_SHELL_CODEC_FRAME_LENGTH;
+            var i: usize = 0;
+            while i < SILK_SHELL_CODEC_FRAME_LENGTH {
+                const abs_value: i32 = hybrid_lowband_test_abs_i16_to_i32(signed_pulses.ptr[offset + i]);
+                var bit_index: i32 = shift - 1;
+                while bit_index >= 0 {
+                    ec_enc_icdf(enc, (abs_value >> bit_index) & 1, &lsb_icdf[0:2], 8);
+                    bit_index = bit_index - 1;
+                }
+                i = i + 1;
+            }
+        }
+        block = block + 1;
+    }
+
+    try hybrid_lowband_test_encode_pulse_signs(enc, signed_pulses, &encoded_totals[0:blocks], SILK_SIGNAL_TYPE_UNVOICED, quant_offset_type);
+}
+
+fn encode_test_wb_lowband_payload(payload: &[byte], frame_length: i32) !usize {
+    if frame_length != 160 && frame_length != 320 {
+        try assert(false, "hybrid lowband vector only covers WB 10ms and 20ms");
+    }
+
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, payload);
+    ec_enc_bit_logp(&enc, 1, 1);
+    ec_enc_bit_logp(&enc, 0, 1);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    try hybrid_lowband_test_fill_type_offset_vad_icdf(&type_icdf[0:4]);
+    ec_enc_icdf(&enc, 1, &type_icdf[0:4], 8);
+
+    var gain_icdf: [byte: 8] = [0: 8];
+    try hybrid_lowband_test_fill_gain_icdf(&gain_icdf[0:8]);
+    ec_enc_icdf(&enc, 1, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try hybrid_lowband_test_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    ec_enc_icdf(&enc, 5, &uniform8_icdf[0:8], 8);
+
+    var delta_gain_icdf: [byte: 41] = [0: 41];
+    try hybrid_lowband_test_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
+    var subframe: i32 = 1;
+    const nb_subframes: i32 = frame_length / 40;
+    while subframe < nb_subframes {
+        ec_enc_icdf(&enc, 4, &delta_gain_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
+    var cb1_icdf: [byte: 32] = [0: 32];
+    try hybrid_lowband_test_fill_nlsf_cb1_icdf(&cb1_icdf[0:32]);
+    ec_enc_icdf(&enc, 0, &cb1_icdf[0:32], 8);
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    try silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], SILK_NLSF_CODEBOOK_WB, 0);
+
+    var order_index: usize = 0;
+    while order_index < 16 {
+        var cb2_icdf: [byte: 9] = [0: 9];
+        try hybrid_lowband_test_fill_nlsf_cb2_icdf(&cb2_icdf[0:9], ec_ix[order_index]);
+        ec_enc_icdf(&enc, SILK_NLSF_QUANT_MAX_AMPLITUDE, &cb2_icdf[0:9], 8);
+        order_index = order_index + 1;
+    }
+
+    if nb_subframes == 4 {
+        var interpolation_icdf: [byte: 5] = [0: 5];
+        try hybrid_lowband_test_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
+        ec_enc_icdf(&enc, 4, &interpolation_icdf[0:5], 8);
+    }
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try hybrid_lowband_test_fill_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(&enc, 2, &seed_icdf[0:4], 8);
+
+    var pulses: [i16: SILK_CONTROL_MAX_FRAME_SAMPLES] = [0: SILK_CONTROL_MAX_FRAME_SAMPLES];
+    pulses[0] = -3;
+    pulses[2] = 1;
+    pulses[5] = -2;
+    pulses[8] = 4;
+    pulses[11] = -1;
+    pulses[15] = 5;
+    pulses[32] = 2;
+    pulses[33] = -1;
+    pulses[47] = 4;
+    pulses[80] = 3;
+    pulses[96] = -2;
+    pulses[127] = 1;
+    pulses[151] = -4;
+    pulses[191] = 2;
+    pulses[240] = 3;
+    pulses[319] = -2;
+    var encoded_totals: [i32: 20] = [0: 20];
+    try hybrid_lowband_test_encode_pulse_blocks(&enc, &pulses[0:SILK_CONTROL_MAX_FRAME_SAMPLES], frame_length, 5, 1, &encoded_totals[0:20]);
+
+    const used: usize = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+    return used;
+}
+
+test "hybrid lowband test payload decodes through existing SILK mono path" {
+    var payload: [byte: 512] = [0: 512];
+    const used: usize = try encode_test_wb_lowband_payload(&payload[0:512], 160);
+    try assert(used > 0, "test payload must encode bytes");
+    const frame_bytes: usize = 255;
+
+    var reference_state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&reference_state, 1, HYBRID_SILK_SAMPLE_RATE_HZ, 10);
+    var reference_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&reference_entropy, &payload[0:frame_bytes], 1, 1);
+    try silk_entropy_decode_vad_flags(&reference_entropy);
+    try silk_entropy_decode_lbrr_flags(&reference_entropy);
+    var reference_q14: [i32: 160] = [0: 160];
+    const decoded: usize = try silk_decoder_decode_mono_frame_q14(&reference_state, &reference_entropy, 0, &reference_q14[0:160]);
+    try assert_eq_i32(decoded as i32, 160);
+}
+
+test "hybrid lowband glue decodes SILK mono through the shared range decoder" {
+    var payload: [byte: 512] = [0: 512];
+    _ = try encode_test_wb_lowband_payload(&payload[0:512], 160);
+    const frame_bytes: usize = 255;
+
+    var info: PacketInfo = hybrid_lowband_packet_info(OpusBandwidth.SUPERWIDEBAND, 1, 10000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &payload[0:frame_bytes]);
+    const silk_start: i32 = split.silk_start_bit;
+
+    var reference_state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&reference_state, 1, HYBRID_SILK_SAMPLE_RATE_HZ, 10);
+    var reference_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&reference_entropy, &payload[0:frame_bytes], 1, 1);
+    try silk_entropy_decode_vad_flags(&reference_entropy);
+    try silk_entropy_decode_lbrr_flags(&reference_entropy);
+    var reference_q14: [i32: 160] = [0: 160];
+    const reference_decoded: usize = try silk_decoder_decode_mono_frame_q14(&reference_state, &reference_entropy, 0, &reference_q14[0:160]);
+
+    var lowband_state: SilkDecoderState = SilkDecoderState{};
+    var lowband_q14: [i32: 160] = [0: 160];
+    const result: HybridLowbandDecodeResult = try hybrid_lowband_decode_mono_q14(&lowband_state, &split, &lowband_q14[0:160]);
+
+    try assert_eq_i32(result.decoded_samples_16k, 160);
+    try assert_eq_i32(result.decoded_samples_48k, 480);
+    try assert_eq_i32(reference_decoded as i32, 160);
+    try assert_i32_slice_eq(&lowband_q14[0:160], &reference_q14[0:160]);
+    try assert_eq_i32(lowband_state.sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(lowband_state.frame_ms, 10);
+    try assert(split.celt_start_bit > silk_start, "SILK lowband decode must advance the shared range decoder");
+    try assert_eq_i32(split.celt_start_bit, ec_tell(&split.dec) as i32);
+    try assert_eq_i32(split.celt_start_bit, ec_tell(&reference_entropy.ec) as i32);
+    try assert_eq_i32(result.celt_start_bit, split.celt_start_bit);
+    try assert_eq_i32(result.celt_budget_bits, split.celt_budget_bits);
+}
+
+test "hybrid lowband glue supports 20ms fullband lowband layout" {
+    var payload: [byte: 768] = [0: 768];
+    _ = try encode_test_wb_lowband_payload(&payload[0:768], 320);
+    const frame_bytes: usize = 383;
+    var info: PacketInfo = hybrid_lowband_packet_info(OpusBandwidth.FULLBAND, 1, 20000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &payload[0:frame_bytes]);
+
+    var lowband_state: SilkDecoderState = SilkDecoderState{};
+    var lowband_q14: [i32: 320] = [0: 320];
+    const result: HybridLowbandDecodeResult = try hybrid_lowband_decode_mono_q14(&lowband_state, &split, &lowband_q14[0:320]);
+
+    try assert_eq_i32(result.decoded_samples_16k, 320);
+    try assert_eq_i32(result.decoded_samples_48k, 960);
+    try assert_eq_i32(lowband_state.sample_rate_hz, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(lowband_state.frame_ms, 20);
+    try assert_eq_i32(lowband_state.frame_length, 320);
+}
+
+test "hybrid lowband glue validates active layout and output buffers" {
+    var payload: [byte: 512] = [0: 512];
+    _ = try encode_test_wb_lowband_payload(&payload[0:512], 160);
+    const frame_bytes: usize = 255;
+    var info: PacketInfo = hybrid_lowband_packet_info(OpusBandwidth.SUPERWIDEBAND, 2, 10000);
+    var split: HybridBudgetSplit = HybridBudgetSplit{};
+    try hybrid_budget_init(&split, &info, &payload[0:frame_bytes]);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var short_out: [i32: 159] = [0: 159];
+    const stereo_res: !HybridLowbandDecodeResult = hybrid_lowband_decode_mono_q14(&state, &split, &short_out[0:159]);
+    match stereo_res {
+        error.HybridLowbandError => {}
+        else => { try assert(false, "mono lowband glue must reject stereo splits until stereo glue is explicit"); }
+    }
+
+    info.channels = 1;
+    try hybrid_budget_init(&split, &info, &payload[0:frame_bytes]);
+    const short_res: !HybridLowbandDecodeResult = hybrid_lowband_decode_mono_q14(&state, &split, &short_out[0:159]);
+    match short_res {
+        error.HybridLowbandError => {}
+        else => { try assert(false, "lowband glue must reject short output buffers"); }
+    }
+}
