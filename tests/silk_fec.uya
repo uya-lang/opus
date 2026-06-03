@@ -1,0 +1,101 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.fec.SilkFecPlan;
+use src.opus.silk.fec.silk_fec_has_lbrr;
+use src.opus.silk.fec.silk_fec_mark_recovered;
+use src.opus.silk.fec.silk_fec_plan_from_lbrr_flags;
+use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.state.silk_state_init;
+
+test "silk fec plan reports full-channel LBRR availability" {
+    var payload: [byte: 1] = [0: 1];
+    var decoder: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&decoder, &payload[0:1], 2, 3);
+
+    const left_index: usize = try silk_entropy_decoder_flag_index(&decoder, 0, 2);
+    const right_index: usize = try silk_entropy_decoder_flag_index(&decoder, 1, 2);
+    decoder.lbrr_channel_flags[0] = true;
+    decoder.lbrr_channel_flags[1] = true;
+    decoder.lbrr_flags[left_index] = true;
+    decoder.lbrr_flags[right_index] = true;
+
+    try assert(try silk_fec_has_lbrr(&decoder, 0, 2), "left channel must expose frame LBRR");
+    try assert(try silk_fec_has_lbrr(&decoder, 1, 2), "right channel must expose frame LBRR");
+
+    var plan: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_plan_from_lbrr_flags(&plan, &decoder, 2);
+
+    try assert(plan.can_recover, "FEC plan must recover when every active channel has LBRR");
+    try assert(!plan.needs_plc, "full LBRR recovery does not need PLC fallback");
+    try assert_eq_i32(plan.channels, 2);
+    try assert_eq_i32(plan.frames_per_packet, 3);
+    try assert_eq_i32(plan.frame_index, 2);
+    try assert_eq_i32(plan.available_channels, 2);
+    try assert(plan.channel_available[0], "left LBRR flag must be copied into the plan");
+    try assert(plan.channel_available[1], "right LBRR flag must be copied into the plan");
+}
+
+test "silk fec plan falls back to plc for partial or absent LBRR" {
+    var payload: [byte: 1] = [0: 1];
+    var decoder: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&decoder, &payload[0:1], 2, 2);
+
+    const left_index: usize = try silk_entropy_decoder_flag_index(&decoder, 0, 1);
+    decoder.lbrr_channel_flags[0] = true;
+    decoder.lbrr_flags[left_index] = true;
+
+    var partial: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_plan_from_lbrr_flags(&partial, &decoder, 1);
+
+    try assert(!partial.can_recover, "partial stereo LBRR must not claim full FEC recovery");
+    try assert(partial.needs_plc, "partial LBRR needs PLC fallback until channel repair exists");
+    try assert_eq_i32(partial.available_channels, 1);
+    try assert(partial.channel_available[0], "available channel must be tracked");
+    try assert(!partial.channel_available[1], "missing channel must stay unavailable");
+
+    var absent: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_plan_from_lbrr_flags(&absent, &decoder, 0);
+    try assert(!absent.can_recover, "absent LBRR must not be recoverable");
+    try assert(absent.needs_plc, "absent LBRR must request PLC fallback");
+    try assert_eq_i32(absent.available_channels, 0);
+}
+
+test "silk fec helpers validate channel and frame bounds" {
+    var payload: [byte: 1] = [0: 1];
+    var decoder: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&decoder, &payload[0:1], 1, 1);
+
+    const bad_channel: !bool = silk_fec_has_lbrr(&decoder, 1, 0);
+    match bad_channel {
+        error.SilkFecError => {}
+        else => { try assert(false, "FEC LBRR query must reject channels outside the decoder layout"); }
+    }
+
+    const bad_frame: !bool = silk_fec_has_lbrr(&decoder, 0, 1);
+    match bad_frame {
+        error.SilkFecError => {}
+        else => { try assert(false, "FEC LBRR query must reject frames outside the packet layout"); }
+    }
+
+    var plan: SilkFecPlan = SilkFecPlan{};
+    const bad_plan: !void = silk_fec_plan_from_lbrr_flags(&plan, &decoder, -1);
+    match bad_plan {
+        error.SilkFecError => {}
+        else => { try assert(false, "FEC planning must reject negative frame indexes"); }
+    }
+}
+
+test "silk fec recovery marker clears pending loss state" {
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.loss_count = 2;
+    state.first_frame_after_reset = true;
+
+    try silk_fec_mark_recovered(&state);
+
+    try assert_eq_i32(state.loss_count, 0);
+    try assert(!state.first_frame_after_reset, "FEC recovery consumes the reset marker like a decoded frame");
+}

@@ -1,0 +1,112 @@
+use src.opus.silk.entropy_decode.SILK_ENTROPY_FLAG_CAPACITY;
+use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
+use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+use src.opus.silk.state.SilkDecoderState;
+
+export error SilkFecError;
+
+export struct SilkFecPlan {
+    channels: i32,
+    frames_per_packet: i32,
+    frame_index: i32,
+    available_channels: i32,
+    can_recover: bool,
+    needs_plc: bool,
+    channel_available: [bool: SILK_STATE_MAX_CHANNELS],
+}
+
+fn clear_bool(values: &[bool]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = false;
+        i = i + 1;
+    }
+}
+
+fn silk_fec_validate_decoder(decoder: &const SilkEntropyDecoder) !void {
+    if decoder.channels < 1 || decoder.channels > (SILK_STATE_MAX_CHANNELS as i32) {
+        return error.SilkFecError;
+    }
+    if decoder.frames_per_packet < 1 || decoder.frames_per_packet > (SILK_ENTROPY_MAX_FRAMES_PER_PACKET as i32) {
+        return error.SilkFecError;
+    }
+}
+
+fn silk_fec_validate_state(state: &const SilkDecoderState) !void {
+    if state.channels < 1 || state.channels > (SILK_STATE_MAX_CHANNELS as i32) {
+        return error.SilkFecError;
+    }
+    if state.frame_length <= 0 || state.frame_length > (SILK_MAX_FRAME_SAMPLES as i32) {
+        return error.SilkFecError;
+    }
+    if state.loss_count < 0 {
+        return error.SilkFecError;
+    }
+}
+
+export fn silk_fec_plan_reset(plan: &SilkFecPlan) void {
+    plan.channels = 0;
+    plan.frames_per_packet = 0;
+    plan.frame_index = -1;
+    plan.available_channels = 0;
+    plan.can_recover = false;
+    plan.needs_plc = true;
+    clear_bool(&plan.channel_available[0:SILK_STATE_MAX_CHANNELS]);
+}
+
+export fn silk_fec_has_lbrr(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !bool {
+    try silk_fec_validate_decoder(decoder);
+    if channel < 0 || channel >= decoder.channels || frame_index < 0 || frame_index >= decoder.frames_per_packet {
+        return error.SilkFecError;
+    }
+
+    const channel_index: usize = channel as usize;
+    if channel_index >= SILK_STATE_MAX_CHANNELS {
+        return error.SilkFecError;
+    }
+    if !decoder.lbrr_channel_flags[channel_index] {
+        return false;
+    }
+
+    const flag_index: usize = silk_entropy_decoder_flag_index(decoder, channel, frame_index) catch {
+        return error.SilkFecError;
+    };
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkFecError;
+    }
+    return decoder.lbrr_flags[flag_index];
+}
+
+export fn silk_fec_plan_from_lbrr_flags(plan: &SilkFecPlan, decoder: &const SilkEntropyDecoder, frame_index: i32) !void {
+    silk_fec_plan_reset(plan);
+    try silk_fec_validate_decoder(decoder);
+    if frame_index < 0 || frame_index >= decoder.frames_per_packet {
+        return error.SilkFecError;
+    }
+
+    plan.channels = decoder.channels;
+    plan.frames_per_packet = decoder.frames_per_packet;
+    plan.frame_index = frame_index;
+
+    var channel: i32 = 0;
+    while channel < decoder.channels {
+        const has_lbrr: bool = try silk_fec_has_lbrr(decoder, channel, frame_index);
+        plan.channel_available[channel as usize] = has_lbrr;
+        if has_lbrr {
+            plan.available_channels = plan.available_channels + 1;
+        }
+        channel = channel + 1;
+    }
+
+    plan.can_recover = plan.available_channels == decoder.channels;
+    plan.needs_plc = !plan.can_recover;
+}
+
+export fn silk_fec_mark_recovered(state: &SilkDecoderState) !void {
+    try silk_fec_validate_state(state);
+    state.loss_count = 0;
+    state.first_frame_after_reset = false;
+}
