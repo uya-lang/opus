@@ -1,5 +1,6 @@
 use src.opus.entropy.range_dec.EcDec;
 use src.opus.entropy.range_dec.ec_dec_icdf;
+use src.opus.core.saturate.sat32;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.decoder_control.silk_decoder_control_ltp_index;
@@ -94,6 +95,10 @@ const SILK_LTP_VQ_2_Q7: [i16: 160] = [
 ];
 
 fn smulww_i32(a: i32, b: i32) i32 {
+    return (((a as i64) * (b as i64)) >> 16) as i32;
+}
+
+fn smulwb_i32(a: i32, b: i16) i32 {
     return (((a as i64) * (b as i64)) >> 16) as i32;
 }
 
@@ -240,6 +245,35 @@ export fn silk_ltp_scale_history_q15(history_q15: &[i32], len: i32, gain_adj_q16
     var i: usize = 0;
     while i < (len as usize) {
         history_q15.ptr[i] = smulww_i32(gain_adj_q16, history_q15.ptr[i]);
+        i = i + 1;
+    }
+}
+
+export fn silk_ltp_synthesis_q14(out_q14: &[i32], history_q15: &[i32], excitation_q14: &[i32], coeff_q14: &[i16], write_index: i32, pitch_lag: i32, len: i32) !void {
+    if write_index < 0 || len < 0 || pitch_lag <= 0 || out_q14.len < (len as usize) || excitation_q14.len < (len as usize) || coeff_q14.len < SILK_LTP_ORDER {
+        return error.SilkLtpError;
+    }
+    if history_q15.len < ((write_index + len) as usize) {
+        return error.SilkLtpError;
+    }
+
+    var i: usize = 0;
+    while i < (len as usize) {
+        const history_write_index: i32 = write_index + (i as i32);
+        var pred_q13: i32 = 2;
+        var tap: usize = 0;
+        while tap < SILK_LTP_ORDER {
+            const history_index: usize = try silk_ltp_history_index(history_write_index, pitch_lag, tap as i32);
+            if history_index >= history_q15.len {
+                return error.SilkLtpError;
+            }
+            pred_q13 = pred_q13 + smulwb_i32(history_q15.ptr[history_index], coeff_q14.ptr[tap]);
+            tap = tap + 1;
+        }
+
+        const residual_q14: i32 = sat32((excitation_q14.ptr[i] as i64) + ((pred_q13 as i64) << 1));
+        out_q14.ptr[i] = residual_q14;
+        history_q15.ptr[history_write_index as usize] = sat32((residual_q14 as i64) << 1);
         i = i + 1;
     }
 }

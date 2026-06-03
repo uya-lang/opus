@@ -21,6 +21,7 @@ use src.opus.silk.ltp.silk_ltp_vq_q7;
 use src.opus.silk.ltp.silk_ltp_history_index;
 use src.opus.silk.ltp.silk_ltp_per_index_icdf_value;
 use src.opus.silk.ltp.silk_ltp_scale_history_q15;
+use src.opus.silk.ltp.silk_ltp_synthesis_q14;
 use src.opus.silk.ltp.silk_ltp_tap_index;
 use src.opus.silk.ltp.silk_ltp_validate_pitch_lag;
 use src.opus.silk.state.SilkDecoderState;
@@ -182,5 +183,61 @@ test "silk ltp coefficient decode rejects unvoiced control" {
     match result {
         error.SilkLtpError => {}
         else => { try assert(false, "LTP coefficient decode is only valid for voiced frames"); }
+    }
+}
+
+test "silk ltp synthesis adds long-term prediction to q14 excitation" {
+    var history_q15: [i32: 40] = [0: 40];
+    var i: usize = 0;
+    while i < 40 {
+        history_q15[i] = ((i as i32) - 20) * 4096;
+        i = i + 1;
+    }
+    var excitation_q14: [i32: 6] = [16000, -8000, 4800, 0, 19200, -11200];
+    var coeff_q14: [i16: 5] = [4096, -2048, 1024, -512, 256];
+    var out_q14: [i32: 6] = [0: 6];
+
+    try silk_ltp_synthesis_q14(&out_q14[0:6], &history_q15[0:40], &excitation_q14[0:6], &coeff_q14[0:5], 20, 6, 6);
+
+    try assert_eq_i32(out_q14[0], 14660);
+    try assert_eq_i32(out_q14[1], -8988);
+    try assert_eq_i32(out_q14[2], 4164);
+    try assert_eq_i32(out_q14[3], -284);
+    try assert_eq_i32(out_q14[4], 22932);
+    try assert_eq_i32(out_q14[5], -15374);
+    try assert_eq_i32(history_q15[20], 29320);
+    try assert_eq_i32(history_q15[25], -30748);
+}
+
+test "silk ltp synthesis consumes generated history and validates bounds" {
+    var history_q15: [i32: 20] = [0: 20];
+    history_q15[7] = 100000;
+    history_q15[6] = -50000;
+    history_q15[5] = 25000;
+    history_q15[4] = -12500;
+    history_q15[3] = 6250;
+    var excitation_q14: [i32: 3] = [0, 0, 0];
+    var coeff_q14: [i16: 5] = [8192, 8192, 0, 0, 0];
+    var out_q14: [i32: 3] = [0: 3];
+
+    try silk_ltp_synthesis_q14(&out_q14[0:3], &history_q15[0:20], &excitation_q14[0:3], &coeff_q14[0:5], 10, 5, 3);
+
+    try assert_eq_i32(out_q14[0], 12504);
+    try assert_eq_i32(out_q14[1], 25004);
+    try assert_eq_i32(out_q14[2], 4);
+    try assert_eq_i32(history_q15[10], 25008);
+    try assert_eq_i32(history_q15[11], 50008);
+    try assert_eq_i32(history_q15[12], 8);
+
+    const too_early: !void = silk_ltp_synthesis_q14(&out_q14[0:3], &history_q15[0:20], &excitation_q14[0:3], &coeff_q14[0:5], 2, 5, 3);
+    match too_early {
+        error.SilkLtpError => {}
+        else => { try assert(false, "LTP synthesis must reject history reads before buffer start"); }
+    }
+
+    const too_short: !void = silk_ltp_synthesis_q14(&out_q14[0:3], &history_q15[0:20], &excitation_q14[0:3], &coeff_q14[0:5], 18, 5, 3);
+    match too_short {
+        error.SilkLtpError => {}
+        else => { try assert(false, "LTP synthesis must reject history writes past buffer end"); }
     }
 }
