@@ -108,6 +108,30 @@ test "decoder api converts empty-packet plc to configured output rate" {
     try assert(decoder.active_mode == OpusMode.CELT, "sample-rate conversion must preserve active CELT mode");
 }
 
+test "decoder api 48k output fast path writes directly to caller pcm" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    const tail: usize = CELT_DECODE_MEM - 120;
+    var i: usize = 0;
+    while i < 120 {
+        decoder.celt.decode_mem[tail + i] = 2000 + (i as i32);
+        decoder.output_scratch_i16[i] = -2222;
+        i = i + 1;
+    }
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 120] = [0: 120];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:120], 120, false);
+
+    try assert_eq_i32(decoded, 120);
+    try assert_eq_i32(pcm[0] as i32, 2000);
+    try assert_eq_i32(pcm[119] as i32, 2119);
+    try assert_eq_i32(decoder.output_scratch_i16[0] as i32, -2222);
+    try assert_eq_i32(decoder.output_scratch_i16[119] as i32, -2222);
+}
+
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
