@@ -9,6 +9,7 @@ use src.opus.celt.mdct_bridge.celt_imdct_overlap_q15;
 use src.opus.celt.mode.celt_mode_eband_width_5ms;
 use src.opus.celt.quant_bands.celt_decode_coarse_energy;
 use src.opus.celt.quant_bands.celt_decode_fine_energy;
+use src.opus.celt.rate.CeltRateFrameAllocation;
 use src.opus.celt.rate.celt_rate_decode_allocation;
 use src.opus.celt.rate.celt_rate_decode_legacy_allocation;
 use src.opus.celt.rate.celt_rate_bits2pulses_pseudo;
@@ -310,6 +311,16 @@ fn celt_prepare_channel_pulse_bits_from_legacy_allocation(state: &const CeltDeco
 }
 
 fn celt_prepare_channel_pulse_counts_from_q3(state: &const CeltDecoderState, channel: i32, scratch: &CeltMonoDecodeScratch) !void {
+    return celt_prepare_channel_pulse_counts_from_q3_range(state, channel, scratch, state.end_band, 0);
+}
+
+fn celt_prepare_channel_pulse_counts_from_q3_range(
+    state: &const CeltDecoderState,
+    channel: i32,
+    scratch: &CeltMonoDecodeScratch,
+    decode_end_band: i32,
+    intensity_band: i32,
+) !void {
     if state.channels < 1 || state.channels > 2 || channel < 0 || channel >= state.channels {
         return error.CeltDecodeError;
     }
@@ -322,10 +333,13 @@ fn celt_prepare_channel_pulse_counts_from_q3(state: &const CeltDecoderState, cha
     if state.end_band > (CELT_MAX_BANDS as i32) {
         return error.CeltDecodeError;
     }
+    if decode_end_band < state.start_band || decode_end_band > state.end_band {
+        return error.CeltDecodeError;
+    }
 
     clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
     var band: i32 = state.start_band;
-    while band < state.end_band {
+    while band < decode_end_band {
         if band < 0 || band >= (CELT_MAX_BANDS as i32) {
             return error.CeltDecodeError;
         }
@@ -338,7 +352,11 @@ fn celt_prepare_channel_pulse_counts_from_q3(state: &const CeltDecoderState, cha
             return error.CeltDecodeError;
         }
         var channel_bits_q3: i32 = total_bits_q3;
-        if state.channels > 1 {
+        var split_stereo: bool = state.channels > 1;
+        if state.channels == 2 && channel == 0 && intensity_band > state.start_band && band >= intensity_band {
+            split_stereo = false;
+        }
+        if split_stereo {
             channel_bits_q3 = total_bits_q3 / state.channels;
             const extra: i32 = total_bits_q3 - (channel_bits_q3 * state.channels);
             if channel < extra {
@@ -357,6 +375,118 @@ fn celt_prepare_channel_pulse_counts_from_q3(state: &const CeltDecoderState, cha
     }
 }
 
+fn celt_copy_intensity_shape_from_left(
+    state: &const CeltDecoderState,
+    total_dim: usize,
+    scratch: &CeltMonoDecodeScratch,
+    intensity_band: i32,
+    decode_end_band: i32,
+) !void {
+    if state.channels != 2 {
+        return;
+    }
+    if intensity_band < state.start_band || intensity_band > decode_end_band || decode_end_band > state.end_band {
+        return error.CeltDecodeError;
+    }
+    if total_dim * 2 > CELT_MONO_DECODE_MAX_SPECTRAL {
+        return error.CeltDecodeError;
+    }
+
+    var offset: usize = 0;
+    var band: i32 = state.start_band;
+    while band < decode_end_band {
+        if band < 0 || band >= (CELT_MAX_BANDS as i32) {
+            return error.CeltDecodeError;
+        }
+        const band_index: usize = band as usize;
+        if band_index >= CELT_MAX_BANDS {
+            return error.CeltDecodeError;
+        }
+        const dim: i32 = scratch.band_dims[band_index];
+        if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DECODE_DIM {
+            return error.CeltDecodeError;
+        }
+        const dim_usize: usize = dim as usize;
+        if offset + dim_usize > total_dim {
+            return error.CeltDecodeError;
+        }
+        if band >= intensity_band {
+            var i: usize = 0;
+            while i < dim_usize {
+                scratch.shape_q15[total_dim + offset + i] = scratch.shape_q15[offset + i];
+                i = i + 1;
+            }
+        }
+        offset = offset + dim_usize;
+        band = band + 1;
+    }
+}
+
+fn celt_decode_opus_band_shapes_i16(
+    state: &const CeltDecoderState,
+    dec: &EcDec,
+    total_dim: usize,
+    scratch: &CeltMonoDecodeScratch,
+    coded_bands: i32,
+    intensity_band: i32,
+) !void {
+    if coded_bands < state.start_band || coded_bands > state.end_band {
+        return error.CeltDecodeError;
+    }
+    if state.channels == 2 && intensity_band > state.start_band && intensity_band < coded_bands {
+        const left_offset: usize = 0;
+        try celt_prepare_channel_pulse_counts_from_q3_range(state, 0, scratch, coded_bands, intensity_band);
+        _ = celt_decode_band_shapes_with_pulse_counts(
+            dec,
+            state.start_band,
+            coded_bands,
+            &scratch.band_dims[0:CELT_MAX_BANDS],
+            &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+            &scratch.pulses[left_offset:total_dim],
+            &scratch.shape_q15[left_offset:total_dim],
+        ) catch {
+            return error.CeltDecodeError;
+        };
+
+        const right_end: i32 = intensity_band;
+        if right_end > state.start_band {
+            const right_offset: usize = total_dim;
+            try celt_prepare_channel_pulse_counts_from_q3_range(state, 1, scratch, right_end, intensity_band);
+            _ = celt_decode_band_shapes_with_pulse_counts(
+                dec,
+                state.start_band,
+                right_end,
+                &scratch.band_dims[0:CELT_MAX_BANDS],
+                &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+                &scratch.pulses[right_offset:total_dim],
+                &scratch.shape_q15[right_offset:total_dim],
+            ) catch {
+                return error.CeltDecodeError;
+            };
+        }
+        try celt_copy_intensity_shape_from_left(state, total_dim, scratch, intensity_band, coded_bands);
+        return;
+    }
+
+    var channel: i32 = 0;
+    while channel < state.channels {
+        const spectral_offset: usize = (channel as usize) * total_dim;
+        try celt_prepare_channel_pulse_counts_from_q3_range(state, channel, scratch, coded_bands, 0);
+        _ = celt_decode_band_shapes_with_pulse_counts(
+            dec,
+            state.start_band,
+            coded_bands,
+            &scratch.band_dims[0:CELT_MAX_BANDS],
+            &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+            &scratch.pulses[spectral_offset:total_dim],
+            &scratch.shape_q15[spectral_offset:total_dim],
+        ) catch {
+            return error.CeltDecodeError;
+        };
+        channel = channel + 1;
+    }
+}
+
 fn celt_decode_spectral_shapes_i16(
     state: &CeltDecoderState,
     dec: &EcDec,
@@ -371,8 +501,10 @@ fn celt_decode_spectral_shapes_i16(
     clear_i32(&scratch.pulses[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
     clear_i16(&scratch.shape_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
 
+    var opus_coded_bands: i32 = state.end_band;
+    var opus_intensity_band: i32 = 0;
     if use_opus_allocation {
-        _ = celt_rate_decode_allocation(
+        var alloc: CeltRateFrameAllocation = celt_rate_decode_allocation(
             state,
             dec,
             total_bits,
@@ -381,6 +513,8 @@ fn celt_decode_spectral_shapes_i16(
         ) catch {
             return error.CeltDecodeError;
         };
+        opus_coded_bands = alloc.coded_bands;
+        opus_intensity_band = alloc.intensity;
     } else {
         _ = celt_rate_decode_legacy_allocation(
             state,
@@ -398,22 +532,11 @@ fn celt_decode_spectral_shapes_i16(
     };
 
     var channel: i32 = 0;
-    while channel < state.channels {
-        const spectral_offset: usize = (channel as usize) * total_dim;
-        if use_opus_allocation {
-            try celt_prepare_channel_pulse_counts_from_q3(state, channel, scratch);
-            _ = celt_decode_band_shapes_with_pulse_counts(
-                dec,
-                state.start_band,
-                state.end_band,
-                &scratch.band_dims[0:CELT_MAX_BANDS],
-                &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
-                &scratch.pulses[spectral_offset:total_dim],
-                &scratch.shape_q15[spectral_offset:total_dim],
-            ) catch {
-                return error.CeltDecodeError;
-            };
-        } else {
+    if use_opus_allocation {
+        try celt_decode_opus_band_shapes_i16(state, dec, total_dim, scratch, opus_coded_bands, opus_intensity_band);
+    } else {
+        while channel < state.channels {
+            const spectral_offset: usize = (channel as usize) * total_dim;
             try celt_prepare_channel_pulse_bits_from_legacy_allocation(state, channel, scratch);
             _ = celt_decode_band_shapes(
                 dec,
@@ -426,8 +549,8 @@ fn celt_decode_spectral_shapes_i16(
             ) catch {
                 return error.CeltDecodeError;
             };
+            channel = channel + 1;
         }
-        channel = channel + 1;
     }
 
     ec_dec_check(dec) catch {

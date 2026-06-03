@@ -195,7 +195,7 @@ python3 tools/generate_actual_decode.py /tmp/uopus-rfc8251-full-manifest.json \
   --decoder build/uopus-decode-vector
 ```
 
-Current full-vector result after the second packet fix:
+Current full-vector result after the fourth packet fix:
 
 ```text
 uopus-decode-vector: decode failed
@@ -222,11 +222,19 @@ packet fix imports the CELT pulse cache tables and retries CELT spectral shape
 decode with Opus-compatible allocation when the legacy allocation path consumes
 an invalid range-coder state.
 
-The current first blocker is now the fourth packet of `testvector01.bit`: it is
-976 bytes with TOC `0xff` and count byte `0x85`. A full-file decode of
-`rfc8251-testvector01-8000-mono` writes 2880 bytes for the first three packets
+The fourth packet of `testvector01.bit` now decodes through the CELT core tests
+and through `build/uopus-decode-vector 8000 1 0`. It is 976 bytes with TOC
+`0xff` and count byte `0x85`, carrying five VBR frames of 192, 194, 193, 195,
+and 196 bytes. The fix makes Opus-compatible CELT spectral shape decode respect
+`coded_bands` and avoid independently decoding the right channel after the
+allocation switches to intensity stereo.
+
+The current first blocker is now the fifth packet of `testvector01.bit`: it is
+589 bytes with TOC `0xff` and count byte `0x83`, carrying three VBR frames of
+194, 196, and 195 bytes. A full-file decode of
+`rfc8251-testvector01-8000-mono` writes 4480 bytes for the first four packets
 and then fails during the next packet. The next RFC8251 step should continue
-from that fourth packet rather than from vector plumbing or public API channel
+from that fifth packet rather than from vector plumbing or public API channel
 dispatch.
 
 ## Acceptance Commands
