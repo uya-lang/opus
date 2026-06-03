@@ -346,7 +346,11 @@
   - [x] 定义 vector manifest 格式并实现最小 vector runner contract。
   - [x] 实现 `tools/diff_decode.sh` 并支持空 corpus/缺 manifest 的清晰错误。
   - [x] 接入 `make conformance`，调用 `make test` 和 decoder vector diff。
-  - [ ] 获取/整理 RFC/upstream decoder vectors 并运行 full decoder diff。
+  - Full decoder vector corpus 导入和 diff（拆分执行）。
+    - [x] 记录 RFC/upstream decoder vector 来源和获取命令。
+    - [ ] 导入/整理 decoder vector corpus 到 `tests/vectors/manifest.json`。
+    - [ ] 生成并记录 reference PCM hash。
+    - [ ] 补齐 actual decode 生成路径并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
 ## 13. Public Decoder API

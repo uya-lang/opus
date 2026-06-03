@@ -30,6 +30,60 @@ The current upstream `main` commit observed during setup was
 only; table imports must use the fixed `v1.5.2` commit unless a later TODO
 explicitly updates this baseline.
 
+## Decoder Vector Sources
+
+Verified on 2026-06-04 from the official Opus test vector index:
+
+- Index: https://opus-codec.org/testvectors/
+
+Primary release decoder corpus:
+
+- Name: Post-RFC8251 decoder bitstream vectors.
+- Opus mirror:
+  https://opus-codec.org/static/testvectors/opus_testvectors-rfc8251.tar.gz
+- IETF source:
+  https://www.ietf.org/proceedings/98/slides/materials-98-codec-opus-newvectors-00.tar.gz
+- Archive SHA-256:
+  `6b26a22f9ba87b2b836906a9bb7afec5f8e54d49553b1200382520ee6fedfa55`
+- HTTP `Content-Length`: `74624664`.
+- Archive root: `opus_newvectors/`.
+- Contents observed: `testvector01..12.bit`, `testvector01..12.dec`, and
+  `testvector01..12m.dec`.
+
+Legacy decoder corpus for historical RFC6716 coverage:
+
+- Name: Original RFC6716 decoder bitstream vectors.
+- Opus mirror:
+  https://opus-codec.org/static/testvectors/opus_testvectors.tar.gz
+- IETF source:
+  https://www.ietf.org/proceedings/83/slides/slides-83-codec-0.gz
+- Archive SHA-256:
+  `94ac78ca4f74c4e43bc9fe4ec1ad0aa36f38ab90f45b0727c40dd1e96096e767`
+- HTTP `Content-Length`: `39001148`.
+- Archive root: `opus_testvectors/`.
+- Contents observed: `testvector01..12.bit` and `testvector01..12.dec`.
+
+Reproducible fetch and verification commands:
+
+```sh
+mkdir -p build/vector_sources
+curl -L --fail \
+  -o build/vector_sources/opus_testvectors-rfc8251.tar.gz \
+  https://opus-codec.org/static/testvectors/opus_testvectors-rfc8251.tar.gz
+curl -L --fail \
+  -o build/vector_sources/opus_testvectors.tar.gz \
+  https://opus-codec.org/static/testvectors/opus_testvectors.tar.gz
+sha256sum \
+  build/vector_sources/opus_testvectors-rfc8251.tar.gz \
+  build/vector_sources/opus_testvectors.tar.gz
+tar -tzf build/vector_sources/opus_testvectors-rfc8251.tar.gz | sort
+tar -tzf build/vector_sources/opus_testvectors.tar.gz | sort
+```
+
+The release manifest should import the post-RFC8251 corpus first. The original
+RFC6716 corpus may be retained as an additional regression set, but it must not
+replace the updated vectors.
+
 ## Table Source Inventory
 
 The following upstream paths are the expected source of truth for table
