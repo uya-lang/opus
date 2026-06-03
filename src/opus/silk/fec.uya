@@ -1,7 +1,15 @@
+use src.opus.core.types.OpusMode;
+use src.opus.packet.toc.PacketParseResult;
+use src.opus.packet.toc.parse_packet;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_FLAG_CAPACITY;
 use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.frame_params.SilkFrameParams;
+use src.opus.silk.frame_params.silk_frame_params_from_packet_info;
 use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
 use src.opus.silk.state.SilkDecoderState;
@@ -103,6 +111,46 @@ export fn silk_fec_plan_from_lbrr_flags(plan: &SilkFecPlan, decoder: &const Silk
 
     plan.can_recover = plan.available_channels == decoder.channels;
     plan.needs_plc = !plan.can_recover;
+}
+
+export fn silk_fec_detect_lbrr_payload(plan: &SilkFecPlan, payload: &[byte], channels: i32, frames_per_packet: i32, frame_index: i32) !void {
+    silk_fec_plan_reset(plan);
+
+    var decoder: SilkEntropyDecoder = SilkEntropyDecoder{};
+    silk_entropy_decoder_init(&decoder, payload, channels, frames_per_packet) catch {
+        return error.SilkFecError;
+    };
+    silk_entropy_decode_vad_flags(&decoder) catch {
+        return error.SilkFecError;
+    };
+    silk_entropy_decode_lbrr_flags(&decoder) catch {
+        return error.SilkFecError;
+    };
+    silk_fec_plan_from_lbrr_flags(plan, &decoder, frame_index) catch {
+        return error.SilkFecError;
+    };
+}
+
+export fn silk_fec_detect_lbrr_packet(plan: &SilkFecPlan, packet: &[byte], frame_index: i32) !void {
+    silk_fec_plan_reset(plan);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.SilkFecError;
+    };
+    if parsed.info.mode != OpusMode.SILK || parsed.info.frame_count != 1 {
+        return error.SilkFecError;
+    }
+
+    var params: SilkFrameParams = SilkFrameParams{};
+    silk_frame_params_from_packet_info(&parsed.info, &params) catch {
+        return error.SilkFecError;
+    };
+
+    const payload: &[byte] = &packet[parsed.frames[0].offset:parsed.frames[0].len];
+    silk_fec_detect_lbrr_payload(plan, payload, params.channels, params.frames_per_packet, frame_index) catch {
+        return error.SilkFecError;
+    };
 }
 
 export fn silk_fec_mark_recovered(state: &SilkDecoderState) !void {

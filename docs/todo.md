@@ -307,7 +307,7 @@
 - [x] 实现 SILK energy decay。
 - [x] 实现 SILK pitch extrapolation。
 - [x] 实现 `silk/fec.uya`。
-- [ ] 实现 LBRR packet 检测。
+- [x] 实现 LBRR packet 检测。
 - [ ] 实现 delayed FEC decode。
 - [ ] 实现 `celt/plc.uya`。
 - [ ] 实现 CELT frequency-domain PLC 初版。

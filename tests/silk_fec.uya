@@ -1,14 +1,86 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
 use src.opus.silk.fec.SilkFecPlan;
+use src.opus.silk.fec.silk_fec_detect_lbrr_packet;
+use src.opus.silk.fec.silk_fec_detect_lbrr_payload;
 use src.opus.silk.fec.silk_fec_has_lbrr;
 use src.opus.silk.fec.silk_fec_mark_recovered;
 use src.opus.silk.fec.silk_fec_plan_from_lbrr_flags;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_init;
+use src.opus.silk.tables.silk_lbrr_flags_2_icdf_value;
+use src.opus.silk.tables.silk_lbrr_flags_3_icdf_value;
+
+fn fill_lbrr_icdf(out: &[byte], frames_per_packet: i32) !usize {
+    if frames_per_packet == 2 {
+        if out.len < 3 {
+            try assert(false, "two-frame LBRR helper needs 3 iCDF entries");
+        }
+        var i: usize = 0;
+        while i < 3 {
+            out.ptr[i] = silk_lbrr_flags_2_icdf_value(i);
+            i = i + 1;
+        }
+        return 3 as usize;
+    }
+    if frames_per_packet == 3 {
+        if out.len < 7 {
+            try assert(false, "three-frame LBRR helper needs 7 iCDF entries");
+        }
+        var j: usize = 0;
+        while j < 7 {
+            out.ptr[j] = silk_lbrr_flags_3_icdf_value(j);
+            j = j + 1;
+        }
+        return 7 as usize;
+    }
+    try assert(false, "test LBRR helper only supports two or three frames");
+    return 0 as usize;
+}
+
+fn encode_vad_lbrr_payload(payload: &[byte], channels: i32, frames_per_packet: i32, lbrr_channel_flags: &[bool], lbrr_frame_masks: &[i32]) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, payload);
+
+    var channel: i32 = 0;
+    while channel < channels {
+        var frame: i32 = 0;
+        while frame < frames_per_packet {
+            ec_enc_bit_logp(&enc, 0, 1);
+            frame = frame + 1;
+        }
+        channel = channel + 1;
+    }
+
+    channel = 0;
+    while channel < channels {
+        const channel_index: usize = channel as usize;
+        var has_lbrr: i32 = 0;
+        if lbrr_channel_flags.ptr[channel_index] {
+            has_lbrr = 1;
+        }
+        ec_enc_bit_logp(&enc, has_lbrr, 1);
+        if has_lbrr != 0 && frames_per_packet > 1 {
+            var icdf: [byte: 7] = [0: 7];
+            const icdf_len: usize = try fill_lbrr_icdf(&icdf[0:7], frames_per_packet);
+            const mask: i32 = lbrr_frame_masks.ptr[channel_index];
+            ec_enc_icdf(&enc, mask - 1, &icdf[0:icdf_len], 8);
+        }
+        channel = channel + 1;
+    }
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
 
 test "silk fec plan reports full-channel LBRR availability" {
     var payload: [byte: 1] = [0: 1];
@@ -85,6 +157,64 @@ test "silk fec helpers validate channel and frame bounds" {
     match bad_plan {
         error.SilkFecError => {}
         else => { try assert(false, "FEC planning must reject negative frame indexes"); }
+    }
+}
+
+test "silk fec detects LBRR flags from encoded SILK payload" {
+    var payload: [byte: 32] = [0: 32];
+    var channel_flags: [bool: 1] = [true];
+    var frame_masks: [i32: 1] = [4];
+    try encode_vad_lbrr_payload(&payload[0:32], 1, 3, &channel_flags[0:1], &frame_masks[0:1]);
+
+    var frame_two: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_detect_lbrr_payload(&frame_two, &payload[0:32], 1, 3, 2);
+    try assert(frame_two.can_recover, "encoded LBRR mask must make frame 2 recoverable");
+    try assert(!frame_two.needs_plc, "available mono LBRR must not need PLC");
+    try assert_eq_i32(frame_two.available_channels, 1);
+    try assert(frame_two.channel_available[0], "payload detection must copy per-channel availability");
+
+    var frame_one: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_detect_lbrr_payload(&frame_one, &payload[0:32], 1, 3, 1);
+    try assert(!frame_one.can_recover, "frames absent from the LBRR mask must not be recoverable");
+    try assert(frame_one.needs_plc, "missing payload LBRR must request PLC");
+}
+
+test "silk fec detects LBRR flags from complete SILK packet" {
+    var packet: [byte: 33] = [0: 33];
+    packet[0] = 88;
+    var channel_flags: [bool: 1] = [true];
+    var frame_masks: [i32: 1] = [2];
+    try encode_vad_lbrr_payload(&packet[1:32], 1, 3, &channel_flags[0:1], &frame_masks[0:1]);
+
+    var plan: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_detect_lbrr_packet(&plan, &packet[0:33], 1);
+
+    try assert(plan.can_recover, "packet-level detector must derive SILK layout and find frame LBRR");
+    try assert_eq_i32(plan.channels, 1);
+    try assert_eq_i32(plan.frames_per_packet, 3);
+    try assert_eq_i32(plan.frame_index, 1);
+    try assert_eq_i32(plan.available_channels, 1);
+}
+
+test "silk fec packet detector rejects non-silk packets and bad frame indexes" {
+    var celt_packet: [byte: 4] = [248, 0, 0, 0];
+    var plan: SilkFecPlan = SilkFecPlan{};
+    const celt_result: !void = silk_fec_detect_lbrr_packet(&plan, &celt_packet[0:4], 0);
+    match celt_result {
+        error.SilkFecError => {}
+        else => { try assert(false, "FEC packet detection must reject non-SILK packets"); }
+    }
+
+    var silk_packet: [byte: 33] = [0: 33];
+    silk_packet[0] = 88;
+    var channel_flags: [bool: 1] = [false];
+    var frame_masks: [i32: 1] = [0];
+    try encode_vad_lbrr_payload(&silk_packet[1:32], 1, 3, &channel_flags[0:1], &frame_masks[0:1]);
+
+    const bad_frame: !void = silk_fec_detect_lbrr_packet(&plan, &silk_packet[0:33], 3);
+    match bad_frame {
+        error.SilkFecError => {}
+        else => { try assert(false, "FEC packet detection must reject internal frame indexes outside packet duration"); }
     }
 }
 
