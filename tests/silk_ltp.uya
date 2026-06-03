@@ -1,0 +1,65 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.silk.ltp.SILK_LTP_HISTORY_EXTRA_TAPS;
+use src.opus.silk.ltp.SILK_LTP_ORDER;
+use src.opus.silk.ltp.silk_ltp_history_index;
+use src.opus.silk.ltp.silk_ltp_scale_history_q15;
+use src.opus.silk.ltp.silk_ltp_tap_index;
+use src.opus.silk.ltp.silk_ltp_validate_pitch_lag;
+
+test "silk ltp exposes order and history constants" {
+    try assert_eq_i32(SILK_LTP_ORDER as i32, 5);
+    try assert_eq_i32(SILK_LTP_HISTORY_EXTRA_TAPS as i32, 2);
+}
+
+test "silk ltp validates pitch lags against decoder sampling rate" {
+    try silk_ltp_validate_pitch_lag(16, 32);
+    try silk_ltp_validate_pitch_lag(16, 288);
+    try silk_ltp_validate_pitch_lag(8, 16);
+    try silk_ltp_validate_pitch_lag(12, 216);
+
+    const too_short: !void = silk_ltp_validate_pitch_lag(16, 31);
+    match too_short {
+        error.SilkLtpError => {}
+        else => { try assert(false, "pitch lag below 2 ms must be rejected"); }
+    }
+
+    const bad_rate: !void = silk_ltp_validate_pitch_lag(24, 48);
+    match bad_rate {
+        error.SilkLtpError => {}
+        else => { try assert(false, "unsupported SILK fs_khz must be rejected"); }
+    }
+}
+
+test "silk ltp maps channel subframe tap indices" {
+    try assert_eq_i32((try silk_ltp_tap_index(0, 0, 0, 2, 4)) as i32, 0);
+    try assert_eq_i32((try silk_ltp_tap_index(0, 3, 4, 2, 4)) as i32, 19);
+    try assert_eq_i32((try silk_ltp_tap_index(1, 2, 3, 2, 4)) as i32, 33);
+
+    const bad_tap: !usize = silk_ltp_tap_index(0, 0, 5, 1, 4);
+    match bad_tap {
+        error.SilkLtpError => {}
+        else => { try assert(false, "tap past LTP_ORDER must be rejected"); }
+    }
+}
+
+test "silk ltp maps pitch-relative q15 history slots" {
+    try assert_eq_i32((try silk_ltp_history_index(100, 20, 0)) as i32, 82);
+    try assert_eq_i32((try silk_ltp_history_index(100, 20, 4)) as i32, 78);
+
+    const too_far: !usize = silk_ltp_history_index(20, 20, 4);
+    match too_far {
+        error.SilkLtpError => {}
+        else => { try assert(false, "history index before buffer start must fail"); }
+    }
+}
+
+test "silk ltp scales q15 history by q16 gain adjustment" {
+    var history_q15: [i32: 6] = [65536, -32768, 16384, -8192, 4096, -2048];
+    try silk_ltp_scale_history_q15(&history_q15[0:6], 6, 32768);
+
+    try assert_eq_i32(history_q15[0], 32768);
+    try assert_eq_i32(history_q15[1], -16384);
+    try assert_eq_i32(history_q15[2], 8192);
+    try assert_eq_i32(history_q15[5], -1024);
+}

@@ -1,0 +1,68 @@
+use src.opus.silk.state.SILK_MAX_NB_SUBFR;
+use src.opus.silk.state.SILK_MIN_PITCH_LAG_MS;
+use src.opus.silk.state.SILK_MAX_PITCH_LAG_MS;
+use src.opus.silk.state.SILK_STATE_MAX_CHANNELS;
+
+export error SilkLtpError;
+
+export const SILK_LTP_ORDER: usize = 5;
+export const SILK_LTP_HISTORY_EXTRA_TAPS: usize = SILK_LTP_ORDER / 2;
+export const SILK_LTP_MAX_CHANNELS: usize = SILK_STATE_MAX_CHANNELS;
+export const SILK_LTP_MAX_NB_SUBFR: usize = SILK_MAX_NB_SUBFR;
+export const SILK_LTP_MAX_COEFS: usize = SILK_LTP_MAX_CHANNELS * SILK_LTP_MAX_NB_SUBFR * SILK_LTP_ORDER;
+
+fn smulww_i32(a: i32, b: i32) i32 {
+    return (((a as i64) * (b as i64)) >> 16) as i32;
+}
+
+export fn silk_ltp_validate_fs_khz(fs_khz: i32) !void {
+    if fs_khz == 8 || fs_khz == 12 || fs_khz == 16 {
+        return;
+    }
+    return error.SilkLtpError;
+}
+
+export fn silk_ltp_validate_pitch_lag(fs_khz: i32, pitch_lag: i32) !void {
+    try silk_ltp_validate_fs_khz(fs_khz);
+    const min_lag: i32 = SILK_MIN_PITCH_LAG_MS * fs_khz;
+    const max_lag: i32 = SILK_MAX_PITCH_LAG_MS * fs_khz;
+    if pitch_lag < min_lag || pitch_lag > max_lag {
+        return error.SilkLtpError;
+    }
+}
+
+export fn silk_ltp_tap_index(channel: i32, subframe: i32, tap: i32, channels: i32, nb_subframes: i32) !usize {
+    if channels < 1 || channels > (SILK_LTP_MAX_CHANNELS as i32) || nb_subframes < 1 || nb_subframes > (SILK_LTP_MAX_NB_SUBFR as i32) {
+        return error.SilkLtpError;
+    }
+    if channel < 0 || channel >= channels || subframe < 0 || subframe >= nb_subframes || tap < 0 || tap >= (SILK_LTP_ORDER as i32) {
+        return error.SilkLtpError;
+    }
+
+    return (channel as usize) * SILK_LTP_MAX_NB_SUBFR * SILK_LTP_ORDER
+        + (subframe as usize) * SILK_LTP_ORDER
+        + (tap as usize);
+}
+
+export fn silk_ltp_history_index(write_index: i32, pitch_lag: i32, tap: i32) !usize {
+    if pitch_lag <= 0 || tap < 0 || tap >= (SILK_LTP_ORDER as i32) {
+        return error.SilkLtpError;
+    }
+    const index: i32 = write_index - pitch_lag + (SILK_LTP_HISTORY_EXTRA_TAPS as i32) - tap;
+    if index < 0 {
+        return error.SilkLtpError;
+    }
+    return index as usize;
+}
+
+export fn silk_ltp_scale_history_q15(history_q15: &[i32], len: i32, gain_adj_q16: i32) !void {
+    if len < 0 || history_q15.len < (len as usize) || gain_adj_q16 < 0 {
+        return error.SilkLtpError;
+    }
+
+    var i: usize = 0;
+    while i < (len as usize) {
+        history_q15.ptr[i] = smulww_i32(gain_adj_q16, history_q15.ptr[i]);
+        i = i + 1;
+    }
+}
