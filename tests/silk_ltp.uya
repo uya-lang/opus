@@ -27,6 +27,15 @@ use src.opus.silk.ltp.silk_ltp_validate_pitch_lag;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_init;
 
+fn assert_i32_slice_eq(actual: &[i32], expected: &[i32]) !void {
+    try assert_eq_i32(actual.len as i32, expected.len as i32);
+    var i: usize = 0;
+    while i < actual.len {
+        try assert_eq_i32(actual.ptr[i], expected.ptr[i]);
+        i = i + 1;
+    }
+}
+
 test "silk ltp exposes order and history constants" {
     try assert_eq_i32(SILK_LTP_ORDER as i32, 5);
     try assert_eq_i32(SILK_LTP_HISTORY_EXTRA_TAPS as i32, 2);
@@ -199,14 +208,16 @@ test "silk ltp synthesis adds long-term prediction to q14 excitation" {
 
     try silk_ltp_synthesis_q14(&out_q14[0:6], &history_q15[0:40], &excitation_q14[0:6], &coeff_q14[0:5], 20, 6, 6);
 
-    try assert_eq_i32(out_q14[0], 14660);
-    try assert_eq_i32(out_q14[1], -8988);
-    try assert_eq_i32(out_q14[2], 4164);
-    try assert_eq_i32(out_q14[3], -284);
-    try assert_eq_i32(out_q14[4], 22932);
-    try assert_eq_i32(out_q14[5], -15374);
-    try assert_eq_i32(history_q15[20], 29320);
-    try assert_eq_i32(history_q15[25], -30748);
+    var expected_out_q14: [i32: 6] = [14660, -8988, 4164, -284, 22932, -15374];
+    var expected_history_q15: [i32: 40] = [
+        -81920, -77824, -73728, -69632, -65536, -61440, -57344, -53248,
+        -49152, -45056, -40960, -36864, -32768, -28672, -24576, -20480,
+        -16384, -12288, -8192, -4096, 29320, -17976, 8328, -568,
+        45864, -30748, 24576, 28672, 32768, 36864, 40960, 45056,
+        49152, 53248, 57344, 61440, 65536, 69632, 73728, 77824,
+    ];
+    try assert_i32_slice_eq(&out_q14[0:6], &expected_out_q14[0:6]);
+    try assert_i32_slice_eq(&history_q15[0:40], &expected_history_q15[0:40]);
 }
 
 test "silk ltp synthesis consumes generated history and validates bounds" {
@@ -222,12 +233,13 @@ test "silk ltp synthesis consumes generated history and validates bounds" {
 
     try silk_ltp_synthesis_q14(&out_q14[0:3], &history_q15[0:20], &excitation_q14[0:3], &coeff_q14[0:5], 10, 5, 3);
 
-    try assert_eq_i32(out_q14[0], 12504);
-    try assert_eq_i32(out_q14[1], 25004);
-    try assert_eq_i32(out_q14[2], 4);
-    try assert_eq_i32(history_q15[10], 25008);
-    try assert_eq_i32(history_q15[11], 50008);
-    try assert_eq_i32(history_q15[12], 8);
+    var expected_out_q14: [i32: 3] = [12504, 25004, 4];
+    var expected_history_q15: [i32: 20] = [
+        0, 0, 0, 6250, -12500, 25000, -50000, 100000, 0, 0,
+        25008, 50008, 8, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    try assert_i32_slice_eq(&out_q14[0:3], &expected_out_q14[0:3]);
+    try assert_i32_slice_eq(&history_q15[0:20], &expected_history_q15[0:20]);
 
     const too_early: !void = silk_ltp_synthesis_q14(&out_q14[0:3], &history_q15[0:20], &excitation_q14[0:3], &coeff_q14[0:5], 2, 5, 3);
     match too_early {

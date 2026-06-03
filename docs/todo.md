@@ -259,7 +259,7 @@
 - [x] 测试 shell coder vectors。
 - [x] 测试 NLSF stabilization。
 - [x] 测试 LPC synthesis golden。
-- [ ] 测试 LTP synthesis golden。
+- [x] 测试 LTP synthesis golden。
 
 验收标准：
 
