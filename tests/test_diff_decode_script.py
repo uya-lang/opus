@@ -7,6 +7,7 @@ import os
 import struct
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -41,6 +42,24 @@ class DiffDecodeScriptTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def write_fake_decoder(self, root: Path, output: bytes) -> Path:
+        script = root / "fake_decoder.py"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            + textwrap.dedent(
+                f"""
+                import pathlib
+                import sys
+
+                _sample_rate, _channels, _decode_fec, _input_path, output_path = sys.argv[1:6]
+                pathlib.Path(output_path).write_bytes({output!r})
+                """
+            ),
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return script
 
     def create_single_case_corpus(self, root: Path, reference: bytes) -> dict:
         (root / "packets").mkdir()
@@ -137,6 +156,29 @@ class DiffDecodeScriptTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             self.assertIn("one-packet", result.stdout)
+            self.assertIn("matched reference PCM", result.stdout)
+
+    def test_nonempty_corpus_can_generate_actual_pcm_with_decoder_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            actual = root / "actual"
+            corpus.mkdir()
+            reference = pcm_bytes([0, 1, -1])
+            self.create_single_case_corpus(corpus, reference)
+            decoder = self.write_fake_decoder(root, reference)
+
+            result = self.run_script(
+                corpus,
+                {
+                    "UOPUS_DECODE_CMD": str(decoder),
+                    "UOPUS_DIFF_ACTUAL_DIR": str(actual),
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((actual / "one-packet.s16le").is_file())
+            self.assertIn("generated: one-packet", result.stdout)
             self.assertIn("matched reference PCM", result.stdout)
 
 

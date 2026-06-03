@@ -155,12 +155,32 @@ the manifest references. A case passes when any declared reference passes the
 configured tolerance. Producing those actual files from the Uya decoder is the
 responsibility of `tools/diff_decode.sh`.
 
+`tools/generate_actual_decode.py` produces actual PCM files from manifest cases:
+
+```sh
+python3 tools/generate_actual_decode.py tests/vectors/manifest.json \
+  --actual-dir build/vectors/actual \
+  --decoder build/uopus-decode-vector
+```
+
+The decoder command is invoked once per enabled case as:
+
+```text
+<decoder> <sample_rate_hz> <channels> <decode_fec:0|1> <input.bit> <output.s16le>
+```
+
+`input.bit` always uses the opus_demo framing contract. Manifest `bitstream`
+cases pass their source file directly; manifest `packets` cases are converted
+to a temporary opus_demo-framed stream with zero final-range fields so the same
+decoder command shape can handle both source styles. The generator never copies
+reference PCM into the actual directory.
+
 `tools/diff_decode.sh tests/vectors` validates `tests/vectors/manifest.json`.
 An empty enabled case set is a successful no-op, which keeps the command usable
 while imported external corpus cases remain disabled. When enabled cases exist,
-the current script expects `UOPUS_DIFF_ACTUAL_DIR` to point at pre-generated
-`<case id>.s16le` files; wiring that directory to a raw packet decoder command
-is tracked as a later conformance task.
+the script either uses `UOPUS_DIFF_ACTUAL_DIR` as a pre-generated actual PCM
+directory or, when `UOPUS_DECODE_CMD` is set, runs
+`tools/generate_actual_decode.py` first and then diffs the generated files.
 
 ## Acceptance Commands
 

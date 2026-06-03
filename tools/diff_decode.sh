@@ -14,6 +14,7 @@ corpus_dir=$1
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/.." && pwd)
 runner="$repo_root/tools/vector_runner.py"
+generator="$repo_root/tools/generate_actual_decode.py"
 
 if [[ ! -d "$corpus_dir" ]]; then
     printf '%s\n' "error: corpus directory not found: $corpus_dir" >&2
@@ -34,13 +35,19 @@ if [[ "$case_count" == "0" ]]; then
     exit 0
 fi
 
+decoder_cmd=${UOPUS_DECODE_CMD:-}
 actual_dir=${UOPUS_DIFF_ACTUAL_DIR:-}
-if [[ -z "$actual_dir" ]]; then
+if [[ -n "$decoder_cmd" ]]; then
+    if [[ -z "$actual_dir" ]]; then
+        actual_dir="$repo_root/build/vectors/actual"
+    fi
+    mkdir -p "$actual_dir"
+    python3 "$generator" "$manifest" --corpus-root "$corpus_dir" --actual-dir "$actual_dir" --decoder "$decoder_cmd"
+elif [[ -z "$actual_dir" ]]; then
     printf '%s\n' \
-        "error: non-empty decoder corpus requires UOPUS_DIFF_ACTUAL_DIR with pre-generated <case id>.s16le files" >&2
+        "error: non-empty decoder corpus requires UOPUS_DIFF_ACTUAL_DIR with pre-generated <case id>.s16le files or UOPUS_DECODE_CMD to generate them" >&2
     exit 2
-fi
-if [[ ! -d "$actual_dir" ]]; then
+elif [[ ! -d "$actual_dir" ]]; then
     printf '%s\n' "error: actual PCM directory not found: $actual_dir" >&2
     exit 2
 fi

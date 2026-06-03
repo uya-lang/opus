@@ -351,7 +351,7 @@
     - [x] 导入/整理 decoder vector corpus 到 `tests/vectors/manifest.json`。
     - [x] 生成并记录 reference PCM hash。
     - [x] 实现 opus_demo `.bit` framing parser contract。
-    - [ ] 实现 actual PCM 生成器，按 manifest case 产生 `<case id>.s16le`。
+    - [x] 实现 actual PCM 生成器，按 manifest case 产生 `<case id>.s16le`。
     - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
