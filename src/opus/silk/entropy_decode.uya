@@ -94,6 +94,8 @@ export struct SilkEntropyDecoder {
     ltp_coefficients_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
     ltp_scale_indices: [i32: SILK_ENTROPY_FLAG_CAPACITY],
     ltp_scaling_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
+    random_seeds: [i32: SILK_ENTROPY_FLAG_CAPACITY],
+    random_seed_valid: [bool: SILK_ENTROPY_FLAG_CAPACITY],
 }
 
 fn clear_bool(values: &[bool]) void {
@@ -202,6 +204,17 @@ fn fill_uniform8_icdf(out: &[byte]) !void {
     var i: usize = 0;
     while i < 8 {
         out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn fill_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        return error.SilkEntropyDecodeError;
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
         i = i + 1;
     }
 }
@@ -510,6 +523,8 @@ export fn silk_entropy_decoder_init(decoder: &SilkEntropyDecoder, payload: &[byt
     clear_bool(&decoder.ltp_coefficients_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_i32(&decoder.ltp_scale_indices[0:SILK_ENTROPY_FLAG_CAPACITY]);
     clear_bool(&decoder.ltp_scaling_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_i32(&decoder.random_seeds[0:SILK_ENTROPY_FLAG_CAPACITY]);
+    clear_bool(&decoder.random_seed_valid[0:SILK_ENTROPY_FLAG_CAPACITY]);
 }
 
 export fn silk_entropy_decoder_flag_index(decoder: &const SilkEntropyDecoder, channel: i32, frame_index: i32) !usize {
@@ -1006,6 +1021,49 @@ export fn silk_entropy_decode_ltp_scaling(decoder: &SilkEntropyDecoder, control:
     control.ltp_scale_q14 = silk_ltp_scale_q14(scale_index);
     decoder.ltp_scale_indices[flag_index] = scale_index;
     decoder.ltp_scaling_valid[flag_index] = true;
+    try silk_entropy_decoder_check(decoder);
+}
+
+export fn silk_entropy_decode_random_seed(decoder: &SilkEntropyDecoder, control: &SilkDecoderControl, channel: i32, frame_index: i32) !void {
+    const flag_index: usize = try silk_entropy_decoder_flag_index(decoder, channel, frame_index);
+    if flag_index >= SILK_ENTROPY_FLAG_CAPACITY {
+        return error.SilkEntropyDecodeError;
+    }
+    if channel < 0 || channel >= decoder.channels {
+        return error.SilkEntropyDecodeError;
+    }
+    if !decoder.type_offset_valid[flag_index] {
+        return error.SilkEntropyDecodeError;
+    }
+    const signal_type: i32 = decoder.signal_types[flag_index];
+    if signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED {
+        return error.SilkEntropyDecodeError;
+    }
+    if signal_type == SILK_SIGNAL_TYPE_VOICED && !decoder.ltp_scaling_valid[flag_index] {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.channels != decoder.channels || channel >= control.channels {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.nb_subframes < 1 || control.nb_subframes > (SILK_ENTROPY_MAX_NB_SUBFR as i32) {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.fs_khz != 8 && control.fs_khz != 12 && control.fs_khz != 16 {
+        return error.SilkEntropyDecodeError;
+    }
+    if control.frame_length <= 0 || control.subframe_length <= 0 {
+        return error.SilkEntropyDecodeError;
+    }
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try fill_uniform4_icdf(&seed_icdf[0:4]);
+    const seed: i32 = try silk_entropy_decode_icdf(decoder, &seed_icdf[0:4], 8);
+    if seed < 0 || seed > 3 {
+        return error.SilkEntropyDecodeError;
+    }
+    decoder.random_seeds[flag_index] = seed;
+    decoder.random_seed_valid[flag_index] = true;
+    control.seed = seed;
     try silk_entropy_decoder_check(decoder);
 }
 

@@ -23,6 +23,7 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_nlsf_indices;
 use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_contour;
 use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_lag;
 use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
+use src.opus.silk.entropy_decode.silk_entropy_decode_random_seed;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
@@ -587,6 +588,17 @@ fn fill_test_ltp_scale_icdf(out: &[byte]) !void {
     }
 }
 
+fn fill_test_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        try assert(false, "uniform4 helper needs 4 entries");
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
+        i = i + 1;
+    }
+}
+
 fn encode_ltp_coefficients_payload(packet: &[byte], type_offset_symbol: i32, fs_khz: i32, nb_subframes: i32, lag_index: i32, contour_index: i32, periodicity_index: i32, cb0: i32, cb1: i32, cb2: i32, cb3: i32) !void {
     var enc: EcEnc = EcEnc{};
     ec_enc_init(&enc, packet);
@@ -646,6 +658,60 @@ fn encode_ltp_scaling_payload(packet: &[byte], type_offset_symbol: i32, fs_khz: 
     var scale_icdf: [byte: 3] = [0: 3];
     try fill_test_ltp_scale_icdf(&scale_icdf[0:3]);
     ec_enc_icdf(&enc, scale_index, &scale_icdf[0:3], 8);
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn encode_random_seed_payload(packet: &[byte], type_offset_symbol: i32, fs_khz: i32, nb_subframes: i32, lag_index: i32, contour_index: i32, periodicity_index: i32, cb0: i32, cb1: i32, cb2: i32, cb3: i32, scale_index: i32, seed: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], true);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+    try encode_pitch_lag_absolute(&enc, fs_khz, lag_index);
+
+    var contour_icdf: [byte: 34] = [0: 34];
+    const contour_len: usize = try fill_pitch_contour_icdf(&contour_icdf[0:34], fs_khz, nb_subframes);
+    ec_enc_icdf(&enc, contour_index, &contour_icdf[0:contour_len], 8);
+
+    var per_icdf: [byte: 3] = [0: 3];
+    try fill_test_ltp_periodicity_icdf(&per_icdf[0:3]);
+    ec_enc_icdf(&enc, periodicity_index, &per_icdf[0:3], 8);
+
+    var gain_icdf: [byte: 32] = [0: 32];
+    const gain_len: usize = try fill_test_ltp_gain_icdf(&gain_icdf[0:32], periodicity_index);
+    ec_enc_icdf(&enc, cb0, &gain_icdf[0:gain_len], 8);
+    ec_enc_icdf(&enc, cb1, &gain_icdf[0:gain_len], 8);
+    if nb_subframes > 2 {
+        ec_enc_icdf(&enc, cb2, &gain_icdf[0:gain_len], 8);
+        ec_enc_icdf(&enc, cb3, &gain_icdf[0:gain_len], 8);
+    }
+
+    var scale_icdf: [byte: 3] = [0: 3];
+    try fill_test_ltp_scale_icdf(&scale_icdf[0:3]);
+    ec_enc_icdf(&enc, scale_index, &scale_icdf[0:3], 8);
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try fill_test_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(&enc, seed, &seed_icdf[0:4], 8);
+
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+fn encode_unvoiced_seed_payload(packet: &[byte], type_offset_symbol: i32, seed: i32) !void {
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+
+    var type_icdf: [byte: 4] = [0: 4];
+    const type_icdf_len: usize = fill_type_offset_icdf(&type_icdf[0:4], true);
+    ec_enc_icdf(&enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try fill_test_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(&enc, seed, &seed_icdf[0:4], 8);
 
     _ = try ec_enc_done(&enc);
     try ec_enc_check(&enc);
@@ -1399,5 +1465,81 @@ test "silk entropy decoder rejects LTP scaling before coefficients" {
     match result {
         error.SilkEntropyDecodeError => {}
         else => { try assert(false, "LTP scaling decode must require decoded coefficients"); }
+    }
+}
+
+test "silk entropy decoder decodes voiced random seed after LTP scaling" {
+    var packet: [byte: 64] = [0: 64];
+    try encode_random_seed_payload(&packet[0:64], 2, 16, 4, 101, 10, 2, 0, 7, 18, 31, 1, 3);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:64], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_pitch_lag(&dec, &control, 0, 0, false);
+    try silk_entropy_decode_pitch_contour(&dec, &control, 0, 0);
+    try silk_entropy_decode_ltp_coefficients(&dec, &control, 0, 0);
+    try silk_entropy_decode_ltp_scaling(&dec, &control, 0, 0, false);
+    try silk_entropy_decode_random_seed(&dec, &control, 0, 0);
+
+    try assert(dec.random_seed_valid[0], "random seed for voiced frame is cached");
+    try assert_eq_i32(dec.random_seeds[0], 3);
+    try assert_eq_i32(control.seed, 3);
+}
+
+test "silk entropy decoder decodes unvoiced random seed" {
+    var packet: [byte: 16] = [0: 16];
+    try encode_unvoiced_seed_payload(&packet[0:16], 0, 2);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:16], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_random_seed(&dec, &control, 0, 0);
+
+    try assert_eq_i32(dec.random_seeds[0], 2);
+    try assert_eq_i32(control.seed, 2);
+}
+
+test "silk entropy decoder rejects voiced random seed before LTP scaling" {
+    var packet: [byte: 64] = [0: 64];
+    try encode_random_seed_payload(&packet[0:64], 2, 16, 4, 101, 10, 2, 0, 7, 18, 31, 1, 3);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:64], 1, 1);
+    dec.vad_flags[0] = true;
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&dec, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_pitch_lag(&dec, &control, 0, 0, false);
+    try silk_entropy_decode_pitch_contour(&dec, &control, 0, 0);
+    try silk_entropy_decode_ltp_coefficients(&dec, &control, 0, 0);
+
+    const result: !void = silk_entropy_decode_random_seed(&dec, &control, 0, 0);
+    match result {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "voiced random seed decode must require LTP scaling"); }
     }
 }

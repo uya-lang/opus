@@ -279,7 +279,7 @@
 - [x] 解码 pitch contour。
 - [x] 解码 LTP coefficients。
 - [x] 解码 LTP scaling。
-- [ ] 解码 random seed。
+- [x] 解码 random seed。
 - [ ] 解码 pulse blocks。
 - [ ] 实现 excitation reconstruction。
 - [ ] 集成 LTP/LPC synthesis。
