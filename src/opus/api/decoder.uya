@@ -11,6 +11,8 @@ use src.opus.core.errors.validate_decoder_config;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
 use src.opus.core.constants.SAMPLE_RATE_48K;
+use src.opus.core.qformat.Q8_ONE;
+use src.opus.core.saturate.sat16;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
@@ -40,11 +42,13 @@ export error DecoderApiUnsupported;
 
 const DECODER_OUTPUT_SCRATCH_SAMPLES: usize = 5760;
 const DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3;
+const DECODER_GAIN_Q8_MAX: i32 = 65536;
 
 export struct OpusDecoder {
     config: OpusDecoderConfig,
     resampler: ResamplerConfig,
     silk_resampler: ResamplerConfig,
+    gain_q8: i32,
     active_mode: OpusMode,
     celt: CeltDecoderState,
     celt_scratch: CeltMonoDecodeScratch,
@@ -148,6 +152,37 @@ fn decoder_resample_output_i16(decoder: &OpusDecoder, decoded_frame_size_48k: i3
     return output_frame_size;
 }
 
+fn decoder_round_q8_to_i32(value_q8: i64) i32 {
+    if value_q8 >= 0L {
+        return ((value_q8 + 128L) >> 8) as i32;
+    }
+    return (0L - (((0L - value_q8) + 128L) >> 8)) as i32;
+}
+
+fn decoder_apply_gain_q8(decoder: &const OpusDecoder, pcm: &[i16], sample_count: usize) void {
+    if decoder.gain_q8 == Q8_ONE {
+        return;
+    }
+
+    var i: usize = 0;
+    while i < sample_count {
+        const scaled_q8: i64 = (pcm.ptr[i] as i64) * (decoder.gain_q8 as i64);
+        pcm.ptr[i] = sat16(decoder_round_q8_to_i32(scaled_q8));
+        i = i + 1;
+    }
+}
+
+fn decoder_apply_output_gain_q8(decoder: &const OpusDecoder, pcm: &[i16], frame_size: i32) !void {
+    if frame_size < 0 {
+        return error.DecoderApiError;
+    }
+    const sample_count: usize = (frame_size as usize) * (decoder.config.channels as usize);
+    if sample_count > pcm.len {
+        return error.DecoderApiError;
+    }
+    decoder_apply_gain_q8(decoder, pcm, sample_count);
+}
+
 export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) !void {
     validate_decoder_config(config) catch {
         return error.DecoderApiError;
@@ -160,6 +195,7 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     decoder.silk_resampler = resampler_config_init(SILK_MAX_INTERNAL_RATE_HZ as u32, config.sample_rate_hz, config.channels as u32, DECODER_SILK_PACKET_SCRATCH_SAMPLES) catch {
         return error.DecoderApiError;
     };
+    decoder.gain_q8 = Q8_ONE;
     decoder.active_mode = OpusMode.CELT;
     decoder.celt_scratch = CeltMonoDecodeScratch{};
     decoder.celt_plc_scratch = CeltPlcScratch{};
@@ -171,6 +207,16 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
         return error.DecoderApiError;
     };
     decoder.last_frame_size_48k = decoder.celt.frame_size;
+}
+
+export fn decoder_set_gain_q8(decoder: &OpusDecoder, gain_q8: i32) !void {
+    validate_decoder_config(&decoder.config) catch {
+        return error.DecoderApiError;
+    };
+    if gain_q8 < 0 || gain_q8 > DECODER_GAIN_Q8_MAX {
+        return error.DecoderApiError;
+    }
+    decoder.gain_q8 = gain_q8;
 }
 
 export fn decoder_reset(decoder: &OpusDecoder) !void {
@@ -233,7 +279,9 @@ fn decoder_decode_empty_packet_48k_i16(decoder: &OpusDecoder, pcm: &[i16], frame
 fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_size: i32) !i32 {
     const frame_size_48k: i32 = try decoder_frame_size_48k_for_output(decoder, frame_size);
     if resampler_is_identity(&decoder.resampler) {
-        return decoder_decode_empty_packet_48k_i16(decoder, pcm, frame_size_48k);
+        const decoded_48k: i32 = try decoder_decode_empty_packet_48k_i16(decoder, pcm, frame_size_48k);
+        try decoder_apply_output_gain_q8(decoder, pcm, decoded_48k);
+        return decoded_48k;
     }
 
     _ = try decoder_validate_output_frame_request(decoder, pcm, frame_size);
@@ -243,13 +291,15 @@ fn decoder_decode_empty_packet_i16(decoder: &OpusDecoder, pcm: &[i16], frame_siz
         &decoder.output_scratch_i16[0:input_required],
         frame_size_48k,
     );
-    return decoder_resample_output_i16(
+    const output_frame_size: i32 = try decoder_resample_output_i16(
         decoder,
         decoded,
         &decoder.output_scratch_i16[0:input_required],
         pcm,
         frame_size,
     );
+    try decoder_apply_output_gain_q8(decoder, pcm, output_frame_size);
+    return output_frame_size;
 }
 
 fn decoder_decode_celt_parsed_48k_i16(decoder: &OpusDecoder, packet: &[byte], parsed: &const PacketParseResult, pcm: &[i16]) !i32 {
@@ -295,7 +345,9 @@ fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
     _ = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
     if resampler_is_identity(&decoder.resampler) {
-        return decoder_decode_celt_parsed_48k_i16(decoder, packet, parsed, pcm);
+        const decoded_48k: i32 = try decoder_decode_celt_parsed_48k_i16(decoder, packet, parsed, pcm);
+        try decoder_apply_output_gain_q8(decoder, pcm, decoded_48k);
+        return decoded_48k;
     }
 
     const input_required: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
@@ -305,13 +357,15 @@ fn decoder_decode_celt_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed
         parsed,
         &decoder.output_scratch_i16[0:input_required],
     );
-    return decoder_resample_output_i16(
+    const output_frame_size: i32 = try decoder_resample_output_i16(
         decoder,
         decoded,
         &decoder.output_scratch_i16[0:input_required],
         pcm,
         frame_size,
     );
+    try decoder_apply_output_gain_q8(decoder, pcm, output_frame_size);
+    return output_frame_size;
 }
 
 fn decoder_supports_hybrid_packet_info(info: &const PacketInfo) bool {
@@ -375,7 +429,9 @@ fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], pars
     const decoded_frame_size: i32 = parsed.info.duration_samples_48k as i32;
     _ = try decoder_prepare_output_for_48k(decoder, pcm, frame_size, decoded_frame_size);
     if resampler_is_identity(&decoder.resampler) {
-        return decoder_decode_hybrid_parsed_48k_i16(decoder, packet, parsed, pcm);
+        const decoded_48k: i32 = try decoder_decode_hybrid_parsed_48k_i16(decoder, packet, parsed, pcm);
+        try decoder_apply_output_gain_q8(decoder, pcm, decoded_48k);
+        return decoded_48k;
     }
 
     const input_required: usize = (decoded_frame_size as usize) * (decoder.config.channels as usize);
@@ -385,13 +441,15 @@ fn decoder_decode_hybrid_parsed_i16(decoder: &OpusDecoder, packet: &[byte], pars
         parsed,
         &decoder.output_scratch_i16[0:input_required],
     );
-    return decoder_resample_output_i16(
+    const output_frame_size: i32 = try decoder_resample_output_i16(
         decoder,
         decoded,
         &decoder.output_scratch_i16[0:input_required],
         pcm,
         frame_size,
     );
+    try decoder_apply_output_gain_q8(decoder, pcm, output_frame_size);
+    return output_frame_size;
 }
 
 fn decoder_silk_native_samples_per_channel(params: &const SilkFrameParams) !usize {
@@ -487,6 +545,7 @@ fn decoder_decode_silk_parsed_i16(decoder: &OpusDecoder, packet: &[byte], parsed
     }
     decoder.active_mode = OpusMode.SILK;
     decoder.last_frame_size_48k = parsed.info.duration_samples_48k as i32;
+    try decoder_apply_output_gain_q8(decoder, pcm, output_frame_size);
     return output_frame_size;
 }
 

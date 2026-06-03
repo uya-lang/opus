@@ -7,6 +7,7 @@ use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.api.decoder.decoder_init;
 use src.opus.api.decoder.decoder_reset;
+use src.opus.api.decoder.decoder_set_gain_q8;
 use src.opus.celt.state.CELT_DECODE_MEM;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
@@ -325,6 +326,66 @@ test "decoder reset clears state while preserving output config" {
     const decoded_after_reset: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm_after_reset[0:40], 40, false);
     try assert_eq_i32(decoded_after_reset, 40);
     try assert(decoder.active_mode == OpusMode.CELT, "decoder must remain usable after reset");
+}
+
+test "decoder api applies linear gain q8 to output pcm" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    const negative_gain: !void = decoder_set_gain_q8(&decoder, -1);
+    match negative_gain {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder gain must reject negative linear Q8 values"); }
+    }
+
+    const oversized_gain: !void = decoder_set_gain_q8(&decoder, 65537);
+    match oversized_gain {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder gain must reject oversized linear Q8 values"); }
+    }
+
+    const half_gain_q8: i32 = 128;
+    try decoder_set_gain_q8(&decoder, half_gain_q8);
+    const tail: usize = CELT_DECODE_MEM - 120;
+    decoder.celt.decode_mem[tail] = 1000;
+
+    var empty_packet: [byte: 1] = [0];
+    var half_pcm: [i16: 120] = [0: 120];
+    const half_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &half_pcm[0:120], 120, false);
+    try assert_eq_i32(half_decoded, 120);
+    try assert_eq_i32(half_pcm[0] as i32, 500);
+
+    const double_gain_q8: i32 = 512;
+    try decoder_set_gain_q8(&decoder, double_gain_q8);
+    try decoder_reset(&decoder);
+    decoder.celt.decode_mem[tail] = 20000;
+    decoder.celt.decode_mem[tail + 1] = -20000;
+
+    var saturated_pcm: [i16: 120] = [0: 120];
+    const saturated_decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &saturated_pcm[0:120], 120, false);
+    try assert_eq_i32(saturated_decoded, 120);
+    try assert_eq_i32(saturated_pcm[0] as i32, 32767);
+    try assert_eq_i32(saturated_pcm[1] as i32, -32768);
+}
+
+test "decoder api applies gain after output resampling" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+    try decoder_set_gain_q8(&decoder, 512);
+
+    const tail: usize = CELT_DECODE_MEM - 120;
+    decoder.celt.decode_mem[tail] = 30000;
+    decoder.celt.decode_mem[tail + 1] = 30000;
+    decoder.celt.decode_mem[tail + 2] = -30000;
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 40] = [0: 40];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:40], 40, false);
+
+    try assert_eq_i32(decoded, 40);
+    try assert_eq_i32(pcm[0] as i32, 20000);
 }
 
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
