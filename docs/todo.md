@@ -353,6 +353,8 @@
     - [x] 实现 opus_demo `.bit` framing parser contract。
     - [x] 实现 actual PCM 生成器，按 manifest case 产生 `<case id>.s16le`。
     - [x] 实现 Uya opus_demo actual decoder CLI，满足 `UOPUS_DECODE_CMD` contract。
+    - [x] 试运行 RFC8251 manifest cases，记录首个 actual decode/diff 阻塞点。
+    - [ ] 根据 RFC8251 试运行结果修复 decoder 或 vector plumbing。
     - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 

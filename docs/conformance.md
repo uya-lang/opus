@@ -183,6 +183,33 @@ the script either uses `UOPUS_DIFF_ACTUAL_DIR` as a pre-generated actual PCM
 directory or, when `UOPUS_DECODE_CMD` is set, runs
 `tools/generate_actual_decode.py` first and then diffs the generated files.
 
+## RFC8251 Full-Corpus Probe
+
+A full-corpus probe with all 120 RFC8251 manifest cases enabled reaches the
+Uya decoder and fails at the first actual PCM generation case:
+
+```sh
+python3 tools/generate_actual_decode.py /tmp/uopus-rfc8251-full-manifest.json \
+  --corpus-root tests/vectors \
+  --actual-dir /tmp/uopus-rfc8251-actual \
+  --decoder build/uopus-decode-vector
+```
+
+Current result:
+
+```text
+error: actual decode failed for rfc8251-testvector01-8000-mono: exit 1: uopus-decode-vector: decode failed
+```
+
+`tests/vectors/rfc8251/testvector01.bit` validates as an opus_demo stream with
+2147 packets. Its first packet is 731 bytes with TOC `0xff` and count byte
+`0x83`, which is a CELT fullband stereo code-3 packet with three VBR frames.
+The current public decoder CELT path accepts only single-frame CELT packets and
+requires the packet channel count to match the configured output channel count.
+The next RFC8251 step should therefore start by supporting multi-frame CELT
+packets and the official mono/stereo output cases before enabling manifest
+cases permanently.
+
 ## Acceptance Commands
 
 At the empty-skeleton stage, conformance documentation is accepted by:
