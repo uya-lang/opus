@@ -1,0 +1,93 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
+use src.opus.silk.entropy_decode.SILK_ENTROPY_MAX_FRAMES_PER_PACKET;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_bit_logp;
+use src.opus.silk.entropy_decode.silk_entropy_decode_icdf;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_flag_index;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_set_frame;
+
+fn encode_test_payload(packet: &[byte]) !void {
+    const icdf: [byte: 4] = [200, 100, 40, 0];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, packet);
+    ec_enc_icdf(&enc, 2, &icdf[0:4], 8);
+    ec_enc_bit_logp(&enc, 1, 3);
+    _ = try ec_enc_done(&enc);
+    try ec_enc_check(&enc);
+}
+
+test "silk entropy decoder initializes layout and reads range symbols" {
+    var packet: [byte: 32] = [0: 32];
+    try encode_test_payload(&packet[0:32]);
+
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:32], 2, 3);
+
+    try assert_eq_i32(dec.channels, 2);
+    try assert_eq_i32(dec.frames_per_packet, 3);
+    try assert_eq_i32(dec.current_frame, 0);
+    try assert_eq_i32(dec.ec.storage as i32, 32);
+    try assert_eq_i32(SILK_ENTROPY_MAX_FRAMES_PER_PACKET as i32, 12);
+    try assert_eq_i32((try silk_entropy_decoder_flag_index(&dec, 0, 0)) as i32, 0);
+    try assert_eq_i32((try silk_entropy_decoder_flag_index(&dec, 1, 2)) as i32, 14);
+
+    try silk_entropy_decoder_set_frame(&dec, 2);
+    try assert_eq_i32(dec.current_frame, 2);
+
+    const icdf: [byte: 4] = [200, 100, 40, 0];
+    try assert_eq_i32(try silk_entropy_decode_icdf(&dec, &icdf[0:4], 8), 2);
+    try assert_eq_i32(try silk_entropy_decode_bit_logp(&dec, 3), 1);
+    try silk_entropy_decoder_check(&dec);
+}
+
+test "silk entropy decoder validates layout indexes and cdfs" {
+    var packet: [byte: 8] = [0: 8];
+    var dec: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&dec, &packet[0:8], 1, 2);
+
+    const bad_channels: !void = silk_entropy_decoder_init(&dec, &packet[0:8], 3, 1);
+    match bad_channels {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy decode must reject channels above stereo"); }
+    }
+
+    const bad_frames: !void = silk_entropy_decoder_init(&dec, &packet[0:8], 1, 13);
+    match bad_frames {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy decode must reject packet frame counts above 120 ms / 10 ms"); }
+    }
+
+    const empty_payload: !void = silk_entropy_decoder_init(&dec, &packet[0:0], 1, 1);
+    match empty_payload {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy decode must reject empty range payloads"); }
+    }
+
+    const bad_index: !usize = silk_entropy_decoder_flag_index(&dec, 1, 0);
+    match bad_index {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy flag index must reject inactive channels"); }
+    }
+
+    const bad_frame: !void = silk_entropy_decoder_set_frame(&dec, 2);
+    match bad_frame {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy decoder must reject inactive frame index"); }
+    }
+
+    const bad_icdf: [byte: 3] = [200, 210, 0];
+    const icdf_result: !i32 = silk_entropy_decode_icdf(&dec, &bad_icdf[0:3], 8);
+    match icdf_result {
+        error.SilkEntropyDecodeError => {}
+        else => { try assert(false, "SILK entropy decode must reject non-monotonic iCDFs"); }
+    }
+}

@@ -268,7 +268,7 @@
 
 ## 10. SILK-only Decoder
 
-- [ ] 实现 `silk/entropy_decode.uya`。
+- [x] 实现 `silk/entropy_decode.uya`。
 - [ ] 解码 VAD flags。
 - [ ] 解码 LBRR flags。
 - [ ] 解码 signal type。
