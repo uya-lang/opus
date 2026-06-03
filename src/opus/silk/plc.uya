@@ -1,3 +1,4 @@
+use src.opus.core.saturate.sat32;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
@@ -13,6 +14,7 @@ export error SilkPlcError;
 
 export const SILK_PLC_MAX_LOSS_COUNT: i32 = 127;
 export const SILK_PLC_HISTORY_WRITE_INDEX: usize = 304;
+export const SILK_PLC_ENERGY_DECAY_Q16: i32 = 57344;
 
 export struct SilkPlcContext {
     channels: i32,
@@ -215,6 +217,21 @@ fn silk_plc_update_history_q14(state: &SilkDecoderState, channel: i32, frame_q14
     }
 }
 
+fn silk_plc_apply_energy_decay_q14(frame_q14: &[i32], frame_len: usize, loss_count: i32) !void {
+    if frame_q14.len < frame_len || loss_count < 0 {
+        return error.SilkPlcError;
+    }
+    if loss_count == 0 {
+        return;
+    }
+
+    var i: usize = 0;
+    while i < frame_len {
+        frame_q14.ptr[i] = sat32(((frame_q14.ptr[i] as i64) * (SILK_PLC_ENERGY_DECAY_Q16 as i64)) >> 16);
+        i = i + 1;
+    }
+}
+
 export fn silk_plc_conceal_frame_q14(state: &SilkDecoderState, channel: i32, out_q14: &[i32]) !usize {
     var context: SilkPlcContext = SilkPlcContext{};
     try silk_plc_context_from_state(&context, state);
@@ -230,6 +247,7 @@ export fn silk_plc_conceal_frame_q14(state: &SilkDecoderState, channel: i32, out
     }
 
     try silk_plc_copy_previous_frame_q14(state, channel, &out_q14[0:frame_len], frame_len);
+    try silk_plc_apply_energy_decay_q14(&out_q14[0:frame_len], frame_len, context.loss_count);
     try silk_plc_update_history_q14(state, channel, &out_q14[0:frame_len], frame_len);
     try silk_plc_mark_lost_frame(state);
     return frame_len;

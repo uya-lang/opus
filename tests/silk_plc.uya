@@ -2,6 +2,7 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.plc.SILK_PLC_ENERGY_DECAY_Q16;
 use src.opus.silk.plc.SILK_PLC_MAX_LOSS_COUNT;
 use src.opus.silk.plc.SilkPlcContext;
 use src.opus.silk.plc.silk_plc_conceal_frame_q14;
@@ -143,4 +144,26 @@ test "silk plc concealment validates channel and output bounds" {
         error.SilkPlcError => {}
         else => { try assert(false, "PLC concealment must reject output shorter than one SILK frame"); }
     }
+}
+
+test "silk plc concealment decays energy across consecutive losses" {
+    try assert_eq_i32(SILK_PLC_ENERGY_DECAY_Q16, 57344);
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    try silk_state_init(&state, 1, 16000, 20);
+    state.history_q14[304] = 8000;
+    state.history_q14[305] = -8000;
+
+    var first_q14: [i32: 320] = [0: 320];
+    var second_q14: [i32: 320] = [0: 320];
+    _ = try silk_plc_conceal_frame_q14(&state, 0, &first_q14[0:320]);
+    _ = try silk_plc_conceal_frame_q14(&state, 0, &second_q14[0:320]);
+
+    try assert_eq_i32(first_q14[0], 8000);
+    try assert_eq_i32(first_q14[1], -8000);
+    try assert_eq_i32(second_q14[0], 7000);
+    try assert_eq_i32(second_q14[1], -7000);
+    try assert_eq_i32(state.loss_count, 2);
+    try assert_eq_i32(state.history_q14[304], 7000);
+    try assert_eq_i32(state.history_q14[305], -7000);
 }
