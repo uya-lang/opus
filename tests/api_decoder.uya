@@ -100,6 +100,58 @@ test "decoder api smoke initializes inspects decodes conceals and resets" {
     try assert(concealed_pcm[119] != 555, "smoke PLC must write the requested PCM frame after reset");
 }
 
+test "decoder api rejects illegal public parameters" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const zero_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 0, channels: 1 };
+    const zero_rate_result: !void = decoder_init(&decoder, &zero_rate);
+    match zero_rate_result {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder init must reject zero sample rate"); }
+    }
+
+    const too_many_channels: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 3 };
+    const too_many_channels_result: !void = decoder_init(&decoder, &too_many_channels);
+    match too_many_channels_result {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder init must reject channel counts above stereo"); }
+    }
+
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 120] = [0: 120];
+
+    const zero_frame: !i32 = decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:120], 0, false);
+    match zero_frame {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder decode must reject zero frame size"); }
+    }
+
+    const unsupported_frame: !i32 = decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:120], 123, false);
+    match unsupported_frame {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder decode must reject unsupported frame size"); }
+    }
+
+    const bad_fec_frame: !i32 = decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:120], -120, true);
+    match bad_fec_frame {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder FEC path must reject negative frame size"); }
+    }
+
+    const negative_gain: !void = decoder_set_gain_q8(&decoder, -1);
+    match negative_gain {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder gain must reject negative linear Q8 values"); }
+    }
+
+    const oversized_gain: !void = decoder_set_gain_q8(&decoder, 65537);
+    match oversized_gain {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder gain must reject oversized linear Q8 values"); }
+    }
+}
+
 test "decoder api empty packet invokes celt plc" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };

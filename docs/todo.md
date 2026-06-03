@@ -361,7 +361,7 @@
 - [x] 拆分 decoder 常驻 history 和 scratch。
 - [x] 确认 Hybrid glue 不复制 SILK/CELT 大型 history buffer。
 - [x] 写 API smoke tests。
-- [ ] 写非法参数 tests。
+- [x] 写非法参数 tests。
 - [ ] 写小型 raw packet stream decode test。
 
 验收标准：
