@@ -7,6 +7,7 @@ use src.opus.silk.nlsf.SILK_NLSF_Q15_ONE;
 use src.opus.silk.nlsf.silk_nlsf_decode_q15;
 use src.opus.silk.nlsf.silk_nlsf_interpolate_q15;
 use src.opus.silk.nlsf.silk_nlsf_is_sorted_q15;
+use src.opus.silk.nlsf.silk_nlsf_stabilize_q15;
 use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
 use src.opus.silk.nlsf.silk_nlsf_validate_order;
 use src.opus.silk.nlsf.silk_nlsf_validate_stable_q15;
@@ -137,5 +138,36 @@ test "silk nlsf decode reconstructs q15 vectors from decoded indices" {
     match bad_cb1 {
         error.SilkNlsfError => {}
         else => { try assert(false, "NLSF decode must reject missing first-stage index"); }
+    }
+}
+
+test "silk nlsf stabilization enforces borders and minimum deltas" {
+    var nlsf: [i16: 10] = [20, 100, 105, 110, 900, 1200, 1250, 2000, 3000, 32760];
+    var delta_min: [i16: 11] = [100, 40, 40, 40, 40, 40, 40, 40, 40, 40, 120];
+    try silk_nlsf_stabilize_q15(&nlsf[0:10], &delta_min[0:11], 10);
+
+    try assert_eq_i32(nlsf[0] as i32, 100);
+    try assert_eq_i32(nlsf[1] as i32, 140);
+    try assert_eq_i32(nlsf[2] as i32, 180);
+    try assert_eq_i32(nlsf[3] as i32, 220);
+    try assert_eq_i32(nlsf[9] as i32, 32648);
+    try silk_nlsf_validate_stable_q15(&nlsf[0:10], &delta_min[0:11], 10);
+}
+
+test "silk nlsf stabilization fallback sorts severely unstable vectors" {
+    var nlsf: [i16: 10] = [3000, 1200, 900, 600, 500, 400, 300, 200, 100, 50];
+    var delta_min: [i16: 11] = [250, 3, 6, 3, 3, 3, 4, 3, 3, 3, 461];
+    try silk_nlsf_stabilize_q15(&nlsf[0:10], &delta_min[0:11], 10);
+
+    try assert_eq_i32(nlsf[0] as i32, 250);
+    try assert_eq_i32(nlsf[1] as i32, 253);
+    try assert_eq_i32(nlsf[2] as i32, 326);
+    try assert_eq_i32(nlsf[9] as i32, 1482);
+    try silk_nlsf_validate_stable_q15(&nlsf[0:10], &delta_min[0:11], 10);
+
+    const short_delta: !void = silk_nlsf_stabilize_q15(&nlsf[0:10], &delta_min[0:10], 10);
+    match short_delta {
+        error.SilkNlsfError => {}
+        else => { try assert(false, "stabilizer must require order + 1 delta entries"); }
     }
 }

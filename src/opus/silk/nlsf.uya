@@ -193,3 +193,127 @@ export fn silk_nlsf_decode_q15(out_q15: &[i16], indices: &[i16], codebook: i32) 
         i = i + 1;
     }
 }
+
+fn clamp_i32(value: i32, low: i32, high: i32) i32 {
+    if value < low {
+        return low;
+    }
+    if value > high {
+        return high;
+    }
+    return value;
+}
+
+fn round_shift_right_1(value: i32) i32 {
+    if value >= 0 {
+        return (value + 1) >> 1;
+    }
+    return -(((-value) + 1) >> 1);
+}
+
+fn insertion_sort_i16(values: &[i16], len: usize) void {
+    var i: usize = 1;
+    while i < len {
+        const key: i16 = values.ptr[i];
+        var j: usize = i;
+        while j > 0 && values.ptr[j - 1] > key {
+            values.ptr[j] = values.ptr[j - 1];
+            j = j - 1;
+        }
+        values.ptr[j] = key;
+        i = i + 1;
+    }
+}
+
+export fn silk_nlsf_stabilize_q15(nlsf_q15: &[i16], delta_min_q15: &[i16], order: i32) !void {
+    try silk_nlsf_validate_order(order);
+    if nlsf_q15.len < (order as usize) || delta_min_q15.len < (order as usize) + 1 {
+        return error.SilkNlsfError;
+    }
+    var i: usize = 0;
+    while i < (order as usize) + 1 {
+        if delta_min_q15.ptr[i] <= 0 {
+            return error.SilkNlsfError;
+        }
+        i = i + 1;
+    }
+
+    var loops: i32 = 0;
+    while loops < 20 {
+        var min_diff_q15: i32 = (nlsf_q15.ptr[0] as i32) - (delta_min_q15.ptr[0] as i32);
+        var min_index: i32 = 0;
+
+        i = 1;
+        while i < (order as usize) {
+            const diff_q15: i32 = (nlsf_q15.ptr[i] as i32) - ((nlsf_q15.ptr[i - 1] as i32) + (delta_min_q15.ptr[i] as i32));
+            if diff_q15 < min_diff_q15 {
+                min_diff_q15 = diff_q15;
+                min_index = i as i32;
+            }
+            i = i + 1;
+        }
+
+        const upper_diff_q15: i32 = SILK_NLSF_Q15_ONE - ((nlsf_q15.ptr[(order as usize) - 1] as i32) + (delta_min_q15.ptr[order as usize] as i32));
+        if upper_diff_q15 < min_diff_q15 {
+            min_diff_q15 = upper_diff_q15;
+            min_index = order;
+        }
+
+        if min_diff_q15 >= 0 {
+            return;
+        }
+
+        if min_index == 0 {
+            nlsf_q15.ptr[0] = delta_min_q15.ptr[0];
+        } else if min_index == order {
+            nlsf_q15.ptr[(order as usize) - 1] = (SILK_NLSF_Q15_ONE - (delta_min_q15.ptr[order as usize] as i32)) as i16;
+        } else {
+            var min_center_q15: i32 = 0;
+            var k: usize = 0;
+            while k < (min_index as usize) {
+                min_center_q15 = min_center_q15 + (delta_min_q15.ptr[k] as i32);
+                k = k + 1;
+            }
+            min_center_q15 = min_center_q15 + ((delta_min_q15.ptr[min_index as usize] as i32) >> 1);
+
+            var max_center_q15: i32 = SILK_NLSF_Q15_ONE;
+            k = order as usize;
+            while k > (min_index as usize) {
+                max_center_q15 = max_center_q15 - (delta_min_q15.ptr[k] as i32);
+                k = k - 1;
+            }
+            max_center_q15 = max_center_q15 - ((delta_min_q15.ptr[min_index as usize] as i32) >> 1);
+
+            const center_q15: i32 = clamp_i32(round_shift_right_1((nlsf_q15.ptr[(min_index as usize) - 1] as i32) + (nlsf_q15.ptr[min_index as usize] as i32)), min_center_q15, max_center_q15);
+            nlsf_q15.ptr[(min_index as usize) - 1] = (center_q15 - ((delta_min_q15.ptr[min_index as usize] as i32) >> 1)) as i16;
+            nlsf_q15.ptr[min_index as usize] = ((nlsf_q15.ptr[(min_index as usize) - 1] as i32) + (delta_min_q15.ptr[min_index as usize] as i32)) as i16;
+        }
+        loops = loops + 1;
+    }
+
+    insertion_sort_i16(nlsf_q15, order as usize);
+    nlsf_q15.ptr[0] = clamp_i32(nlsf_q15.ptr[0] as i32, delta_min_q15.ptr[0] as i32, 32767) as i16;
+
+    i = 1;
+    while i < (order as usize) {
+        const min_value: i32 = (nlsf_q15.ptr[i - 1] as i32) + (delta_min_q15.ptr[i] as i32);
+        if (nlsf_q15.ptr[i] as i32) < min_value {
+            nlsf_q15.ptr[i] = min_value as i16;
+        }
+        i = i + 1;
+    }
+
+    const upper: i32 = SILK_NLSF_Q15_ONE - (delta_min_q15.ptr[order as usize] as i32);
+    if (nlsf_q15.ptr[(order as usize) - 1] as i32) > upper {
+        nlsf_q15.ptr[(order as usize) - 1] = upper as i16;
+    }
+
+    var pos: usize = (order as usize) - 1;
+    while pos > 0 {
+        const max_value: i32 = (nlsf_q15.ptr[pos] as i32) - (delta_min_q15.ptr[pos] as i32);
+        if (nlsf_q15.ptr[pos - 1] as i32) > max_value {
+            nlsf_q15.ptr[pos - 1] = max_value as i16;
+        }
+        pos = pos - 1;
+    }
+}
