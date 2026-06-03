@@ -478,6 +478,50 @@ test "silk mono packet decoder decodes one narrowband 10ms packet" {
     try assert(state.rng != 0, "mono packet decode must advance the SILK random seed");
 }
 
+test "silk mono packet decoder supports mediumband 10ms packets" {
+    var packet: [byte: 192] = [0: 192];
+    packet[0] = 32;
+    _ = try encode_simple_nb_mb_unvoiced_payload(&packet[1:191], 120);
+    const packet_len: usize = 192;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 120] = [0: 120];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:120]);
+
+    try assert_eq_i32(decoded as i32, 120);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 12);
+    try assert_eq_i32(state.frame_ms, 10);
+    try assert_eq_i32(state.frame_length, 120);
+    try assert_eq_i32(state.subframe_length, 60);
+    try assert_eq_i32(state.nb_subframes, 2);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "MB 10ms decode must advance SILK state");
+    try assert(test_decoder_checksum_i32(&out_q14[0:120]) != 0, "MB 10ms decode must produce synthesized output");
+}
+
+test "silk mono packet decoder supports wideband 10ms packets" {
+    var packet: [byte: 256] = [0: 256];
+    packet[0] = 64;
+    _ = try encode_simple_wb_unvoiced_payload(&packet[1:255], 160);
+    const packet_len: usize = 256;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 160] = [0: 160];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:160]);
+
+    try assert_eq_i32(decoded as i32, 160);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 16);
+    try assert_eq_i32(state.frame_ms, 10);
+    try assert_eq_i32(state.frame_length, 160);
+    try assert_eq_i32(state.subframe_length, 80);
+    try assert_eq_i32(state.nb_subframes, 2);
+    try assert_eq_i32(state.lpc_order, 16);
+    try assert(!state.first_frame_after_reset, "WB 10ms decode must advance SILK state");
+    try assert(test_decoder_checksum_i32(&out_q14[0:160]) != 0, "WB 10ms decode must produce synthesized output");
+}
+
 test "silk mono packet decoder supports narrowband 20ms packets" {
     var packet: [byte: 192] = [0: 192];
     packet[0] = 8;
