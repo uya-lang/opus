@@ -41,7 +41,12 @@ export struct HybridDecodeResult {
     remaining_bits: i32,
 }
 
-fn hybrid_decoder_supports_mono_swb(info: &const PacketInfo) bool {
+fn hybrid_decoder_supports_mono_hybrid_bandwidth(info: &const PacketInfo) bool {
+    return info.bandwidth == OpusBandwidth.SUPERWIDEBAND
+        || info.bandwidth == OpusBandwidth.FULLBAND;
+}
+
+fn hybrid_decoder_supports_mono_hybrid(info: &const PacketInfo) bool {
     var duration_matches: bool = false;
     if info.frame_duration_us == 10000 && info.duration_samples_48k == 480 {
         duration_matches = true;
@@ -51,7 +56,7 @@ fn hybrid_decoder_supports_mono_swb(info: &const PacketInfo) bool {
     }
 
     return info.mode == OpusMode.HYBRID
-        && info.bandwidth == OpusBandwidth.SUPERWIDEBAND
+        && hybrid_decoder_supports_mono_hybrid_bandwidth(info)
         && info.channels == 1
         && info.frame_count == 1
         && duration_matches;
@@ -92,7 +97,7 @@ export fn hybrid_decode_i16(
     pcm_i16: &[i16],
     scratch: &HybridDecoderScratch,
 ) !HybridDecodeResult {
-    if !hybrid_decoder_supports_mono_swb(info) {
+    if !hybrid_decoder_supports_mono_hybrid(info) {
         return error.HybridDecoderUnsupported;
     }
     if frame.len == 0 || pcm_i16.len < (info.duration_samples_48k as usize) {
