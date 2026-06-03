@@ -198,6 +198,73 @@ test "decoder api validates mono and stereo output channel layout" {
     }
 }
 
+test "decoder api validates CELT output buffer size" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 65] = [0: 65];
+    packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        packet[i] = ((i * 19 + 11) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 119] = [0: 119];
+    const decoded: !i32 = decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:119], 120, false);
+    match decoded {
+        error.DecoderApiError => {}
+        else => { try assert(false, "normal CELT decode must reject short output buffers"); }
+    }
+}
+
+test "decoder api validates resampled PLC output buffer size" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm: [i16: 39] = [0: 39];
+    const decoded: !i32 = decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm[0:39], 40, false);
+    match decoded {
+        error.DecoderApiError => {}
+        else => { try assert(false, "resampled PLC decode must reject short output buffers"); }
+    }
+}
+
+test "decoder api validates SILK-only output buffer size" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 384] = [0: 384];
+    packet[0] = (72 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&packet[1:383], 320);
+    var pcm: [i16: 159] = [0: 159];
+    const decoded: !i32 = decoder_decode_i16(&decoder, &packet[0:384], &pcm[0:159], 160, false);
+    match decoded {
+        error.DecoderApiError => {}
+        else => { try assert(false, "SILK-only decode must reject short output buffers"); }
+    }
+}
+
+test "decoder api validates Hybrid output buffer size" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 256] = [0: 256];
+    packet[0] = (96 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&packet[1:255], 160);
+    var pcm: [i16: 479] = [0: 479];
+    const decoded: !i32 = decoder_decode_i16(&decoder, &packet[0:256], &pcm[0:479], 480, false);
+    match decoded {
+        error.DecoderApiError => {}
+        else => { try assert(false, "Hybrid decode must reject short output buffers"); }
+    }
+}
+
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
