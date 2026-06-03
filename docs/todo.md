@@ -342,7 +342,7 @@
 验收标准：
 
 - [ ] Full Opus decoder vectors 通过。
-- [ ] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
+- [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
 ## 13. Public Decoder API
 
