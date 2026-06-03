@@ -344,7 +344,7 @@
 - Full Opus decoder vectors 通过（拆分执行）。
   blocked: `make test` 已通过，但 release gate 需要的 `tools/diff_decode.sh tests/vectors` 当前无法运行；`tools/diff_decode.sh` 尚未实现，`tests/vectors/` 只有 `.gitkeep`，且后续 conformance 章节仍未完成获取/整理 vectors、manifest 和 vector runner。
   - [x] 定义 vector manifest 格式并实现最小 vector runner contract。
-  - [ ] 实现 `tools/diff_decode.sh` 并支持空 corpus/缺 manifest 的清晰错误。
+  - [x] 实现 `tools/diff_decode.sh` 并支持空 corpus/缺 manifest 的清晰错误。
   - [ ] 接入 `make conformance`，调用 `make test` 和 decoder vector diff。
   - [ ] 获取/整理 RFC/upstream decoder vectors 并运行 full decoder diff。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
@@ -534,7 +534,7 @@
 - [ ] 记录 PCM hash。
 - [ ] 支持逐样本 diff 输出。
 - [ ] 支持误差统计。
-- [ ] 实现 `tools/diff_decode.sh`。
+- [x] 实现 `tools/diff_decode.sh`。
 - [ ] 实现 `tools/diff_encode_decode.sh`。
 - [ ] 实现 corpus 批量 decode。
 - [ ] 接入 `make conformance`。

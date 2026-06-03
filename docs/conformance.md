@@ -106,6 +106,13 @@ python3 tools/vector_runner.py diff tests/vectors/manifest.json --actual-dir bui
 the manifest reference PCM. Producing those actual files from the Uya decoder is
 the responsibility of `tools/diff_decode.sh`.
 
+`tools/diff_decode.sh tests/vectors` validates `tests/vectors/manifest.json`.
+An empty manifest is a successful no-op, which keeps the command usable before
+the external corpus is imported. For non-empty manifests, the current script
+expects `UOPUS_DIFF_ACTUAL_DIR` to point at pre-generated `<case id>.s16le`
+files; wiring that directory to a raw packet decoder command is tracked as a
+later conformance task.
+
 ## Acceptance Commands
 
 At the empty-skeleton stage, conformance documentation is accepted by:
