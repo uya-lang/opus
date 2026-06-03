@@ -1,6 +1,7 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.api.decoder.DecoderApiError;
+use src.opus.api.decoder.DecoderApiUnsupported;
 use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_init;
@@ -11,6 +12,33 @@ use src.opus.hybrid.state.HYBRID_CELT_START_BAND;
 use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
 use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
 use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
+
+test "decoder init validates config and initializes 48k state" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try decoder_init(&decoder, &config);
+
+    try assert_eq_i32(decoder.config.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(decoder.config.channels as i32, 2);
+    try assert(decoder.active_mode == OpusMode.CELT, "decoder init must start in CELT mode");
+    try assert_eq_i32(decoder.celt.channels, 2);
+    try assert_eq_i32(decoder.last_frame_size_48k, decoder.celt.frame_size);
+    try assert_eq_i32(decoder.hybrid.frame_size_48k, 0);
+
+    const bad_channels: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 0 };
+    const bad_channels_result: !void = decoder_init(&decoder, &bad_channels);
+    match bad_channels_result {
+        error.DecoderApiError => {}
+        else => { try assert(false, "decoder init must reject invalid channel counts"); }
+    }
+
+    const unsupported_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    const unsupported_rate_result: !void = decoder_init(&decoder, &unsupported_rate);
+    match unsupported_rate_result {
+        error.DecoderApiUnsupported => {}
+        else => { try assert(false, "decoder init must reject non-48k output until resampling is implemented"); }
+    }
+}
 
 test "decoder api empty packet invokes celt plc" {
     var decoder: OpusDecoder = OpusDecoder{};

@@ -347,7 +347,7 @@
 ## 13. Public Decoder API
 
 - [x] 实现 `api/decoder.uya`。
-- [ ] 实现 `decoder_init`。
+- [x] 实现 `decoder_init`。
 - [ ] 实现 `decoder_get_packet_info`。
 - [ ] 实现 `decoder_decode_i16`。
 - [ ] 实现 output sample rate 转换。
