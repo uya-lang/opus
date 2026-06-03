@@ -54,6 +54,42 @@ test "decoder api uses celt frequency history on packet loss after a decoded pac
     try assert_eq_i32(decoder.celt.loss_count, 1);
 }
 
+test "decoder api decode_fec falls back to plc without consuming celt packet" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var first_packet: [byte: 65] = [0: 65];
+    first_packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        first_packet[i] = ((i * 3) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 120] = [0: 120];
+    _ = try decoder_decode_i16(&decoder, &first_packet[0:65], &pcm[0:120], 120, false);
+
+    var next_packet: [byte: 65] = [0: 65];
+    next_packet[0] = (128 as! byte).value;
+    i = 1;
+    while i < 65 {
+        next_packet[i] = ((255 - i) as! byte).value;
+        i = i + 1;
+    }
+
+    var recovered_pcm: [i16: 120] = [0: 120];
+    const recovered: i32 = try decoder_decode_i16(&decoder, &next_packet[0:65], &recovered_pcm[0:120], 120, true);
+    try assert_eq_i32(recovered, 120);
+    try assert(decoder.celt_plc_scratch.used_frequency_history, "CELT packets do not carry FEC and must use PLC fallback");
+    try assert_eq_i32(decoder.celt.loss_count, 1);
+
+    var decoded_pcm: [i16: 120] = [0: 120];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &next_packet[0:65], &decoded_pcm[0:120], 120, false);
+    try assert_eq_i32(decoded, 120);
+    try assert_eq_i32(decoder.celt.loss_count, 0);
+}
+
 test "decoder api empty packet validates pcm bounds" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };

@@ -125,9 +125,24 @@ fn decoder_decode_celt_packet_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &
     return decoded as i32;
 }
 
+fn decoder_decode_fec_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32) !i32 {
+    if packet.len == 0 {
+        return decoder_decode_empty_packet_i16(decoder, pcm, frame_size);
+    }
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    parse_packet(packet, &parsed) catch {
+        return error.DecoderApiError;
+    };
+    if parsed.info.mode == OpusMode.CELT {
+        return decoder_decode_empty_packet_i16(decoder, pcm, frame_size);
+    }
+    return error.DecoderApiUnsupported;
+}
+
 export fn decoder_decode_i16(decoder: &OpusDecoder, packet: &[byte], pcm: &[i16], frame_size: i32, decode_fec: bool) !i32 {
     if decode_fec {
-        return error.DecoderApiUnsupported;
+        return decoder_decode_fec_i16(decoder, packet, pcm, frame_size);
     }
     if packet.len == 0 {
         return decoder_decode_empty_packet_i16(decoder, pcm, frame_size);
