@@ -40,7 +40,7 @@ fn internal_frame_ms_from_duration_us(frame_duration_us: u32) !i32 {
     if frame_duration_us == 10000 {
         return 10;
     }
-    if frame_duration_us == 20000 || frame_duration_us == 40000 {
+    if frame_duration_us == 20000 || frame_duration_us == 40000 || frame_duration_us == 60000 {
         return 20;
     }
     return error.SilkFrameParamsError;
@@ -50,8 +50,8 @@ fn internal_frames_from_duration_us(frame_duration_us: u32) !i32 {
     if frame_duration_us == 10000 || frame_duration_us == 20000 {
         return 1;
     }
-    if frame_duration_us == 40000 {
-        return 2;
+    if frame_duration_us == 40000 || frame_duration_us == 60000 {
+        return frame_duration_us as i32 / 20000;
     }
     return error.SilkFrameParamsError;
 }

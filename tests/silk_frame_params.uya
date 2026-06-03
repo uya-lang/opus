@@ -79,6 +79,22 @@ test "silk frame params map 40ms packets to two internal 20ms frames" {
     try assert_eq_i32(params.frames_per_packet, 2);
 }
 
+test "silk frame params map 60ms packets to three internal 20ms frames" {
+    const info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.MEDIUMBAND, 1, 1, 60000);
+    var params: SilkFrameParams = SilkFrameParams{};
+    try silk_frame_params_from_packet_info(&info, &params);
+
+    try assert_eq_i32(params.channels, 1);
+    try assert_eq_i32(params.sample_rate_hz, 12000);
+    try assert_eq_i32(params.fs_khz, 12);
+    try assert_eq_i32(params.frame_ms, 20);
+    try assert_eq_i32(params.frame_length, 240);
+    try assert_eq_i32(params.subframe_length, 60);
+    try assert_eq_i32(params.nb_subframes, 4);
+    try assert_eq_i32(params.lpc_order, 10);
+    try assert_eq_i32(params.frames_per_packet, 3);
+}
+
 test "silk frame params configure decoder state and control together" {
     const info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 2, 1, 20000);
     var params: SilkFrameParams = SilkFrameParams{};
@@ -119,10 +135,10 @@ test "silk frame params reject non-silk or unsupported first-stage layouts" {
         else => { try assert(false, "SILK-only frame params must reject SWB bandwidth"); }
     }
 
-    const long_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 1, 1, 60000);
+    const long_info: PacketInfo = packet_info(OpusMode.SILK, OpusBandwidth.WIDEBAND, 1, 1, 80000);
     const long_res: !void = silk_frame_params_from_packet_info(&long_info, &params);
     match long_res {
         error.SilkFrameParamsError => {}
-        else => { try assert(false, "60ms SILK frames are deferred to the next multi-frame decode task"); }
+        else => { try assert(false, "unsupported SILK frame durations must stay rejected"); }
     }
 }

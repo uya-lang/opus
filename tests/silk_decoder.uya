@@ -477,6 +477,14 @@ fn encode_simple_wb_40ms_unvoiced_payload(payload: &[byte]) !usize {
     return encode_simple_silk_unvoiced_packet_payload(payload, 320, 2, SILK_NLSF_CODEBOOK_WB, 16);
 }
 
+fn encode_simple_nb_mb_60ms_unvoiced_payload(payload: &[byte], frame_length: i32) !usize {
+    return encode_simple_silk_unvoiced_packet_payload(payload, frame_length, 3, SILK_NLSF_CODEBOOK_NB_MB, 10);
+}
+
+fn encode_simple_wb_60ms_unvoiced_payload(payload: &[byte]) !usize {
+    return encode_simple_silk_unvoiced_packet_payload(payload, 320, 3, SILK_NLSF_CODEBOOK_WB, 16);
+}
+
 fn encode_simple_nb_10ms_unvoiced_payload(payload: &[byte]) !usize {
     return encode_simple_nb_mb_unvoiced_payload(payload, 80);
 }
@@ -693,6 +701,80 @@ test "silk mono packet decoder supports wideband 40ms packets" {
     try assert(state.rng != 0, "WB 40ms decode must advance the SILK random seed");
     try assert(test_decoder_checksum_i32(&out_q14[0:320]) != 0, "WB 40ms first frame must produce synthesized output");
     try assert(test_decoder_checksum_i32(&out_q14[320:320]) != 0, "WB 40ms second frame must produce synthesized output");
+}
+
+test "silk mono packet decoder supports narrowband 60ms packets" {
+    var packet: [byte: 640] = [0: 640];
+    packet[0] = 24;
+    _ = try encode_simple_nb_mb_60ms_unvoiced_payload(&packet[1:639], 160);
+    const packet_len: usize = 640;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 480] = [0: 480];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:480]);
+
+    try assert_eq_i32(decoded as i32, 480);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 8);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 160);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "NB 60ms decode must advance SILK state");
+    try assert(state.rng != 0, "NB 60ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:160]) != 0, "NB 60ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[160:160]) != 0, "NB 60ms second frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[320:160]) != 0, "NB 60ms third frame must produce synthesized output");
+}
+
+test "silk mono packet decoder supports mediumband 60ms packets" {
+    var packet: [byte: 768] = [0: 768];
+    packet[0] = 56;
+    _ = try encode_simple_nb_mb_60ms_unvoiced_payload(&packet[1:767], 240);
+    const packet_len: usize = 768;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 720] = [0: 720];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:720]);
+
+    try assert_eq_i32(decoded as i32, 720);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 12);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 240);
+    try assert_eq_i32(state.subframe_length, 60);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 10);
+    try assert(!state.first_frame_after_reset, "MB 60ms decode must advance SILK state");
+    try assert(state.rng != 0, "MB 60ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:240]) != 0, "MB 60ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[240:240]) != 0, "MB 60ms second frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[480:240]) != 0, "MB 60ms third frame must produce synthesized output");
+}
+
+test "silk mono packet decoder supports wideband 60ms packets" {
+    var packet: [byte: 1024] = [0: 1024];
+    packet[0] = 88;
+    _ = try encode_simple_wb_60ms_unvoiced_payload(&packet[1:1023]);
+    const packet_len: usize = 1024;
+
+    var state: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 960] = [0: 960];
+    const decoded: usize = try silk_decode_mono_packet_q14(&state, &packet[0:packet_len], &out_q14[0:960]);
+
+    try assert_eq_i32(decoded as i32, 960);
+    try assert_eq_i32(state.channels, 1);
+    try assert_eq_i32(state.fs_khz, 16);
+    try assert_eq_i32(state.frame_ms, 20);
+    try assert_eq_i32(state.frame_length, 320);
+    try assert_eq_i32(state.subframe_length, 80);
+    try assert_eq_i32(state.nb_subframes, 4);
+    try assert_eq_i32(state.lpc_order, 16);
+    try assert(!state.first_frame_after_reset, "WB 60ms decode must advance SILK state");
+    try assert(state.rng != 0, "WB 60ms decode must advance the SILK random seed");
+    try assert(test_decoder_checksum_i32(&out_q14[0:320]) != 0, "WB 60ms first frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[320:320]) != 0, "WB 60ms second frame must produce synthesized output");
+    try assert(test_decoder_checksum_i32(&out_q14[640:320]) != 0, "WB 60ms third frame must produce synthesized output");
 }
 
 test "silk mono packet decoder rejects stereo packets and short output" {
