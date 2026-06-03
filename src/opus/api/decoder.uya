@@ -173,6 +173,29 @@ export fn decoder_init(decoder: &OpusDecoder, config: &const OpusDecoderConfig) 
     decoder.last_frame_size_48k = decoder.celt.frame_size;
 }
 
+export fn decoder_reset(decoder: &OpusDecoder) !void {
+    validate_decoder_config(&decoder.config) catch {
+        return error.DecoderApiError;
+    };
+
+    decoder.resampler = resampler_config_init(SAMPLE_RATE_48K, decoder.config.sample_rate_hz, decoder.config.channels as u32, MAX_FRAME_SAMPLES_48K as usize) catch {
+        return error.DecoderApiError;
+    };
+    decoder.silk_resampler = resampler_config_init(SILK_MAX_INTERNAL_RATE_HZ as u32, decoder.config.sample_rate_hz, decoder.config.channels as u32, DECODER_SILK_PACKET_SCRATCH_SAMPLES) catch {
+        return error.DecoderApiError;
+    };
+
+    decoder.active_mode = OpusMode.CELT;
+    celt_state_init(&decoder.celt, decoder.config.channels as i32) catch {
+        return error.DecoderApiError;
+    };
+    decoder.silk = SilkDecoderState{};
+    decoder.hybrid = HybridDecoderState{};
+    decoder.hybrid_silk = SilkDecoderState{};
+    decoder.celt_plc_scratch.used_frequency_history = false;
+    decoder.last_frame_size_48k = decoder.celt.frame_size;
+}
+
 export fn decoder_get_packet_info(packet: &[byte], info: &PacketInfo) !void {
     var parsed: PacketParseResult = PacketParseResult{};
     parse_packet(packet, &parsed) catch {

@@ -355,7 +355,7 @@
 - [x] 实现 SILK-only 原生采样率到目标采样率的一次转换路径。
 - [x] 实现 mono/stereo output 校验。
 - [x] 实现 buffer size 检查。
-- [ ] 实现 decoder reset。
+- [x] 实现 decoder reset。
 - [ ] 实现 gain Q8 设置。
 - [ ] 实现 packet loss API。
 - [ ] 拆分 decoder 常驻 history 和 scratch。

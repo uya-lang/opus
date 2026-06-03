@@ -6,6 +6,7 @@ use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.api.decoder.decoder_init;
+use src.opus.api.decoder.decoder_reset;
 use src.opus.celt.state.CELT_DECODE_MEM;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
@@ -263,6 +264,67 @@ test "decoder api validates Hybrid output buffer size" {
         error.DecoderApiError => {}
         else => { try assert(false, "Hybrid decode must reject short output buffers"); }
     }
+}
+
+test "decoder reset clears state while preserving output config" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var silk_packet: [byte: 384] = [0: 384];
+    silk_packet[0] = (72 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&silk_packet[1:383], 320);
+    var silk_pcm: [i16: 320] = [0: 320];
+    const silk_decoded: i32 = try decoder_decode_i16(&decoder, &silk_packet[0:384], &silk_pcm[0:320], 320, false);
+    try assert_eq_i32(silk_decoded, 320);
+    try assert(decoder.active_mode == OpusMode.SILK, "SILK-only packet must move decoder before reset");
+
+    var hybrid_packet: [byte: 256] = [0: 256];
+    hybrid_packet[0] = (96 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&hybrid_packet[1:255], 160);
+    var hybrid_pcm: [i16: 160] = [0: 160];
+    const hybrid_decoded: i32 = try decoder_decode_i16(&decoder, &hybrid_packet[0:256], &hybrid_pcm[0:160], 160, false);
+    try assert_eq_i32(hybrid_decoded, 160);
+    try assert(decoder.active_mode == OpusMode.HYBRID, "Hybrid packet must move decoder before reset");
+
+    decoder.celt.decode_mem[0] = 1234;
+    decoder.celt.freq_history_ready = true;
+    decoder.celt.loss_count = 7;
+    decoder.celt_plc_scratch.used_frequency_history = true;
+    decoder.silk.history_q14[0] = 2345;
+    decoder.silk.loss_count = 5;
+    decoder.hybrid.delay_q14[0] = 3456;
+    decoder.hybrid.merge_mem_q14[0] = 4567;
+    decoder.hybrid_silk.history_q14[0] = 5678;
+
+    try decoder_reset(&decoder);
+
+    try assert_eq_i32(decoder.config.sample_rate_hz as i32, 16000);
+    try assert_eq_i32(decoder.config.channels as i32, 1);
+    try assert_eq_i32(decoder.resampler.output_rate_hz as i32, 16000);
+    try assert_eq_i32(decoder.resampler.input_rate_hz as i32, 48000);
+    try assert_eq_i32(decoder.silk_resampler.input_rate_hz as i32, HYBRID_SILK_SAMPLE_RATE_HZ);
+    try assert_eq_i32(decoder.silk_resampler.output_rate_hz as i32, 16000);
+    try assert(decoder.active_mode == OpusMode.CELT, "decoder reset must return to CELT mode");
+    try assert_eq_i32(decoder.last_frame_size_48k, decoder.celt.frame_size);
+    try assert_eq_i32(decoder.celt.start_band, 0);
+    try assert_eq_i32(decoder.celt.decode_mem[0], 0);
+    try assert(!decoder.celt.freq_history_ready, "decoder reset must clear CELT frequency history");
+    try assert_eq_i32(decoder.celt.loss_count, 0);
+    try assert(!decoder.celt_plc_scratch.used_frequency_history, "decoder reset must clear public PLC scratch markers");
+    try assert_eq_i32(decoder.silk.sample_rate_hz, 0);
+    try assert_eq_i32(decoder.silk.history_q14[0], 0);
+    try assert_eq_i32(decoder.silk.loss_count, 0);
+    try assert_eq_i32(decoder.hybrid.frame_size_48k, 0);
+    try assert_eq_i32(decoder.hybrid.delay_q14[0], 0);
+    try assert_eq_i32(decoder.hybrid.merge_mem_q14[0], 0);
+    try assert_eq_i32(decoder.hybrid_silk.history_q14[0], 0);
+
+    var empty_packet: [byte: 1] = [0];
+    var pcm_after_reset: [i16: 40] = [0: 40];
+    const decoded_after_reset: i32 = try decoder_decode_i16(&decoder, &empty_packet[0:0], &pcm_after_reset[0:40], 40, false);
+    try assert_eq_i32(decoded_after_reset, 40);
+    try assert(decoder.active_mode == OpusMode.CELT, "decoder must remain usable after reset");
 }
 
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {
