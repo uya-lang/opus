@@ -342,7 +342,7 @@
 验收标准：
 
 - Full Opus decoder vectors 通过（拆分执行）。
-  status: `make conformance` 已覆盖当前单元测试和 decoder diff gate；RFC8251 corpus 已导入，但 manifest cases 仍 disabled，等待 actual PCM 生成路径后启用全量 diff。
+  status: `make conformance` 已覆盖当前单元测试和 decoder diff gate；RFC8251 corpus 已导入。`generate_actual_decode.py --all` 可生成 120 个 actual PCM；full diff 仍阻塞在参考输出契约和 48 kHz stereo PCM mismatch，manifest cases 暂不启用为 release gate。
   - [x] 定义 vector manifest 格式并实现最小 vector runner contract。
   - [x] 实现 `tools/diff_decode.sh` 并支持空 corpus/缺 manifest 的清晰错误。
   - [x] 接入 `make conformance`，调用 `make test` 和 decoder vector diff。
@@ -372,7 +372,14 @@
         备注：下一个阻塞点定位到第 34 个 packet 的第 0 个 CELT frame；在普通 legacy/Opus spectral shape 路径都触发 range-coder error 时恢复 spectral decode 快照，并用 bounded legacy fallback 解到第一个过读 wide band 前后将剩余 shape 置零后，前 34 个 packet 连续输出 27520 字节，完整 `testvector01.bit` 的 2147 个 packet 可输出 471680 字节。下一步推进到启用 manifest/diff 覆盖并继续处理 corpus 级阻塞。
       - [x] 根据后续 RFC8251 试运行结果继续修复 decoder 或 vector plumbing。
         备注：修复 range decoder payload-end zero padding、packet-level stereo SILK、stereo/multi-frame Hybrid API plumbing 和 vector runner decoder state 初始化后，`generate_actual_decode.py --all` 可生成 RFC8251 manifest 中 120 个 actual PCM 文件，覆盖 `testvector01` 到 `testvector12` 的 8/12/16/24/48 kHz mono/stereo decode。
-    - [ ] 启用 RFC8251 manifest cases 并运行 full decoder diff。
+    - [x] 运行 RFC8251 full-corpus actual PCM 生成 probe。
+      备注：`make decode-vector` 后运行 `python3 tools/generate_actual_decode.py tests/vectors/manifest.json --corpus-root tests/vectors --actual-dir build/vectors/actual-probe --decoder build/uopus-decode-vector --all` 成功生成 120 个 actual PCM 文件。
+    - [x] 运行 RFC8251 full decoder diff probe 并记录失败模式。
+      备注：临时按全部 manifest case 参与 diff 比较，结果 `matched=0 failed=120 total=120`；非 48 kHz 或 mono case 与官方 `.dec`/`m.dec` 参考样本长度不一致，48 kHz stereo case 长度匹配但 PCM 仍有大幅 sample mismatch。
+    - [x] 定位 RFC8251 manifest/reference contract 阻塞点。
+      备注：官方 `.dec`/`m.dec` 参考文件大小均匹配 48 kHz stereo 输出；manifest 中 8/12/16/24 kHz 或 mono API 输出 case 需要单独生成匹配采样率/声道的 reference PCM 后才能启用，不能直接与官方 48 kHz stereo reference 做 bit-exact diff。
+    - [f] 修复 RFC8251 `testvector01` 48 kHz stereo 首个 PCM mismatch，然后启用首批可验收 manifest cases。
+      失败原因：`testvector01.dec` 首个非零 interleaved sample 在 562（stereo frame 281），Uya actual 在 sample 8（frame 4）即非零；其他 RFC8251 48 kHz stereo case 的初始静音差异也不固定。偏移比较不能消除大幅 sample mismatch，说明当前 decoder core 仍非 bit-exact，不能诚实启用 release-gate manifest cases。
 - [x] Hybrid 状态不泄漏到 SILK/CELT 模块内部。
 
 ## 13. Public Decoder API
@@ -412,7 +419,7 @@
 - [x] 实现 padding 添加/移除。
 - [x] 测试拼接同 config packets。
 - [x] 测试非法混合 config。
-- [ ] 测试 120ms 超限。
+- [x] 测试 120ms 超限。
 - [ ] 测试输出 packet 可被 decoder 解析。
 
 验收标准：
