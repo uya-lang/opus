@@ -411,7 +411,7 @@
 - [x] 实现 output CBR/VBR packet。
 - [x] 实现 padding 添加/移除。
 - [x] 测试拼接同 config packets。
-- [ ] 测试非法混合 config。
+- [x] 测试非法混合 config。
 - [ ] 测试 120ms 超限。
 - [ ] 测试输出 packet 可被 decoder 解析。
 

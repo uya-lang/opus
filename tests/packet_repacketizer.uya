@@ -105,6 +105,24 @@ test "repacketizer add packet rejects malformed packet without state changes" {
     try assert_eq_i32(bytes_after as i32, 3);
 }
 
+test "repacketizer rejects packets with mismatched config" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var first: [byte: 4] = [248, 17, 18, 19];
+    try repacketizer_add_packet(&rp, &first[0:4]);
+
+    var different_config: [byte: 4] = [240, 20, 21, 22];
+    const add_mixed_result: !void = repacketizer_add_packet(&rp, &different_config[0:4]);
+    match add_mixed_result {
+        error.RepacketizerError => {
+            try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 1);
+            try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 3);
+        }
+        else => { try assert(false, "mixed TOC configs must be rejected"); }
+    }
+}
+
 test "repacketizer add packet rejects aggregate duration over 120ms" {
     var rp: Repacketizer = Repacketizer{};
     try repacketizer_init(&rp);
