@@ -225,6 +225,51 @@ test "decoder api smoke initializes inspects decodes conceals and resets" {
     try assert(concealed_pcm[119] != 555, "smoke PLC must write the requested PCM frame after reset");
 }
 
+test "decoder api decodes small raw packet stream" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 65] = [0: 65];
+    var guarded_pcm: [i16: 128] = [-12345: 128];
+    var packet_index: usize = 0;
+    var total_decoded: i32 = 0;
+    while packet_index < 4 {
+        packet[0] = (128 as! byte).value;
+        var i: usize = 1;
+        while i < 65 {
+            packet[i] = (((packet_index * 37) + (i * 23) + 5) as! byte).value;
+            i = i + 1;
+        }
+
+        var info: PacketInfo = PacketInfo{};
+        try decoder_get_packet_info(&packet[0:65], &info);
+        try assert(info.mode == OpusMode.CELT, "raw packet stream test packets must stay in CELT mode");
+        try assert_eq_i32(info.channels as i32, 1);
+        try assert_eq_i32(info.frame_count as i32, 1);
+        try assert_eq_i32(info.duration_samples_48k as i32, 120);
+
+        i = 0;
+        while i < 128 {
+            guarded_pcm[i] = -12345;
+            i = i + 1;
+        }
+
+        const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &guarded_pcm[4:120], 120, false);
+        try assert_eq_i32(decoded, 120);
+        try assert_eq_i32(guarded_pcm[0] as i32, -12345);
+        try assert_eq_i32(guarded_pcm[3] as i32, -12345);
+        try assert_eq_i32(guarded_pcm[124] as i32, -12345);
+        try assert_eq_i32(guarded_pcm[127] as i32, -12345);
+        try assert(guarded_pcm[123] != -12345, "raw packet stream decode must write the requested frame");
+
+        total_decoded = total_decoded + decoded;
+        packet_index = packet_index + 1;
+    }
+
+    try assert_eq_i32(total_decoded, 480);
+}
+
 test "decoder api rejects illegal public parameters" {
     var decoder: OpusDecoder = OpusDecoder{};
     const zero_rate: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 0, channels: 1 };
