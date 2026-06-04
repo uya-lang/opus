@@ -28,6 +28,19 @@ HYBRID_STRUCTS_WITHOUT_CODEC_HISTORY = (
     ROOT / "src" / "opus" / "hybrid" / "state.uya",
     ROOT / "src" / "opus" / "hybrid" / "decoder.uya",
 )
+API_PUBLIC_FORBIDDEN_STATE_TYPES = (
+    "CeltDecoderState",
+    "CeltMonoDecodeScratch",
+    "CeltPlcScratch",
+    "HybridDecoderScratch",
+    "HybridDecoderState",
+    "OpusDecoderHistory",
+    "OpusDecoderScratch",
+    "OpusDecoderState",
+    "SilkDecoderState",
+    "SilkStereoState",
+)
+API_PUBLIC_FILES = (ROOT / "src" / "opus" / "api",)
 
 
 def uya_files(paths: list[Path], test_prefix: str) -> list[Path]:
@@ -88,6 +101,18 @@ def check_hybrid_glue_state_ownership(violations: list[str]) -> None:
                     )
 
 
+def check_api_public_structs_do_not_embed_codec_state(violations: list[str]) -> None:
+    for path in uya_files(list(API_PUBLIC_FILES), ""):
+        rel = path.relative_to(ROOT)
+        for struct_name, (line_no, body_lines) in exported_struct_bodies(path).items():
+            body = "\n".join(body_lines)
+            for state_type in API_PUBLIC_FORBIDDEN_STATE_TYPES:
+                if state_type in body:
+                    violations.append(
+                        f"{rel}:{line_no}: public API struct {struct_name} must not expose {state_type}"
+                    )
+
+
 def main() -> int:
     violations: list[str] = []
     for boundary in BOUNDARIES:
@@ -104,6 +129,7 @@ def main() -> int:
                         )
 
     check_hybrid_glue_state_ownership(violations)
+    check_api_public_structs_do_not_embed_codec_state(violations)
 
     if violations:
         for violation in violations:

@@ -397,7 +397,7 @@
 
 验收标准：
 
-- [ ] 对外 API 不暴露 SILK/CELT 内部结构。
+- [x] 对外 API 不暴露 SILK/CELT 内部结构。
 - [ ] 错误返回后 decoder 可继续使用。
 - [ ] 单流 decoder 初始化不清零与当前 config 无关的大块 scratch。
 - [ ] 非 48 kHz 输出最多经历一次 final resample。
