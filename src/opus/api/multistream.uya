@@ -239,6 +239,18 @@ fn multistream_validate_coupled_stereo_identity_state(state: &const MultistreamD
     }
 }
 
+fn multistream_validate_uncoupled_mono_identity_state(state: &const MultistreamDecoderState) !void {
+    if !state.initialized {
+        return error.MultistreamApiError;
+    }
+    if state.channel_count != 1 || state.stream_count != 1 || state.coupled_count != 0 {
+        return error.MultistreamApiError;
+    }
+    if state.mapping[0] != 0 {
+        return error.MultistreamApiError;
+    }
+}
+
 fn multistream_clear_packet_split(split: &MultistreamPacketSplit) void {
     split.stream_count = 0;
     var i: usize = 0;
@@ -472,17 +484,23 @@ export fn multistream_decoder_init_coupled_stream_slot(decoder: &const Multistre
     };
 }
 
-export fn multistream_decode_coupled_stream_i16(
-    decoder: &const MultistreamDecoder,
+export fn multistream_decoder_init_uncoupled_stream_slot(decoder: &const MultistreamDecoder, stream_decoder: &OpusDecoder) !void {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    try multistream_validate_uncoupled_mono_identity_state(state);
+
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: state.sample_rate_hz, channels: 1 };
+    decoder_init(stream_decoder, &config) catch {
+        return error.MultistreamApiError;
+    };
+}
+
+fn multistream_decode_identity_single_stream_i16(
     stream_decoder: &OpusDecoder,
     packet: &[byte],
     pcm: &[i16],
     frame_size: i32,
     decode_fec: bool,
 ) !i32 {
-    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
-    try multistream_validate_coupled_stereo_identity_state(state);
-
     if packet.len == 0 {
         return decoder_decode_i16(stream_decoder, packet, pcm, frame_size, decode_fec) catch {
             return error.MultistreamApiError;
@@ -490,7 +508,7 @@ export fn multistream_decode_coupled_stream_i16(
     }
 
     var split: MultistreamPacketSplit = MultistreamPacketSplit{};
-    multistream_split_stream_packets(packet, state.stream_count, &split) catch {
+    multistream_split_stream_packets(packet, 1, &split) catch {
         return error.MultistreamApiError;
     };
     if split.stream_count != 1 || split.streams[0].offset != 0 || split.streams[0].len != packet.len {
@@ -506,6 +524,34 @@ export fn multistream_decode_coupled_stream_i16(
     ) catch {
         return error.MultistreamApiError;
     };
+}
+
+export fn multistream_decode_coupled_stream_i16(
+    decoder: &const MultistreamDecoder,
+    stream_decoder: &OpusDecoder,
+    packet: &[byte],
+    pcm: &[i16],
+    frame_size: i32,
+    decode_fec: bool,
+) !i32 {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    try multistream_validate_coupled_stereo_identity_state(state);
+
+    return try multistream_decode_identity_single_stream_i16(stream_decoder, packet, pcm, frame_size, decode_fec);
+}
+
+export fn multistream_decode_uncoupled_stream_i16(
+    decoder: &const MultistreamDecoder,
+    stream_decoder: &OpusDecoder,
+    packet: &[byte],
+    pcm: &[i16],
+    frame_size: i32,
+    decode_fec: bool,
+) !i32 {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    try multistream_validate_uncoupled_mono_identity_state(state);
+
+    return try multistream_decode_identity_single_stream_i16(stream_decoder, packet, pcm, frame_size, decode_fec);
 }
 
 export fn multistream_decoder_init(decoder: &MultistreamDecoder, config: &const MultistreamDecoderConfig) !void {

@@ -436,7 +436,7 @@
 - Coupled stream decode 拆分：
   - [x] 实现 multistream self-delimited stream packet split helper。
   - [x] 实现 coupled stream packet decode 到 stereo PCM。
-- [ ] 实现 uncoupled stream decode。
+- [x] 实现 uncoupled stream decode。
 - [ ] 实现 channel mapping reorder。
 - [ ] 实现按实际 `stream_count` 持有 decoder slots 的 pool。
 - [ ] 支持 caller-provided multistream decoder storage。
