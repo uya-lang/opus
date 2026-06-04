@@ -251,6 +251,100 @@ fn multistream_validate_uncoupled_mono_identity_state(state: &const MultistreamD
     }
 }
 
+fn multistream_reorder_interleaved_frame_i16(
+    input: &[const i16],
+    input_base: usize,
+    decoded_channels: usize,
+    mapping: &[const u8],
+    output: &[i16],
+    output_base: usize,
+    output_channels: usize,
+) void {
+    var decoded: [i16: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    var channel: usize = 0;
+    while channel < decoded_channels {
+        decoded[channel] = input.ptr[input_base + channel];
+        channel = channel + 1;
+    }
+
+    channel = 0;
+    while channel < output_channels {
+        const mapped: u8 = mapping.ptr[channel];
+        if mapped == OPUS_MULTISTREAM_MAPPING_SILENT {
+            output.ptr[output_base + channel] = 0;
+        } else {
+            output.ptr[output_base + channel] = decoded[mapped as usize];
+        }
+        channel = channel + 1;
+    }
+}
+
+export fn multistream_reorder_interleaved_i16(
+    input: &[const i16],
+    decoded_channels: u8,
+    mapping: &[const u8],
+    output_channels: u8,
+    output: &[i16],
+    frame_size: i32,
+) !void {
+    if frame_size < 0 || decoded_channels == 0 || output_channels == 0 {
+        return error.MultistreamApiError;
+    }
+
+    const decoded_channel_count: usize = decoded_channels as usize;
+    const output_channel_count: usize = output_channels as usize;
+    const samples: usize = frame_size as usize;
+    if decoded_channel_count > OPUS_MULTISTREAM_MAX_CHANNELS || output_channel_count > OPUS_MULTISTREAM_MAX_CHANNELS {
+        return error.MultistreamApiError;
+    }
+    if mapping.len < output_channel_count {
+        return error.MultistreamApiError;
+    }
+    if samples > input.len / decoded_channel_count || samples > output.len / output_channel_count {
+        return error.MultistreamApiError;
+    }
+
+    var channel: usize = 0;
+    while channel < output_channel_count {
+        const mapped: u8 = mapping.ptr[channel];
+        if mapped != OPUS_MULTISTREAM_MAPPING_SILENT && (mapped as usize) >= decoded_channel_count {
+            return error.MultistreamApiError;
+        }
+        channel = channel + 1;
+    }
+
+    if output_channel_count > decoded_channel_count {
+        var remaining: usize = samples;
+        while remaining > 0 {
+            remaining = remaining - 1;
+            multistream_reorder_interleaved_frame_i16(
+                input,
+                remaining * decoded_channel_count,
+                decoded_channel_count,
+                mapping,
+                output,
+                remaining * output_channel_count,
+                output_channel_count,
+            );
+        }
+        return;
+    }
+
+    var sample: usize = 0;
+    while sample < samples {
+        multistream_reorder_interleaved_frame_i16(
+            input,
+            sample * decoded_channel_count,
+            decoded_channel_count,
+            mapping,
+            output,
+            sample * output_channel_count,
+            output_channel_count,
+        );
+        sample = sample + 1;
+    }
+}
+
 fn multistream_clear_packet_split(split: &MultistreamPacketSplit) void {
     split.stream_count = 0;
     var i: usize = 0;

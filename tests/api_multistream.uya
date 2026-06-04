@@ -12,6 +12,7 @@ use src.opus.api.multistream.OPUS_MULTISTREAM_MAX_CHANNELS;
 use src.opus.api.multistream.multistream_split_stream_packets;
 use src.opus.api.multistream.multistream_decode_coupled_stream_i16;
 use src.opus.api.multistream.multistream_decode_uncoupled_stream_i16;
+use src.opus.api.multistream.multistream_reorder_interleaved_i16;
 use src.opus.api.multistream.multistream_decoder_channel_count;
 use src.opus.api.multistream.multistream_decoder_coupled_count;
 use src.opus.api.multistream.multistream_decoder_config_family0;
@@ -315,6 +316,58 @@ test "multistream packet split rejects malformed stream framing" {
     match no_streams {
         error.MultistreamApiError => {}
         else => { try assert(false, "split helper must reject zero streams"); }
+    }
+}
+
+test "multistream channel mapping reorders interleaved pcm and inserts silence" {
+    const input: [i16: 4] = [10, 20, 30, 40];
+    const mapping: [u8: 3] = [1, OPUS_MULTISTREAM_MAPPING_SILENT, 0];
+    var output: [i16: 6] = [-1: 6];
+
+    try multistream_reorder_interleaved_i16(&input[0:4], 2, &mapping[0:3], 3, &output[0:6], 2);
+
+    try assert_eq_i32(output[0] as i32, 20);
+    try assert_eq_i32(output[1] as i32, 0);
+    try assert_eq_i32(output[2] as i32, 10);
+    try assert_eq_i32(output[3] as i32, 40);
+    try assert_eq_i32(output[4] as i32, 0);
+    try assert_eq_i32(output[5] as i32, 30);
+}
+
+test "multistream channel mapping supports in-place stereo swap" {
+    var pcm: [i16: 4] = [1, 2, 3, 4];
+    const mapping: [u8: 2] = [1, 0];
+
+    try multistream_reorder_interleaved_i16(&pcm[0:4], 2, &mapping[0:2], 2, &pcm[0:4], 2);
+
+    try assert_eq_i32(pcm[0] as i32, 2);
+    try assert_eq_i32(pcm[1] as i32, 1);
+    try assert_eq_i32(pcm[2] as i32, 4);
+    try assert_eq_i32(pcm[3] as i32, 3);
+}
+
+test "multistream channel mapping rejects malformed output requests" {
+    const input: [i16: 4] = [10, 20, 30, 40];
+    const bad_mapping: [u8: 1] = [2];
+    var output: [i16: 6] = [0: 6];
+
+    const out_of_range: !void = multistream_reorder_interleaved_i16(&input[0:4], 2, &bad_mapping[0:1], 1, &output[0:6], 2);
+    match out_of_range {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "mapping values must refer to decoded channels or silence"); }
+    }
+
+    const good_mapping: [u8: 3] = [0, 1, OPUS_MULTISTREAM_MAPPING_SILENT];
+    const short_output: !void = multistream_reorder_interleaved_i16(&input[0:4], 2, &good_mapping[0:3], 3, &output[0:5], 2);
+    match short_output {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "output must fit mapped interleaved pcm"); }
+    }
+
+    const zero_decoded_channels: !void = multistream_reorder_interleaved_i16(&input[0:4], 0, &good_mapping[0:3], 3, &output[0:6], 2);
+    match zero_decoded_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "decoded channel count must be nonzero"); }
     }
 }
 
