@@ -409,7 +409,7 @@
 - [x] 实现 frame duration 校验。
 - [x] 实现 get packet duration。
 - [x] 实现 output CBR/VBR packet。
-- [ ] 实现 padding 添加/移除。
+- [x] 实现 padding 添加/移除。
 - [ ] 测试拼接同 config packets。
 - [ ] 测试非法混合 config。
 - [ ] 测试 120ms 超限。

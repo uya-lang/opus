@@ -170,6 +170,70 @@ fn repacketizer_output_size(state: &const RepacketizerState, use_vbr: bool) !usi
     return bytes;
 }
 
+fn repacketizer_padding_code_bytes(padding_data_bytes: usize) usize {
+    return (padding_data_bytes / (255 as usize)) + (1 as usize);
+}
+
+fn repacketizer_padding_data_bytes_for_extra(extra_bytes: usize) !usize {
+    if extra_bytes == 0 {
+        return error.RepacketizerError;
+    }
+
+    const adjusted: usize = extra_bytes - 1;
+    const remainder: usize = adjusted % (256 as usize);
+    if remainder == (255 as usize) {
+        return error.RepacketizerError;
+    }
+
+    const full_chunks: usize = adjusted / (256 as usize);
+    return (full_chunks * (255 as usize)) + remainder;
+}
+
+fn repacketizer_code3_output_size(state: &const RepacketizerState, use_vbr: bool, has_padding: bool, padding_data_bytes: usize) !usize {
+    if state.frame_count == 0 {
+        return error.RepacketizerError;
+    }
+
+    if !use_vbr && !repacketizer_frames_are_equal_size(state) {
+        return error.RepacketizerError;
+    }
+
+    var bytes: usize = (2 as usize) + state.frame_data_len;
+    if has_padding {
+        bytes = bytes + repacketizer_padding_code_bytes(padding_data_bytes) + padding_data_bytes;
+    }
+
+    if use_vbr {
+        var i: usize = 0;
+        while i + 1 < state.frame_count {
+            bytes = bytes + repacketizer_length_code_bytes(state.frames[i].len);
+            i = i + 1;
+        }
+    }
+    return bytes;
+}
+
+fn repacketizer_write_padding_header(out: &[byte], cursor: &usize, padding_data_bytes: usize) void {
+    var remaining: usize = padding_data_bytes;
+    while remaining >= (255 as usize) {
+        out.ptr[*cursor] = 255;
+        *cursor = *cursor + 1;
+        remaining = remaining - (255 as usize);
+    }
+
+    out.ptr[*cursor] = (remaining as! byte).value;
+    *cursor = *cursor + 1;
+}
+
+fn repacketizer_write_padding_tail(out: &[byte], cursor: &usize, padding_data_bytes: usize) void {
+    var i: usize = 0;
+    while i < padding_data_bytes {
+        out.ptr[*cursor + i] = 0;
+        i = i + 1;
+    }
+    *cursor = *cursor + padding_data_bytes;
+}
+
 fn repacketizer_write_frame_data(state: &const RepacketizerState, out: &[byte], cursor: &usize) void {
     var i: usize = 0;
     while i < state.frame_data_len {
@@ -177,6 +241,46 @@ fn repacketizer_write_frame_data(state: &const RepacketizerState, out: &[byte], 
         i = i + 1;
     }
     *cursor = *cursor + state.frame_data_len;
+}
+
+fn repacketizer_output_code3_packet(state: &const RepacketizerState, out: &[byte], use_vbr: bool, has_padding: bool, padding_data_bytes: usize) !usize {
+    const needed: usize = try repacketizer_code3_output_size(state, use_vbr, has_padding, padding_data_bytes);
+    if out.len < needed {
+        return error.RepacketizerError;
+    }
+
+    var cursor: usize = 0;
+    out.ptr[cursor] = repacketizer_toc_byte_with_code(&state.toc, 3);
+    cursor = cursor + 1;
+
+    var count_byte: usize = state.frame_count;
+    if has_padding {
+        count_byte = count_byte + (64 as usize);
+    }
+    if use_vbr {
+        count_byte = count_byte + (128 as usize);
+    }
+    out.ptr[cursor] = (count_byte as! byte).value;
+    cursor = cursor + 1;
+
+    if has_padding {
+        repacketizer_write_padding_header(out, &cursor, padding_data_bytes);
+    }
+
+    if use_vbr {
+        var i: usize = 0;
+        while i + 1 < state.frame_count {
+            repacketizer_write_length(out, &cursor, state.frames[i].len);
+            i = i + 1;
+        }
+    }
+
+    repacketizer_write_frame_data(state, out, &cursor);
+
+    if has_padding {
+        repacketizer_write_padding_tail(out, &cursor, padding_data_bytes);
+    }
+    return cursor;
 }
 
 fn repacketizer_copy_parsed_frames(state: &RepacketizerState, packet: &[byte], parsed: &const PacketParseResult) void {
@@ -320,6 +424,40 @@ export fn repacketizer_output_packet(rp: &const Repacketizer, out: &[byte], use_
 
     repacketizer_write_frame_data(state, out, &cursor);
     return cursor;
+}
+
+export fn repacketizer_output_padded_packet(rp: &const Repacketizer, out: &[byte], use_vbr: bool, target_len: usize) !usize {
+    const state: &const RepacketizerState = repacketizer_state_const(rp);
+    if !state.initialized {
+        return error.RepacketizerError;
+    }
+
+    const compact_len: usize = try repacketizer_output_size(state, use_vbr);
+    if target_len == compact_len {
+        return repacketizer_output_packet(rp, out, use_vbr);
+    }
+
+    const code3_len: usize = try repacketizer_code3_output_size(state, use_vbr, false, 0);
+    if target_len == code3_len {
+        return repacketizer_output_code3_packet(state, out, use_vbr, false, 0);
+    }
+    if target_len < code3_len {
+        return error.RepacketizerError;
+    }
+
+    const padding_extra: usize = target_len - code3_len;
+    const padding_data_bytes: usize = try repacketizer_padding_data_bytes_for_extra(padding_extra);
+    return repacketizer_output_code3_packet(state, out, use_vbr, true, padding_data_bytes);
+}
+
+export fn repacketizer_remove_padding(packet: &[byte], out: &[byte]) !usize {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+    try repacketizer_add_packet(&rp, packet);
+
+    const state: &const RepacketizerState = repacketizer_state_const(&rp);
+    const use_vbr: bool = !repacketizer_frames_are_equal_size(state);
+    return repacketizer_output_packet(&rp, out, use_vbr);
 }
 
 export fn repacketizer_duration_us(rp: &const Repacketizer) u32 {

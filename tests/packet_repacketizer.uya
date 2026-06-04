@@ -7,8 +7,10 @@ use src.opus.packet.repacketizer.repacketizer_duration_us;
 use src.opus.packet.repacketizer.repacketizer_frame_count;
 use src.opus.packet.repacketizer.repacketizer_init;
 use src.opus.packet.repacketizer.repacketizer_is_empty;
+use src.opus.packet.repacketizer.repacketizer_output_padded_packet;
 use src.opus.packet.repacketizer.repacketizer_output_packet;
 use src.opus.packet.repacketizer.repacketizer_payload_bytes;
+use src.opus.packet.repacketizer.repacketizer_remove_padding;
 use src.opus.packet.repacketizer.repacketizer_reset;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_packet;
@@ -165,6 +167,60 @@ test "repacketizer outputs variable frames as VBR packet" {
     var parsed: PacketParseResult = PacketParseResult{};
     try parse_packet(&out[0:written], &parsed);
     try assert_eq_i32(parsed.info.frame_count as i32, 3);
+    try assert_eq_i32(parsed.frames[0].len as i32, 3);
+    try assert_eq_i32(parsed.frames[1].len as i32, 2);
+    try assert_eq_i32(parsed.frames[2].len as i32, 2);
+}
+
+test "repacketizer adds padding to CBR code 3 output" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var frame: [byte: 4] = [248, 17, 18, 19];
+    try repacketizer_add_packet(&rp, &frame[0:4]);
+    try repacketizer_add_packet(&rp, &frame[0:4]);
+    try repacketizer_add_packet(&rp, &frame[0:4]);
+
+    var out: [byte: 16] = [255: 16];
+    const written: usize = try repacketizer_output_padded_packet(&rp, &out[0:16], false, 16);
+    try assert_eq_i32(written as i32, 16);
+    try assert_byte_eq(out[0], 251);
+    try assert_byte_eq(out[1], 67);
+    try assert_byte_eq(out[2], 4);
+    try assert_byte_eq(out[15], 0);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&out[0:written], &parsed);
+    try assert(parsed.info.has_padding, "padded output must set the padding bit");
+    try assert_eq_i32(parsed.info.frame_count as i32, 3);
+    try assert_eq_i32(parsed.frames[0].len as i32, 3);
+    try assert_eq_i32(parsed.frames[2].len as i32, 3);
+}
+
+test "repacketizer removes padding from VBR code 3 packet" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var one_frame: [byte: 4] = [248, 17, 18, 19];
+    var two_cbr: [byte: 5] = [249, 1, 2, 3, 4];
+    try repacketizer_add_packet(&rp, &one_frame[0:4]);
+    try repacketizer_add_packet(&rp, &two_cbr[0:5]);
+
+    var padded: [byte: 15] = [0: 15];
+    const padded_len: usize = try repacketizer_output_padded_packet(&rp, &padded[0:15], true, 15);
+    try assert_eq_i32(padded_len as i32, 15);
+    try assert_byte_eq(padded[1], 195);
+    try assert_byte_eq(padded[2], 3);
+
+    var compact: [byte: 15] = [0: 15];
+    const compact_len: usize = try repacketizer_remove_padding(&padded[0:padded_len], &compact[0:15]);
+    try assert_eq_i32(compact_len as i32, 11);
+    try assert_byte_eq(compact[0], 251);
+    try assert_byte_eq(compact[1], 131);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&compact[0:compact_len], &parsed);
+    try assert(!parsed.info.has_padding, "compact packet must not keep padding");
     try assert_eq_i32(parsed.frames[0].len as i32, 3);
     try assert_eq_i32(parsed.frames[1].len as i32, 2);
     try assert_eq_i32(parsed.frames[2].len as i32, 2);
