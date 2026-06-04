@@ -343,6 +343,73 @@ test "decoder api rejects illegal public parameters" {
     }
 }
 
+test "decoder api remains usable after error returns" {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var packet: [byte: 65] = [0: 65];
+    packet[0] = (128 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        packet[i] = ((i * 17 + 23) as! byte).value;
+        i = i + 1;
+    }
+
+    var pcm: [i16: 120] = [777: 120];
+    const first_decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:120], 120, false);
+    try assert_eq_i32(first_decoded, 120);
+    try assert(pcm[119] != 777, "baseline decode must write output before error recovery checks");
+
+    const bad_reinit_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 44100, channels: 1 };
+    const bad_reinit: !void = decoder_init(&decoder, &bad_reinit_config);
+    match bad_reinit {
+        error.DecoderApiError => {}
+        else => { try assert(false, "invalid re-init must return an API error"); }
+    }
+
+    const bad_frame: !i32 = decoder_decode_i16(&decoder, &packet[0:65], &pcm[0:120], 0, false);
+    match bad_frame {
+        error.DecoderApiError => {}
+        else => { try assert(false, "zero frame size must return an API error"); }
+    }
+
+    var short_pcm: [i16: 119] = [0: 119];
+    const short_output: !i32 = decoder_decode_i16(&decoder, &packet[0:65], &short_pcm[0:119], 120, false);
+    match short_output {
+        error.DecoderApiError => {}
+        else => { try assert(false, "short output buffer must return an API error"); }
+    }
+
+    var malformed: [byte: 2] = [0: 2];
+    malformed[0] = (255 as! byte).value;
+    malformed[1] = (255 as! byte).value;
+    const malformed_decode: !i32 = decoder_decode_i16(&decoder, &malformed[0:2], &pcm[0:120], 120, false);
+    match malformed_decode {
+        error.DecoderApiError => {}
+        error.DecoderApiUnsupported => {}
+        else => { try assert(false, "malformed packet must return a decoder API error"); }
+    }
+
+    const bad_gain: !void = decoder_set_gain_q8(&decoder, -1);
+    match bad_gain {
+        error.DecoderApiError => {}
+        else => { try assert(false, "invalid gain must return an API error"); }
+    }
+
+    var recovered_packet: [byte: 65] = [0: 65];
+    recovered_packet[0] = (128 as! byte).value;
+    i = 1;
+    while i < 65 {
+        recovered_packet[i] = ((255 - (i * 3)) as! byte).value;
+        i = i + 1;
+    }
+    var recovered_pcm: [i16: 120] = [777: 120];
+    const recovered: i32 = try decoder_decode_i16(&decoder, &recovered_packet[0:65], &recovered_pcm[0:120], 120, false);
+    try assert_eq_i32(recovered, 120);
+    try assert(recovered_pcm[119] != 777, "decoder must remain usable after API error returns");
+}
+
 test "decoder api empty packet invokes celt plc" {
     var decoder: OpusDecoder = OpusDecoder{};
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
