@@ -41,6 +41,12 @@ API_PUBLIC_FORBIDDEN_STATE_TYPES = (
     "SilkStereoState",
 )
 API_PUBLIC_FILES = (ROOT / "src" / "opus" / "api",)
+API_DECODER_FILE = ROOT / "src" / "opus" / "api" / "decoder.uya"
+API_DECODER_INIT_FORBIDDEN_SCRATCH_CLEARS = (
+    ("decoder.scratch.celt_decode", "CeltMonoDecodeScratch"),
+    ("decoder.scratch.celt_plc", "CeltPlcScratch"),
+    ("decoder.scratch.hybrid", "HybridDecoderScratch"),
+)
 
 
 def uya_files(paths: list[Path], test_prefix: str) -> list[Path]:
@@ -113,6 +119,39 @@ def check_api_public_structs_do_not_embed_codec_state(violations: list[str]) -> 
                     )
 
 
+def function_body_lines(path: Path, function_name: str) -> list[tuple[int, str]]:
+    lines = path.read_text().splitlines()
+    body: list[tuple[int, str]] = []
+    in_function = False
+    depth = 0
+
+    for line_no, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not in_function:
+            if stripped.startswith(f"fn {function_name}("):
+                in_function = True
+                depth = line.count("{") - line.count("}")
+            continue
+
+        body.append((line_no, line))
+        depth += line.count("{") - line.count("}")
+        if depth == 0:
+            break
+
+    return body
+
+
+def check_api_decoder_init_avoids_large_scratch_clears(violations: list[str]) -> None:
+    rel = API_DECODER_FILE.relative_to(ROOT)
+    for line_no, line in function_body_lines(API_DECODER_FILE, "decoder_init_state"):
+        compact = "".join(line.split())
+        for lhs, type_name in API_DECODER_INIT_FORBIDDEN_SCRATCH_CLEARS:
+            if f"{lhs}={type_name}{{}};" in compact:
+                violations.append(
+                    f"{rel}:{line_no}: decoder_init_state must not clear large {type_name} scratch for single-stream init"
+                )
+
+
 def main() -> int:
     violations: list[str] = []
     for boundary in BOUNDARIES:
@@ -130,6 +169,7 @@ def main() -> int:
 
     check_hybrid_glue_state_ownership(violations)
     check_api_public_structs_do_not_embed_codec_state(violations)
+    check_api_decoder_init_avoids_large_scratch_clears(violations)
 
     if violations:
         for violation in violations:

@@ -230,14 +230,11 @@ fn decoder_init_state(decoder: &OpusDecoderState, config: &const OpusDecoderConf
     };
     decoder.gain_q8 = Q8_ONE;
     decoder.history.active_mode = OpusMode.CELT;
-    decoder.scratch.celt_decode = CeltMonoDecodeScratch{};
-    decoder.scratch.celt_plc = CeltPlcScratch{};
     decoder.history.silk = SilkDecoderState{};
     silk_stereo_reset(&decoder.history.silk_stereo);
     decoder.history.hybrid = HybridDecoderState{};
     decoder.history.hybrid_silk = SilkDecoderState{};
     silk_stereo_reset(&decoder.history.hybrid_silk_stereo);
-    decoder.scratch.hybrid = HybridDecoderScratch{};
     celt_state_init(&decoder.history.celt, config.channels as i32) catch {
         return error.DecoderApiError;
     };
