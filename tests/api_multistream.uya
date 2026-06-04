@@ -9,6 +9,7 @@ use src.opus.api.multistream.multistream_decoder_channel_count;
 use src.opus.api.multistream.multistream_decoder_coupled_count;
 use src.opus.api.multistream.multistream_decoder_config_family0;
 use src.opus.api.multistream.multistream_decoder_config_family1;
+use src.opus.api.multistream.multistream_decoder_config_family255;
 use src.opus.api.multistream.multistream_decoder_init;
 use src.opus.api.multistream.multistream_decoder_is_initialized;
 use src.opus.api.multistream.multistream_decoder_mapping_at;
@@ -175,5 +176,58 @@ test "mapping family 1 rejects unsupported layout inputs" {
     match bad_rate {
         error.MultistreamApiError => {}
         else => { try assert(false, "family 1 must validate Opus API sample rates"); }
+    }
+}
+
+test "mapping family 255 copies explicit channel mappings" {
+    const identity: [u8: 3] = [0, 1, 2];
+    const config: MultistreamDecoderConfig = try multistream_decoder_config_family255(48000, 3, 3, 0, &identity[0:3]);
+    try assert_eq_i32(config.channel_count as i32, 3);
+    try assert_eq_i32(config.stream_count as i32, 3);
+    try assert_eq_i32(config.coupled_count as i32, 0);
+    try assert_eq_i32(config.mapping_family as i32, 255);
+    try assert_eq_i32(config.mapping[0] as i32, 0);
+    try assert_eq_i32(config.mapping[1] as i32, 1);
+    try assert_eq_i32(config.mapping[2] as i32, 2);
+}
+
+test "mapping family 255 accepts silent and coupled explicit layouts" {
+    const explicit_map: [u8: 4] = [0, OPUS_MULTISTREAM_MAPPING_SILENT, 1, 2];
+    const config: MultistreamDecoderConfig = try multistream_decoder_config_family255(48000, 4, 2, 1, &explicit_map[0:4]);
+    try assert_eq_i32(config.channel_count as i32, 4);
+    try assert_eq_i32(config.stream_count as i32, 2);
+    try assert_eq_i32(config.coupled_count as i32, 1);
+    try assert_eq_i32(config.mapping[0] as i32, 0);
+    try assert_eq_i32(config.mapping[1] as i32, OPUS_MULTISTREAM_MAPPING_SILENT as i32);
+    try assert_eq_i32(config.mapping[2] as i32, 1);
+    try assert_eq_i32(config.mapping[3] as i32, 2);
+}
+
+test "mapping family 255 rejects malformed explicit layouts" {
+    const short_map: [u8: 1] = [0];
+    const too_short: !MultistreamDecoderConfig = multistream_decoder_config_family255(48000, 2, 2, 0, &short_map[0:1]);
+    match too_short {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 255 mapping slice must cover all output channels"); }
+    }
+
+    const bad_mapping: [u8: 2] = [0, 1];
+    const out_of_range: !MultistreamDecoderConfig = multistream_decoder_config_family255(48000, 2, 1, 0, &bad_mapping[0:2]);
+    match out_of_range {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 255 mapping values must fit decoded channel count"); }
+    }
+
+    const good_map: [u8: 1] = [0];
+    const zero_channels: !MultistreamDecoderConfig = multistream_decoder_config_family255(48000, 0, 1, 0, &good_map[0:1]);
+    match zero_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 255 must reject zero output channels"); }
+    }
+
+    const bad_rate: !MultistreamDecoderConfig = multistream_decoder_config_family255(44100, 1, 1, 0, &good_map[0:1]);
+    match bad_rate {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 255 must validate Opus API sample rates"); }
     }
 }

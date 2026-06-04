@@ -7,6 +7,7 @@ export const OPUS_MULTISTREAM_MAX_STREAMS: usize = 255;
 export const OPUS_MULTISTREAM_MAPPING_SILENT: u8 = 255;
 export const OPUS_MULTISTREAM_MAPPING_FAMILY_0: u8 = 0;
 export const OPUS_MULTISTREAM_MAPPING_FAMILY_1: u8 = 1;
+export const OPUS_MULTISTREAM_MAPPING_FAMILY_255: u8 = 255;
 export const OPUS_MULTISTREAM_DECODER_STORAGE_WORDS: usize = 128;
 
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS: usize = 8;
@@ -126,6 +127,47 @@ export fn multistream_decoder_config_family1(sample_rate_hz: u32, channel_count:
         coupled_count: OPUS_MULTISTREAM_MAPPING_FAMILY_1_COUPLED_COUNTS[layout_index],
         mapping_family: OPUS_MULTISTREAM_MAPPING_FAMILY_1,
         mapping: mapping,
+    };
+    multistream_validate_decoder_config(&config) catch {
+        return error.MultistreamApiError;
+    };
+    return config;
+}
+
+export fn multistream_decoder_config_family255(
+    sample_rate_hz: u32,
+    channel_count: u8,
+    stream_count: u8,
+    coupled_count: u8,
+    mapping: &[const u8],
+) !MultistreamDecoderConfig {
+    validate_sample_rate(sample_rate_hz) catch {
+        return error.MultistreamApiError;
+    };
+    if channel_count == 0 {
+        return error.MultistreamApiError;
+    }
+    if mapping.len < (channel_count as usize) {
+        return error.MultistreamApiError;
+    }
+
+    var copied_mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    var i: usize = 0;
+    while i < (channel_count as usize) {
+        if i >= mapping.len || i >= OPUS_MULTISTREAM_MAX_CHANNELS {
+            return error.MultistreamApiError;
+        }
+        copied_mapping[i] = mapping.ptr[i];
+        i = i + 1;
+    }
+
+    const config: MultistreamDecoderConfig = MultistreamDecoderConfig{
+        sample_rate_hz: sample_rate_hz,
+        channel_count: channel_count,
+        stream_count: stream_count,
+        coupled_count: coupled_count,
+        mapping_family: OPUS_MULTISTREAM_MAPPING_FAMILY_255,
+        mapping: copied_mapping,
     };
     multistream_validate_decoder_config(&config) catch {
         return error.MultistreamApiError;
