@@ -88,15 +88,24 @@ test "range decoder fractional tell matches upstream correction-boundary vectors
     try assert_tell_frac_reference(0x80000000, 360);
 }
 
-test "range decoder flags truncated input through ec_dec_check" {
-    const truncated: [byte: 1] = [139];
+test "range decoder zero pads normalization after payload end" {
+    const packet: [byte: 1] = [139];
     var dec: EcDec = EcDec{};
-    ec_dec_init(&dec, &truncated[0:1]);
+    ec_dec_init(&dec, &packet[0:1]);
+
+    try assert_eq_i32(dec.offs as i32, 1);
+    try ec_dec_check(&dec);
+}
+
+test "range decoder flags empty input through ec_dec_check" {
+    const empty: [byte: 1] = [0];
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &empty[0:0]);
 
     const result: !void = ec_dec_check(&dec);
     match result {
         error.EntropyDecoderError => {}
-        else => { try assert(false, "truncated entropy stream must be reported"); }
+        else => { try assert(false, "empty entropy stream must be reported"); }
     }
 }
 

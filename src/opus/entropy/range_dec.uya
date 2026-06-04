@@ -47,8 +47,7 @@ export fn ec_ilog(v_in: u32) u32 {
 }
 
 fn read_byte(st: &EcDec) u32 {
-    if st.offs + st.end_offs >= st.storage {
-        st.err = true;
+    if st.offs >= st.storage {
         return 0;
     }
     const b: u32 = st.buf[st.offs] as u32;
@@ -57,8 +56,7 @@ fn read_byte(st: &EcDec) u32 {
 }
 
 fn read_byte_from_end(st: &EcDec) u32 {
-    if st.offs + st.end_offs >= st.storage {
-        st.err = true;
+    if st.end_offs >= st.storage {
         return 0;
     }
     st.end_offs = st.end_offs + 1;
@@ -90,6 +88,9 @@ export fn ec_dec_init(st: &EcDec, buf: &[byte]) void {
     st.val = st.rng - 1 - (st.rem >> (EC_SYM_BITS_SHIFT - EC_CODE_EXTRA_SHIFT));
     st.ext = 0;
     ec_dec_normalize(st);
+    if buf.len == 0 {
+        st.err = true;
+    }
 }
 
 export fn ec_decode(st: &EcDec, ft: u32) u32 {

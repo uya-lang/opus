@@ -16,6 +16,14 @@ export struct HybridHighbandDecodeResult {
     remaining_bits: i32,
 }
 
+fn hybrid_highband_clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
 fn hybrid_highband_frame_samples_48k(duration_us: u32) !i32 {
     if duration_us == 10000 {
         return 480;
@@ -58,7 +66,17 @@ export fn hybrid_highband_decode_i16(
 
     const celt_start: i32 = split.celt_start_bit;
     const current_tell: i32 = ec_tell(&split.dec) as i32;
-    if current_tell != celt_start || split.celt_budget_bits <= 0 || split.celt_budget_bits != split.active_bits - celt_start {
+    if split.celt_budget_bits <= 0 {
+        hybrid_highband_clear_i16(&pcm_i16[0:required_samples]);
+        split.celt_budget_bits = 0;
+        return HybridHighbandDecodeResult{
+            decoded_samples_48k: frame_size,
+            celt_start_bit: celt_start,
+            celt_end_bit: celt_start,
+            remaining_bits: 0,
+        };
+    }
+    if current_tell != celt_start || split.celt_budget_bits != split.active_bits - celt_start {
         return error.HybridHighbandError;
     }
 
@@ -78,9 +96,12 @@ export fn hybrid_highband_decode_i16(
         return error.HybridHighbandError;
     }
 
-    const celt_end: i32 = ec_tell(&split.dec) as i32;
-    if celt_end < celt_start || celt_end > split.active_bits {
+    var celt_end: i32 = ec_tell(&split.dec) as i32;
+    if celt_end < celt_start {
         return error.HybridHighbandError;
+    }
+    if celt_end > split.active_bits {
+        celt_end = split.active_bits;
     }
     split.celt_budget_bits = split.active_bits - celt_end;
 

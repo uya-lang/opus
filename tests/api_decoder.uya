@@ -66,6 +66,67 @@ const RFC8251_TESTVECTOR01_PACKET0: [byte: 731] = [
     124, 247, 233, 144, 149, 154, 20, 161, 4, 181, 76
 ];
 
+const RFC8251_TESTVECTOR02_PACKET0: [byte: 30] = [
+    24, 0, 117, 35, 193, 30, 132, 212, 10, 126, 208, 7, 81, 52, 218, 159,
+    252, 5, 41, 239, 159, 65, 1, 87, 181, 124, 31, 132, 62, 64
+];
+
+const RFC8251_TESTVECTOR02_PACKET602: [byte: 349] = [
+    28, 226, 127, 133, 49, 16, 236, 130, 95, 186, 188, 136, 232, 130, 12, 177,
+    165, 214, 186, 37, 6, 158, 193, 216, 204, 20, 234, 37, 225, 163, 140, 207,
+    212, 234, 175, 179, 89, 108, 20, 68, 194, 224, 47, 232, 112, 104, 71, 213,
+    110, 87, 207, 96, 95, 151, 50, 221, 175, 94, 250, 104, 59, 174, 94, 191,
+    217, 168, 205, 59, 250, 156, 126, 50, 240, 228, 132, 24, 185, 127, 197, 69,
+    3, 206, 202, 161, 204, 107, 26, 70, 217, 17, 35, 144, 129, 25, 185, 121,
+    59, 62, 107, 212, 8, 184, 156, 159, 234, 179, 5, 117, 249, 113, 233, 37,
+    188, 141, 126, 176, 97, 187, 34, 244, 120, 100, 48, 226, 161, 72, 121, 45,
+    62, 48, 151, 190, 168, 225, 24, 111, 107, 14, 253, 204, 16, 122, 198, 243,
+    61, 27, 12, 168, 132, 225, 92, 44, 59, 159, 23, 193, 28, 171, 182, 175,
+    215, 59, 113, 124, 178, 217, 1, 83, 45, 203, 65, 173, 237, 220, 109, 4,
+    53, 42, 4, 166, 205, 78, 172, 39, 90, 177, 138, 23, 178, 225, 255, 17,
+    97, 112, 14, 116, 53, 100, 223, 219, 252, 88, 133, 68, 145, 185, 79, 161,
+    86, 82, 4, 209, 95, 95, 75, 21, 163, 147, 67, 73, 70, 1, 250, 92,
+    140, 127, 155, 70, 64, 99, 195, 50, 102, 149, 29, 201, 101, 9, 98, 0,
+    228, 141, 26, 17, 157, 25, 70, 86, 62, 58, 40, 4, 9, 101, 79, 30,
+    153, 65, 187, 246, 236, 115, 116, 217, 149, 113, 92, 144, 43, 145, 78, 99,
+    38, 45, 176, 72, 4, 143, 220, 113, 20, 128, 102, 2, 153, 36, 124, 64,
+    114, 28, 253, 2, 10, 140, 153, 103, 199, 172, 110, 102, 234, 48, 152, 33,
+    170, 49, 184, 254, 157, 233, 99, 118, 197, 165, 140, 176, 186, 225, 194, 241,
+    19, 103, 134, 0, 65, 47, 76, 97, 48, 217, 86, 100, 129, 1, 243, 73,
+    213, 187, 243, 167, 59, 106, 228, 58, 147, 185, 42, 85, 55
+];
+
+const RFC8251_TESTVECTOR05_PACKET0: [byte: 29] = [
+    104, 12, 83, 26, 68, 28, 187, 38, 152, 234, 8, 161, 247, 106, 114, 104,
+    96, 102, 253, 85, 30, 217, 67, 66, 43, 158, 100, 42, 64
+];
+
+const RFC8251_TESTVECTOR05_PACKET1: [byte: 28] = [
+    104, 12, 69, 239, 70, 62, 139, 186, 28, 174, 100, 160, 51, 224, 133, 60,
+    7, 254, 239, 198, 59, 225, 54, 8, 179, 83, 6, 144
+];
+
+const RFC8251_TESTVECTOR05_PACKET2: [byte: 34] = [
+    104, 12, 38, 250, 0, 71, 91, 16, 128, 55, 169, 224, 72, 123, 130, 165,
+    212, 125, 143, 165, 51, 19, 71, 193, 101, 138, 10, 178, 137, 219, 96, 66,
+    133, 156
+];
+
+const RFC8251_TESTVECTOR05_PACKET3: [byte: 30] = [
+    104, 11, 83, 11, 128, 230, 157, 162, 33, 40, 63, 157, 115, 57, 30, 170,
+    99, 133, 95, 252, 140, 59, 80, 34, 57, 235, 208, 223, 46, 74
+];
+
+const RFC8251_TESTVECTOR05_PACKET1020: [byte: 107] = [
+    108, 7, 253, 240, 23, 221, 158, 16, 127, 141, 196, 12, 119, 48, 240, 41,
+    203, 241, 18, 254, 10, 185, 197, 175, 131, 249, 184, 106, 16, 89, 149, 5,
+    171, 220, 169, 140, 233, 12, 215, 36, 88, 177, 16, 135, 215, 205, 234, 184,
+    203, 35, 83, 71, 247, 81, 112, 229, 253, 12, 245, 237, 121, 215, 89, 4,
+    214, 40, 209, 246, 130, 251, 99, 201, 97, 67, 136, 11, 96, 89, 98, 232,
+    176, 244, 165, 179, 137, 68, 112, 192, 249, 36, 142, 159, 148, 60, 14, 253,
+    72, 236, 92, 111, 229, 27, 178, 0, 205, 96, 87
+];
+
 fn fill_celt_stereo_3x20ms_packet(packet: &[byte]) void {
     packet.ptr[0] = (255 as! byte).value;
     packet.ptr[1] = (131 as! byte).value;
@@ -424,6 +485,128 @@ test "decoder api decodes RFC8251 testvector01 first packet to 8k mono" {
     try assert_eq_i32(decoded, 480);
     try assert_eq_i32(decoder.history.last_frame_size_48k, 2880);
     try assert(pcm[479] != 777, "RFC8251 CELT packet must downmix and resample into 8k mono PCM");
+}
+
+test "decoder api decodes RFC8251 testvector02 first packet to 8k mono" {
+    var packet: [byte: 30] = RFC8251_TESTVECTOR02_PACKET0;
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:30], &info);
+    try assert(info.mode == OpusMode.SILK, "testvector02 first packet must be SILK");
+    try assert_eq_i32(info.channels as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 60000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 2880);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: 480] = [777: 480];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:30], &pcm[0:480], 480, false);
+    try assert_eq_i32(decoded, 480);
+    try assert(decoder.history.active_mode == OpusMode.SILK, "RFC8251 SILK packet must switch decoder into SILK mode");
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 2880);
+    try assert(pcm[479] != 777, "RFC8251 SILK packet must write requested 8k mono PCM");
+}
+
+test "decoder api decodes RFC8251 testvector02 stereo silk packet to 8k mono" {
+    var packet: [byte: 349] = RFC8251_TESTVECTOR02_PACKET602;
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:349], &info);
+    try assert(info.mode == OpusMode.SILK, "testvector02 packet 602 must be SILK");
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_duration_us as i32, 60000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 2880);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: 480] = [777: 480];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:349], &pcm[0:480], 480, false);
+    try assert_eq_i32(decoded, 480);
+    try assert(decoder.history.active_mode == OpusMode.SILK, "RFC8251 stereo SILK packet must switch decoder into SILK mode");
+    try assert_eq_i32(decoder.history.silk.channels, 2);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 2880);
+    try assert(pcm[479] != 777, "RFC8251 stereo SILK packet must downmix and write requested PCM");
+}
+
+test "decoder api decodes RFC8251 testvector05 hybrid prefix to 8k mono" {
+    var packet0: [byte: 29] = RFC8251_TESTVECTOR05_PACKET0;
+    var packet1: [byte: 28] = RFC8251_TESTVECTOR05_PACKET1;
+    var packet2: [byte: 34] = RFC8251_TESTVECTOR05_PACKET2;
+    var packet3: [byte: 30] = RFC8251_TESTVECTOR05_PACKET3;
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet3[0:30], &info);
+    try assert(info.mode == OpusMode.HYBRID, "testvector05 packet 3 must be Hybrid");
+    try assert_eq_i32(info.channels as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: 160] = [777: 160];
+    try assert_eq_i32(try decoder_decode_i16(&decoder, &packet0[0:29], &pcm[0:160], 160, false), 160);
+    try assert_eq_i32(try decoder_decode_i16(&decoder, &packet1[0:28], &pcm[0:160], 160, false), 160);
+    try assert_eq_i32(try decoder_decode_i16(&decoder, &packet2[0:34], &pcm[0:160], 160, false), 160);
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet3[0:30], &pcm[0:160], 160, false);
+    try assert_eq_i32(decoded, 160);
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "RFC8251 Hybrid packet prefix must keep Hybrid mode active");
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 960);
+    try assert(pcm[159] != 777, "RFC8251 Hybrid packet must resample into 8k mono PCM");
+}
+
+test "decoder api decodes RFC8251 testvector05 stereo hybrid packet to 8k mono" {
+    var packet: [byte: 107] = RFC8251_TESTVECTOR05_PACKET1020;
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:107], &info);
+    try assert(info.mode == OpusMode.HYBRID, "testvector05 packet 1020 must be Hybrid");
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: 160] = [777: 160];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:107], &pcm[0:160], 160, false);
+    try assert_eq_i32(decoded, 160);
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "RFC8251 stereo Hybrid packet must switch decoder into Hybrid mode");
+    try assert_eq_i32(decoder.history.celt.channels, 2);
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 960);
+    try assert(pcm[159] != 777, "RFC8251 stereo Hybrid packet must downmix and resample into 8k mono PCM");
+}
+
+test "decoder api decodes Hybrid multi-frame packet to 8k mono" {
+    var packet: [byte: 511] = [0: 511];
+    packet[0] = (97 as! byte).value;
+    _ = try hybrid_test_encode_wb_lowband_payload(&packet[1:255], 160);
+    _ = try hybrid_test_encode_wb_lowband_payload(&packet[256:255], 160);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:511], &info);
+    try assert(info.mode == OpusMode.HYBRID, "two-frame packet must remain Hybrid");
+    try assert_eq_i32(info.channels as i32, 1);
+    try assert_eq_i32(info.frame_count as i32, 2);
+    try assert_eq_i32(info.frame_duration_us as i32, 10000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 8000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: 160] = [777: 160];
+    const decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:511], &pcm[0:160], 160, false);
+    try assert_eq_i32(decoded, 160);
+    try assert(decoder.history.active_mode == OpusMode.HYBRID, "multi-frame Hybrid packet must keep Hybrid mode active");
+    try assert_eq_i32(decoder.history.last_frame_size_48k, 960);
+    try assert(pcm[159] != 777, "multi-frame Hybrid packet must fill the full resampled output");
 }
 
 test "decoder api validates CELT output buffer size" {

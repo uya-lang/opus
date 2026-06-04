@@ -1,15 +1,23 @@
 use src.opus.hybrid.budget.HybridBudgetSplit;
 use src.opus.hybrid.budget.hybrid_budget_refresh_after_silk;
+use src.opus.core.saturate.sat32;
 use src.opus.hybrid.state.HYBRID_SILK_SAMPLE_RATE_HZ;
+use src.opus.silk.decoder.silk_decoder_decode_channel_frame_q14;
 use src.opus.silk.decoder.silk_decoder_decode_mono_frame_q14;
+use src.opus.silk.decoder.silk_decoder_reconstruct_stereo_i16;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_check;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init_from_ec;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_store_ec;
+use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SilkDecoderState;
 use src.opus.silk.state.silk_state_init;
+use src.opus.silk.stereo.SilkStereoState;
+use src.opus.silk.stereo.silk_stereo_decode_mid_only;
+use src.opus.silk.stereo.silk_stereo_decode_pred_q13;
+use src.opus.silk.stereo.silk_stereo_reset;
 
 export error HybridLowbandError;
 
@@ -40,37 +48,67 @@ fn hybrid_lowband_frame_samples_16k(duration_us: u32) !i32 {
     return error.HybridLowbandError;
 }
 
-fn hybrid_lowband_state_matches(state: &const SilkDecoderState, frame_ms: i32, frame_len: i32) bool {
-    return state.channels == 1
+fn hybrid_lowband_state_matches(state: &const SilkDecoderState, channels: i32, frame_ms: i32, frame_len: i32) bool {
+    return state.channels == channels
         && state.sample_rate_hz == HYBRID_SILK_SAMPLE_RATE_HZ
         && state.frame_ms == frame_ms
         && state.frame_length == frame_len;
 }
 
-fn hybrid_lowband_configure_state(state: &SilkDecoderState, frame_ms: i32, frame_len: i32) !void {
-    if hybrid_lowband_state_matches(state, frame_ms, frame_len) {
-        return;
+fn hybrid_lowband_configure_state_changed(state: &SilkDecoderState, channels: i32, frame_ms: i32, frame_len: i32) !bool {
+    if channels < 1 || channels > 2 {
+        return error.HybridLowbandError;
     }
-    silk_state_init(state, 1, HYBRID_SILK_SAMPLE_RATE_HZ, frame_ms) catch {
+    if hybrid_lowband_state_matches(state, channels, frame_ms, frame_len) {
+        return false;
+    }
+    silk_state_init(state, channels, HYBRID_SILK_SAMPLE_RATE_HZ, frame_ms) catch {
         return error.HybridLowbandError;
     };
+    return true;
+}
+
+fn hybrid_lowband_i16_to_q14(value: i16) i32 {
+    return sat32((value as i64) * 16384L);
+}
+
+fn hybrid_lowband_clear_i32(values: &[i32]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
 }
 
 export fn hybrid_lowband_decode_mono_q14(state: &SilkDecoderState, split: &HybridBudgetSplit, out_q14: &[i32]) !HybridLowbandDecodeResult {
-    if split.channels != 1 || split.active_frame_bytes == 0 || split.active_bits <= 0 {
+    if split.channels != 1 {
+        return error.HybridLowbandError;
+    }
+    var stereo_state: SilkStereoState = SilkStereoState{};
+    return hybrid_lowband_decode_q14(state, &stereo_state, split, out_q14);
+}
+
+export fn hybrid_lowband_decode_q14(state: &SilkDecoderState, stereo_state: &SilkStereoState, split: &HybridBudgetSplit, out_q14: &[i32]) !HybridLowbandDecodeResult {
+    if split.channels < 1 || split.channels > 2 || split.active_frame_bytes == 0 || split.active_bits <= 0 {
         return error.HybridLowbandError;
     }
 
     const frame_ms: i32 = try hybrid_lowband_frame_ms(split.frame_duration_us);
     const frame_len: i32 = try hybrid_lowband_frame_samples_16k(split.frame_duration_us);
-    if out_q14.len < (frame_len as usize) {
+    const channels: usize = split.channels as usize;
+    const frame_len_usize: usize = frame_len as usize;
+    const required: usize = frame_len_usize * channels;
+    if out_q14.len < required {
         return error.HybridLowbandError;
     }
 
-    try hybrid_lowband_configure_state(state, frame_ms, frame_len);
+    const state_changed: bool = try hybrid_lowband_configure_state_changed(state, split.channels, frame_ms, frame_len);
+    if state_changed {
+        silk_stereo_reset(stereo_state);
+    }
 
     var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
-    silk_entropy_decoder_init_from_ec(&entropy, &split.dec, 1, 1) catch {
+    silk_entropy_decoder_init_from_ec(&entropy, &split.dec, split.channels, 1) catch {
         return error.HybridLowbandError;
     };
     silk_entropy_decode_vad_flags(&entropy) catch {
@@ -80,11 +118,63 @@ export fn hybrid_lowband_decode_mono_q14(state: &SilkDecoderState, split: &Hybri
         return error.HybridLowbandError;
     };
 
-    const decoded: usize = silk_decoder_decode_mono_frame_q14(state, &entropy, 0, &out_q14[0:(frame_len as usize)]) catch {
+    var pred_q13: [i32: 2] = [0: 2];
+    var mid_only: bool = false;
+    if split.channels == 2 {
+        silk_stereo_decode_pred_q13(&entropy.ec, &pred_q13[0:2]) catch {
+            return error.HybridLowbandError;
+        };
+        mid_only = (silk_stereo_decode_mid_only(&entropy.ec) catch {
+            return error.HybridLowbandError;
+        }) != 0;
+    }
+
+    const mid_q14: &[i32] = &out_q14[0:frame_len_usize];
+    var decoded: usize = 0;
+    if split.channels == 1 {
+        decoded = silk_decoder_decode_mono_frame_q14(state, &entropy, 0, mid_q14) catch {
+            return error.HybridLowbandError;
+        };
+    } else {
+        decoded = silk_decoder_decode_channel_frame_q14(state, &entropy, 0, 0, mid_q14) catch {
+            return error.HybridLowbandError;
+        };
+    }
+    if decoded != frame_len_usize {
         return error.HybridLowbandError;
-    };
-    if decoded != (frame_len as usize) {
-        return error.HybridLowbandError;
+    }
+
+    if split.channels == 2 {
+        const side_q14: &[i32] = &out_q14[frame_len_usize:frame_len_usize];
+        if mid_only {
+            hybrid_lowband_clear_i32(side_q14);
+        } else {
+            const side_decoded: usize = silk_decoder_decode_channel_frame_q14(state, &entropy, 1, 0, side_q14) catch {
+                return error.HybridLowbandError;
+            };
+            if side_decoded != frame_len_usize {
+                return error.HybridLowbandError;
+            }
+        }
+
+        var lowband_i16: [i16: SILK_MAX_FRAME_SAMPLES * 2] = [0: SILK_MAX_FRAME_SAMPLES * 2];
+        _ = silk_decoder_reconstruct_stereo_i16(
+            stereo_state,
+            mid_q14,
+            side_q14,
+            &pred_q13[0:2],
+            16,
+            frame_len,
+            &lowband_i16[0:required],
+        ) catch {
+            return error.HybridLowbandError;
+        };
+
+        var sample: usize = 0;
+        while sample < required {
+            out_q14.ptr[sample] = hybrid_lowband_i16_to_q14(lowband_i16[sample]);
+            sample = sample + 1;
+        }
     }
     silk_entropy_decoder_check(&entropy) catch {
         return error.HybridLowbandError;

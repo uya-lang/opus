@@ -21,6 +21,7 @@ use src.opus.hybrid.state.HYBRID_CELT_SWB_END_BAND;
 use src.opus.hybrid.state.HybridDecoderState;
 use src.opus.hybrid.state.hybrid_state_configure_from_packet_info;
 use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.stereo.SilkStereoState;
 use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
 
 fn hybrid_decoder_packet_info(bandwidth: OpusBandwidth, channels: u8, duration_us: u32) PacketInfo {
@@ -75,12 +76,14 @@ fn hybrid_conformance_case_checksum(
     var info: PacketInfo = hybrid_decoder_packet_info(bandwidth, 1, duration_us);
     var hybrid_state: HybridDecoderState = HybridDecoderState{};
     var silk_state: SilkDecoderState = SilkDecoderState{};
+    var silk_stereo_state: SilkStereoState = SilkStereoState{};
     var celt_state: CeltDecoderState = CeltDecoderState{};
     var scratch: HybridDecoderScratch = HybridDecoderScratch{};
     var pcm: [i16: 960] = [0: 960];
     const result: HybridDecodeResult = try hybrid_decode_i16(
         &hybrid_state,
         &silk_state,
+        &silk_stereo_state,
         &celt_state,
         &info,
         &frame[0:frame_bytes],
@@ -131,12 +134,14 @@ fn expect_hybrid_decoder_matches_manual_pipeline(
 
     var hybrid_state: HybridDecoderState = HybridDecoderState{};
     var silk_state: SilkDecoderState = SilkDecoderState{};
+    var silk_stereo_state: SilkStereoState = SilkStereoState{};
     var celt_state: CeltDecoderState = CeltDecoderState{};
     var scratch: HybridDecoderScratch = HybridDecoderScratch{};
     var actual_pcm: [i16: 960] = [0: 960];
     const result: HybridDecodeResult = try hybrid_decode_i16(
         &hybrid_state,
         &silk_state,
+        &silk_stereo_state,
         &celt_state,
         &info,
         &frame[0:frame_bytes],
@@ -196,12 +201,14 @@ test "hybrid decoder SWB 10ms path validates active layout and buffers" {
 
     var hybrid_state: HybridDecoderState = HybridDecoderState{};
     var silk_state: SilkDecoderState = SilkDecoderState{};
+    var silk_stereo_state: SilkStereoState = SilkStereoState{};
     var celt_state: CeltDecoderState = CeltDecoderState{};
     var scratch: HybridDecoderScratch = HybridDecoderScratch{};
     var short_pcm: [i16: 479] = [0: 479];
     const short_out: !HybridDecodeResult = hybrid_decode_i16(
         &hybrid_state,
         &silk_state,
+        &silk_stereo_state,
         &celt_state,
         &info,
         &frame[0:frame_bytes],
@@ -218,6 +225,7 @@ test "hybrid decoder SWB 10ms path validates active layout and buffers" {
     const wideband_res: !HybridDecodeResult = hybrid_decode_i16(
         &hybrid_state,
         &silk_state,
+        &silk_stereo_state,
         &celt_state,
         &info,
         &frame[0:frame_bytes],
@@ -233,6 +241,7 @@ test "hybrid decoder SWB 10ms path validates active layout and buffers" {
     const stereo_res: !HybridDecodeResult = hybrid_decode_i16(
         &hybrid_state,
         &silk_state,
+        &silk_stereo_state,
         &celt_state,
         &info,
         &frame[0:frame_bytes],
@@ -240,7 +249,7 @@ test "hybrid decoder SWB 10ms path validates active layout and buffers" {
         &scratch,
     );
     match stereo_res {
-        error.HybridDecoderUnsupported => {}
-        else => { try assert(false, "hybrid decoder must reject unsupported stereo SWB frames"); }
+        error.HybridDecoderError => {}
+        else => { try assert(false, "hybrid decoder must reject short stereo output buffers"); }
     }
 }

@@ -61,9 +61,9 @@ fn hybrid_budget_bits_for_len(len: usize) !i32 {
 
 fn hybrid_budget_refresh_fields(split: &HybridBudgetSplit, active_bytes: usize, reserved_bytes: usize) !void {
     const active_bits: i32 = try hybrid_budget_bits_for_len(active_bytes);
-    const tell: i32 = ec_tell(&split.dec) as i32;
+    var tell: i32 = ec_tell(&split.dec) as i32;
     if tell > active_bits {
-        return error.HybridBudgetError;
+        tell = active_bits;
     }
 
     split.active_frame_bytes = active_bytes;

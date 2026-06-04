@@ -9,7 +9,7 @@ use src.opus.hybrid.delay.hybrid_delay_apply_highband_i16_to_q14;
 use src.opus.hybrid.highband.HybridHighbandDecodeResult;
 use src.opus.hybrid.highband.hybrid_highband_decode_i16;
 use src.opus.hybrid.lowband.HybridLowbandDecodeResult;
-use src.opus.hybrid.lowband.hybrid_lowband_decode_mono_q14;
+use src.opus.hybrid.lowband.hybrid_lowband_decode_q14;
 use src.opus.hybrid.merge.HybridMergeResult;
 use src.opus.hybrid.merge.hybrid_merge_i16;
 use src.opus.hybrid.state.HYBRID_MAX_FRAME_SAMPLES_48K;
@@ -17,6 +17,7 @@ use src.opus.hybrid.state.HYBRID_STATE_MAX_CHANNELS;
 use src.opus.hybrid.state.HybridDecoderState;
 use src.opus.hybrid.state.hybrid_state_configure_from_packet_info;
 use src.opus.silk.state.SilkDecoderState;
+use src.opus.silk.stereo.SilkStereoState;
 
 export error HybridDecoderError;
 export error HybridDecoderUnsupported;
@@ -46,7 +47,7 @@ fn hybrid_decoder_supports_mono_hybrid_bandwidth(info: &const PacketInfo) bool {
         || info.bandwidth == OpusBandwidth.FULLBAND;
 }
 
-fn hybrid_decoder_supports_mono_hybrid(info: &const PacketInfo) bool {
+fn hybrid_decoder_supports_hybrid(info: &const PacketInfo) bool {
     var duration_matches: bool = false;
     if info.frame_duration_us == 10000 && info.duration_samples_48k == 480 {
         duration_matches = true;
@@ -57,7 +58,8 @@ fn hybrid_decoder_supports_mono_hybrid(info: &const PacketInfo) bool {
 
     return info.mode == OpusMode.HYBRID
         && hybrid_decoder_supports_mono_hybrid_bandwidth(info)
-        && info.channels == 1
+        && info.channels >= 1
+        && info.channels <= 2
         && info.frame_count == 1
         && duration_matches;
 }
@@ -91,16 +93,19 @@ fn hybrid_decoder_ensure_state(state: &HybridDecoderState, info: &const PacketIn
 export fn hybrid_decode_i16(
     hybrid_state: &HybridDecoderState,
     silk_state: &SilkDecoderState,
+    silk_stereo_state: &SilkStereoState,
     celt_state: &CeltDecoderState,
     info: &const PacketInfo,
     frame: &[byte],
     pcm_i16: &[i16],
     scratch: &HybridDecoderScratch,
 ) !HybridDecodeResult {
-    if !hybrid_decoder_supports_mono_hybrid(info) {
+    if !hybrid_decoder_supports_hybrid(info) {
         return error.HybridDecoderUnsupported;
     }
-    if frame.len == 0 || pcm_i16.len < (info.duration_samples_48k as usize) {
+    const channels: usize = info.channels as usize;
+    const output_required: usize = (info.duration_samples_48k as usize) * channels;
+    if frame.len == 0 || pcm_i16.len < output_required {
         return error.HybridDecoderError;
     }
 
@@ -112,11 +117,13 @@ export fn hybrid_decode_i16(
     };
 
     const lowband_samples: usize = hybrid_state.silk_frame_size as usize;
+    const lowband_required: usize = lowband_samples * channels;
     const frame_samples: usize = hybrid_state.frame_size_48k as usize;
-    const lowband: HybridLowbandDecodeResult = hybrid_lowband_decode_mono_q14(
+    const lowband: HybridLowbandDecodeResult = hybrid_lowband_decode_q14(
         silk_state,
+        silk_stereo_state,
         &split,
-        &scratch.lowband_q14[0:lowband_samples],
+        &scratch.lowband_q14[0:lowband_required],
     ) catch {
         return error.HybridDecoderError;
     };
@@ -124,7 +131,7 @@ export fn hybrid_decode_i16(
     const highband: HybridHighbandDecodeResult = hybrid_highband_decode_i16(
         celt_state,
         &split,
-        &scratch.highband_i16[0:frame_samples],
+        &scratch.highband_i16[0:output_required],
         &scratch.celt_scratch,
     ) catch {
         return error.HybridDecoderError;
@@ -132,8 +139,8 @@ export fn hybrid_decode_i16(
 
     const delayed: usize = hybrid_delay_apply_highband_i16_to_q14(
         hybrid_state,
-        &scratch.highband_i16[0:frame_samples],
-        &scratch.highband_q14[0:frame_samples],
+        &scratch.highband_i16[0:output_required],
+        &scratch.highband_q14[0:output_required],
     ) catch {
         return error.HybridDecoderError;
     };
@@ -143,9 +150,9 @@ export fn hybrid_decode_i16(
 
     const merged: HybridMergeResult = hybrid_merge_i16(
         hybrid_state,
-        &scratch.lowband_q14[0:lowband_samples],
-        &scratch.highband_q14[0:frame_samples],
-        &pcm_i16[0:frame_samples],
+        &scratch.lowband_q14[0:lowband_required],
+        &scratch.highband_q14[0:output_required],
+        &pcm_i16[0:output_required],
     ) catch {
         return error.HybridDecoderError;
     };

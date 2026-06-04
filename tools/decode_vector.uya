@@ -19,12 +19,13 @@ use src.opus.core.types.PacketInfo;
 use src.opus.dsp.resampler.resampler_config_init;
 use src.opus.silk.state.SILK_MAX_FRAME_SAMPLES;
 use src.opus.silk.state.SILK_MAX_INTERNAL_RATE_HZ;
+use src.opus.silk.stereo.silk_stereo_reset;
 
 error DecodeVectorError;
 
 const MAX_PACKET_BYTES: usize = 1500;
 const MAX_PCM_SAMPLES: usize = 5760 * 2;
-const VECTOR_DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3;
+const VECTOR_DECODER_SILK_PACKET_SCRATCH_SAMPLES: usize = SILK_MAX_FRAME_SAMPLES * 3 * 2;
 
 // Keep decoder storage static; the C backend emits very large stack temporaries for decoder scratch.
 var decoder_storage: OpusDecoder = OpusDecoder{};
@@ -103,6 +104,8 @@ fn init_decoder_storage(sample_rate_hz: u32, channels: u8) !void {
     };
     decoder_storage.gain_q8 = Q8_ONE;
     decoder_storage.history.active_mode = OpusMode.CELT;
+    silk_stereo_reset(&decoder_storage.history.silk_stereo);
+    silk_stereo_reset(&decoder_storage.history.hybrid_silk_stereo);
     celt_state_init(&decoder_storage.history.celt, channels as i32) catch {
         return error.DecodeVectorError;
     };
