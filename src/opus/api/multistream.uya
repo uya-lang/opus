@@ -2,6 +2,7 @@ use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_init;
 use src.opus.core.constants.MAX_FRAME_BYTES;
+use src.opus.core.constants.MAX_PACKET_SAMPLES_48K;
 use src.opus.core.errors.validate_sample_rate;
 use src.opus.core.types.OpusDecoderConfig;
 
@@ -20,6 +21,7 @@ const OPUS_MULTISTREAM_MAPPING_FAMILY_1_STRIDE: usize = 8;
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE: usize = OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS * OPUS_MULTISTREAM_MAPPING_FAMILY_1_STRIDE;
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_STREAM_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [1, 1, 2, 2, 3, 4, 4, 5];
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_COUPLED_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [0, 1, 1, 2, 2, 2, 3, 3];
+const MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES: usize = MAX_PACKET_SAMPLES_48K * 2;
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE] = [
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 1, 0, 0, 0, 0, 0, 0,
@@ -227,28 +229,38 @@ fn multistream_copy_mapping(dest: &[u8], src: &[const u8]) void {
     }
 }
 
-fn multistream_validate_coupled_stereo_identity_state(state: &const MultistreamDecoderState) !void {
-    if !state.initialized {
+fn multistream_validate_state_mapping(state: &const MultistreamDecoderState, decoded_channels: u8) !void {
+    if state.channel_count == 0 || decoded_channels == 0 {
         return error.MultistreamApiError;
     }
-    if state.channel_count != 2 || state.stream_count != 1 || state.coupled_count != 1 {
-        return error.MultistreamApiError;
-    }
-    if state.mapping[0] != 0 || state.mapping[1] != 1 {
-        return error.MultistreamApiError;
+    var channel: usize = 0;
+    while channel < state.channel_count as usize {
+        const mapped: u8 = state.mapping[channel];
+        if mapped != OPUS_MULTISTREAM_MAPPING_SILENT && mapped >= decoded_channels {
+            return error.MultistreamApiError;
+        }
+        channel = channel + 1;
     }
 }
 
-fn multistream_validate_uncoupled_mono_identity_state(state: &const MultistreamDecoderState) !void {
+fn multistream_validate_single_coupled_stream_state(state: &const MultistreamDecoderState) !void {
     if !state.initialized {
         return error.MultistreamApiError;
     }
-    if state.channel_count != 1 || state.stream_count != 1 || state.coupled_count != 0 {
+    if state.stream_count != 1 || state.coupled_count != 1 {
         return error.MultistreamApiError;
     }
-    if state.mapping[0] != 0 {
+    try multistream_validate_state_mapping(state, 2);
+}
+
+fn multistream_validate_single_uncoupled_stream_state(state: &const MultistreamDecoderState) !void {
+    if !state.initialized {
         return error.MultistreamApiError;
     }
+    if state.stream_count != 1 || state.coupled_count != 0 {
+        return error.MultistreamApiError;
+    }
+    try multistream_validate_state_mapping(state, 1);
 }
 
 fn multistream_reorder_interleaved_frame_i16(
@@ -570,7 +582,7 @@ export fn multistream_split_stream_packets(packet: &[byte], stream_count: u8, sp
 
 export fn multistream_decoder_init_coupled_stream_slot(decoder: &const MultistreamDecoder, stream_decoder: &OpusDecoder) !void {
     const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
-    try multistream_validate_coupled_stereo_identity_state(state);
+    try multistream_validate_single_coupled_stream_state(state);
 
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: state.sample_rate_hz, channels: 2 };
     decoder_init(stream_decoder, &config) catch {
@@ -580,7 +592,7 @@ export fn multistream_decoder_init_coupled_stream_slot(decoder: &const Multistre
 
 export fn multistream_decoder_init_uncoupled_stream_slot(decoder: &const MultistreamDecoder, stream_decoder: &OpusDecoder) !void {
     const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
-    try multistream_validate_uncoupled_mono_identity_state(state);
+    try multistream_validate_single_uncoupled_stream_state(state);
 
     const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: state.sample_rate_hz, channels: 1 };
     decoder_init(stream_decoder, &config) catch {
@@ -588,36 +600,105 @@ export fn multistream_decoder_init_uncoupled_stream_slot(decoder: &const Multist
     };
 }
 
-fn multistream_decode_identity_single_stream_i16(
+fn multistream_decode_mapped_single_stream_i16(
     stream_decoder: &OpusDecoder,
     packet: &[byte],
+    decoded_channels: u8,
+    mapping: &[const u8],
+    output_channels: u8,
     pcm: &[i16],
     frame_size: i32,
     decode_fec: bool,
 ) !i32 {
-    if packet.len == 0 {
-        return decoder_decode_i16(stream_decoder, packet, pcm, frame_size, decode_fec) catch {
+    if frame_size < 0 || decoded_channels == 0 || output_channels == 0 {
+        return error.MultistreamApiError;
+    }
+
+    const requested_samples: usize = frame_size as usize;
+    const decoded_channel_count: usize = decoded_channels as usize;
+    const output_channel_count: usize = output_channels as usize;
+    if requested_samples > MAX_PACKET_SAMPLES_48K {
+        return error.MultistreamApiError;
+    }
+    if requested_samples > pcm.len / output_channel_count {
+        return error.MultistreamApiError;
+    }
+
+    var stream_offset: usize = 0;
+    var stream_len: usize = packet.len;
+    if packet.len != 0 {
+        var split: MultistreamPacketSplit = MultistreamPacketSplit{};
+        multistream_split_stream_packets(packet, 1, &split) catch {
             return error.MultistreamApiError;
         };
+        if split.stream_count != 1 || split.streams[0].offset != 0 || split.streams[0].len != packet.len {
+            return error.MultistreamApiError;
+        }
+        stream_offset = split.streams[0].offset;
+        stream_len = split.streams[0].len;
     }
 
-    var split: MultistreamPacketSplit = MultistreamPacketSplit{};
-    multistream_split_stream_packets(packet, 1, &split) catch {
-        return error.MultistreamApiError;
-    };
-    if split.stream_count != 1 || split.streams[0].offset != 0 || split.streams[0].len != packet.len {
-        return error.MultistreamApiError;
+    if output_channel_count == decoded_channel_count {
+        const decoded: i32 = decoder_decode_i16(
+            stream_decoder,
+            &packet[stream_offset:stream_len],
+            pcm,
+            frame_size,
+            decode_fec,
+        ) catch {
+            return error.MultistreamApiError;
+        };
+        if decoded < 0 {
+            return error.MultistreamApiError;
+        }
+        const decoded_samples: usize = decoded as usize;
+        if decoded_samples > pcm.len / decoded_channel_count {
+            return error.MultistreamApiError;
+        }
+        const required: usize = decoded_samples * decoded_channel_count;
+        try multistream_reorder_interleaved_i16(
+            &pcm[0:required],
+            decoded_channels,
+            mapping,
+            output_channels,
+            &pcm[0:required],
+            decoded,
+        );
+        return decoded;
     }
 
-    return decoder_decode_i16(
+    if requested_samples > MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES / decoded_channel_count {
+        return error.MultistreamApiError;
+    }
+    const decode_required: usize = requested_samples * decoded_channel_count;
+    var decoded_pcm: [i16: MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES] = [0: MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES];
+    const decoded: i32 = decoder_decode_i16(
         stream_decoder,
-        &packet[split.streams[0].offset:split.streams[0].len],
-        pcm,
+        &packet[stream_offset:stream_len],
+        &decoded_pcm[0:decode_required],
         frame_size,
         decode_fec,
     ) catch {
         return error.MultistreamApiError;
     };
+    if decoded < 0 {
+        return error.MultistreamApiError;
+    }
+    const decoded_samples: usize = decoded as usize;
+    if decoded_samples > MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES / decoded_channel_count || decoded_samples > pcm.len / output_channel_count {
+        return error.MultistreamApiError;
+    }
+    const decoded_required: usize = decoded_samples * decoded_channel_count;
+    const output_required: usize = decoded_samples * output_channel_count;
+    try multistream_reorder_interleaved_i16(
+        &decoded_pcm[0:decoded_required],
+        decoded_channels,
+        mapping,
+        output_channels,
+        &pcm[0:output_required],
+        decoded,
+    );
+    return decoded;
 }
 
 export fn multistream_decode_coupled_stream_i16(
@@ -629,9 +710,18 @@ export fn multistream_decode_coupled_stream_i16(
     decode_fec: bool,
 ) !i32 {
     const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
-    try multistream_validate_coupled_stereo_identity_state(state);
+    try multistream_validate_single_coupled_stream_state(state);
 
-    return try multistream_decode_identity_single_stream_i16(stream_decoder, packet, pcm, frame_size, decode_fec);
+    return try multistream_decode_mapped_single_stream_i16(
+        stream_decoder,
+        packet,
+        2,
+        &state.mapping[0:state.channel_count as usize],
+        state.channel_count,
+        pcm,
+        frame_size,
+        decode_fec,
+    );
 }
 
 export fn multistream_decode_uncoupled_stream_i16(
@@ -643,9 +733,18 @@ export fn multistream_decode_uncoupled_stream_i16(
     decode_fec: bool,
 ) !i32 {
     const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
-    try multistream_validate_uncoupled_mono_identity_state(state);
+    try multistream_validate_single_uncoupled_stream_state(state);
 
-    return try multistream_decode_identity_single_stream_i16(stream_decoder, packet, pcm, frame_size, decode_fec);
+    return try multistream_decode_mapped_single_stream_i16(
+        stream_decoder,
+        packet,
+        1,
+        &state.mapping[0:state.channel_count as usize],
+        state.channel_count,
+        pcm,
+        frame_size,
+        decode_fec,
+    );
 }
 
 export fn multistream_decoder_init(decoder: &MultistreamDecoder, config: &const MultistreamDecoderConfig) !void {

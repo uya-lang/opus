@@ -406,7 +406,45 @@ test "multistream coupled stream decode matches single-stream stereo decode" {
     }
 }
 
-test "multistream coupled stream decode rejects layouts outside stereo identity mapping" {
+test "multistream coupled stream decode applies configured stereo mapping" {
+    var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
+    var multistream_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
+    multistream_config.mapping[0] = 1;
+    multistream_config.mapping[1] = OPUS_MULTISTREAM_MAPPING_SILENT;
+    try multistream_decoder_init(&multistream_decoder, &multistream_config);
+
+    var stream_decoder: OpusDecoder = OpusDecoder{};
+    try multistream_decoder_init_coupled_stream_slot(&multistream_decoder, &stream_decoder);
+
+    var reference_decoder: OpusDecoder = OpusDecoder{};
+    const opus_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try decoder_init(&reference_decoder, &opus_config);
+
+    var packet: [byte: 65] = [0: 65];
+    fill_multistream_stereo_celt_packet(&packet[0:65]);
+
+    var multistream_pcm: [i16: 240] = [777: 240];
+    var reference_pcm: [i16: 240] = [555: 240];
+    const multistream_decoded: i32 = try multistream_decode_coupled_stream_i16(
+        &multistream_decoder,
+        &stream_decoder,
+        &packet[0:65],
+        &multistream_pcm[0:240],
+        120,
+        false,
+    );
+    const reference_decoded: i32 = try decoder_decode_i16(&reference_decoder, &packet[0:65], &reference_pcm[0:240], 120, false);
+    try assert_eq_i32(multistream_decoded, reference_decoded);
+
+    var frame: usize = 0;
+    while frame < 120 {
+        try assert_eq_i32(multistream_pcm[frame * 2] as i32, reference_pcm[(frame * 2) + 1] as i32);
+        try assert_eq_i32(multistream_pcm[(frame * 2) + 1] as i32, 0);
+        frame = frame + 1;
+    }
+}
+
+test "multistream coupled stream decode rejects layouts outside a single coupled stream" {
     var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
     const mono_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 1);
     try multistream_decoder_init(&multistream_decoder, &mono_config);
@@ -425,15 +463,6 @@ test "multistream coupled stream decode rejects layouts outside stereo identity 
     match mono_decode {
         error.MultistreamApiError => {}
         else => { try assert(false, "coupled stream decode must reject mono multistream layouts"); }
-    }
-
-    var silent_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
-    silent_config.mapping[1] = OPUS_MULTISTREAM_MAPPING_SILENT;
-    try multistream_decoder_init(&multistream_decoder, &silent_config);
-    const mapped_slot: !void = multistream_decoder_init_coupled_stream_slot(&multistream_decoder, &stream_decoder);
-    match mapped_slot {
-        error.MultistreamApiError => {}
-        else => { try assert(false, "coupled stream slot init must wait for mapping reorder support"); }
     }
 }
 
@@ -472,7 +501,44 @@ test "multistream uncoupled stream decode matches single-stream mono decode" {
     }
 }
 
-test "multistream uncoupled stream decode rejects layouts outside mono identity mapping" {
+test "multistream uncoupled stream decode applies configured channel mapping" {
+    var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
+    const mapping: [u8: 2] = [0, OPUS_MULTISTREAM_MAPPING_SILENT];
+    const multistream_config: MultistreamDecoderConfig = try multistream_decoder_config_family255(48000, 2, 1, 0, &mapping[0:2]);
+    try multistream_decoder_init(&multistream_decoder, &multistream_config);
+
+    var stream_decoder: OpusDecoder = OpusDecoder{};
+    try multistream_decoder_init_uncoupled_stream_slot(&multistream_decoder, &stream_decoder);
+
+    var reference_decoder: OpusDecoder = OpusDecoder{};
+    const opus_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&reference_decoder, &opus_config);
+
+    var packet: [byte: 65] = [0: 65];
+    fill_multistream_mono_celt_packet(&packet[0:65]);
+
+    var multistream_pcm: [i16: 240] = [777: 240];
+    var reference_pcm: [i16: 120] = [555: 120];
+    const multistream_decoded: i32 = try multistream_decode_uncoupled_stream_i16(
+        &multistream_decoder,
+        &stream_decoder,
+        &packet[0:65],
+        &multistream_pcm[0:240],
+        120,
+        false,
+    );
+    const reference_decoded: i32 = try decoder_decode_i16(&reference_decoder, &packet[0:65], &reference_pcm[0:120], 120, false);
+    try assert_eq_i32(multistream_decoded, reference_decoded);
+
+    var frame: usize = 0;
+    while frame < 120 {
+        try assert_eq_i32(multistream_pcm[frame * 2] as i32, reference_pcm[frame] as i32);
+        try assert_eq_i32(multistream_pcm[(frame * 2) + 1] as i32, 0);
+        frame = frame + 1;
+    }
+}
+
+test "multistream uncoupled stream decode rejects layouts outside a single uncoupled stream" {
     var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
     const stereo_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
     try multistream_decoder_init(&multistream_decoder, &stereo_config);
@@ -491,14 +557,5 @@ test "multistream uncoupled stream decode rejects layouts outside mono identity 
     match stereo_decode {
         error.MultistreamApiError => {}
         else => { try assert(false, "uncoupled stream decode must reject stereo multistream layouts"); }
-    }
-
-    var silent_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 1);
-    silent_config.mapping[0] = OPUS_MULTISTREAM_MAPPING_SILENT;
-    try multistream_decoder_init(&multistream_decoder, &silent_config);
-    const mapped_slot: !void = multistream_decoder_init_uncoupled_stream_slot(&multistream_decoder, &stream_decoder);
-    match mapped_slot {
-        error.MultistreamApiError => {}
-        else => { try assert(false, "uncoupled stream slot init must wait for mapping reorder support"); }
     }
 }
