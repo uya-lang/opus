@@ -405,7 +405,7 @@
 ## 14. Repacketizer
 
 - [x] 实现 `packet/repacketizer.uya`。
-- [ ] 实现 add packet。
+- [x] 实现 add packet。
 - [ ] 实现 frame duration 校验。
 - [ ] 实现 get packet duration。
 - [ ] 实现 output CBR/VBR packet。

@@ -1,5 +1,7 @@
 use src.opus.packet.toc.TocByte;
+use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_toc_byte;
+use src.opus.packet.toc.parse_packet;
 
 export error RepacketizerError;
 
@@ -55,6 +57,46 @@ fn repacketizer_reset_state(state: &RepacketizerState) void {
     repacketizer_clear_frames(state);
 }
 
+fn repacketizer_toc_matches(left: &const TocByte, right: &const TocByte) bool {
+    return left.config_index == right.config_index && left.stereo == right.stereo;
+}
+
+fn repacketizer_parsed_payload_bytes(parsed: &const PacketParseResult) usize {
+    var bytes: usize = 0;
+    var i: usize = 0;
+    while i < parsed.info.frame_count as usize {
+        bytes = bytes + parsed.frames[i].len;
+        i = i + 1;
+    }
+    return bytes;
+}
+
+fn repacketizer_copy_parsed_frames(state: &RepacketizerState, packet: &[byte], parsed: &const PacketParseResult) void {
+    var source_index: usize = 0;
+    var dest_index: usize = state.frame_count;
+    var write_cursor: usize = state.frame_data_len;
+
+    while source_index < parsed.info.frame_count as usize {
+        const frame_len: usize = parsed.frames[source_index].len;
+        const frame_offset: usize = parsed.frames[source_index].offset;
+
+        state.frames[dest_index] = RepacketizerFrame{ offset: write_cursor, len: frame_len };
+
+        var i: usize = 0;
+        while i < frame_len {
+            state.frame_data[write_cursor + i] = packet.ptr[frame_offset + i];
+            i = i + 1;
+        }
+
+        write_cursor = write_cursor + frame_len;
+        dest_index = dest_index + 1;
+        source_index = source_index + 1;
+    }
+
+    state.frame_count = dest_index;
+    state.frame_data_len = write_cursor;
+}
+
 export fn repacketizer_init(rp: &Repacketizer) !void {
     if !repacketizer_storage_fits_state() {
         return error.RepacketizerError;
@@ -67,6 +109,39 @@ export fn repacketizer_reset(rp: &Repacketizer) !void {
         return error.RepacketizerError;
     }
     repacketizer_reset_state(repacketizer_state(rp));
+}
+
+export fn repacketizer_add_packet(rp: &Repacketizer, packet: &[byte]) !void {
+    if !repacketizer_storage_fits_state() {
+        return error.RepacketizerError;
+    }
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(packet, &parsed);
+
+    const state: &RepacketizerState = repacketizer_state(rp);
+    if !state.initialized {
+        return error.RepacketizerError;
+    }
+
+    if state.frame_count != 0 && !repacketizer_toc_matches(&state.toc, &parsed.toc) {
+        return error.RepacketizerError;
+    }
+
+    const parsed_frame_count: usize = parsed.info.frame_count as usize;
+    if state.frame_count + parsed_frame_count > REPACKETIZER_MAX_FRAMES {
+        return error.RepacketizerError;
+    }
+
+    const parsed_bytes: usize = repacketizer_parsed_payload_bytes(&parsed);
+    if state.frame_data_len + parsed_bytes > REPACKETIZER_MAX_FRAME_DATA_BYTES {
+        return error.RepacketizerError;
+    }
+
+    if state.frame_count == 0 {
+        state.toc = parsed.toc;
+    }
+    repacketizer_copy_parsed_frames(state, packet, &parsed);
 }
 
 export fn repacketizer_is_empty(rp: &const Repacketizer) bool {

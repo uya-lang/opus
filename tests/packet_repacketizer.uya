@@ -1,6 +1,7 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.packet.repacketizer.Repacketizer;
+use src.opus.packet.repacketizer.repacketizer_add_packet;
 use src.opus.packet.repacketizer.repacketizer_frame_count;
 use src.opus.packet.repacketizer.repacketizer_init;
 use src.opus.packet.repacketizer.repacketizer_is_empty;
@@ -24,4 +25,42 @@ test "repacketizer reset leaves the builder empty and reusable" {
     try assert(repacketizer_is_empty(&rp), "reset repacketizer must be empty");
     try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 0);
     try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 0);
+}
+
+test "repacketizer add packet appends parsed frame payloads" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var one_frame: [byte: 4] = [248, 17, 18, 19];
+    try repacketizer_add_packet(&rp, &one_frame[0:4]);
+
+    try assert(!repacketizer_is_empty(&rp), "added packet must make repacketizer non-empty");
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 1);
+    try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 3);
+
+    var two_cbr: [byte: 5] = [249, 1, 2, 3, 4];
+    try repacketizer_add_packet(&rp, &two_cbr[0:5]);
+
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 3);
+    try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 7);
+}
+
+test "repacketizer add packet rejects malformed packet without state changes" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var first: [byte: 4] = [248, 17, 18, 19];
+    try repacketizer_add_packet(&rp, &first[0:4]);
+
+    var odd_cbr: [byte: 4] = [249, 1, 2, 3];
+    const add_result: !void = repacketizer_add_packet(&rp, &odd_cbr[0:4]);
+    match add_result {
+        error.InvalidPacket => {}
+        else => { try assert(false, "malformed input must return the parser error"); }
+    }
+
+    const frames_after: usize = repacketizer_frame_count(&rp);
+    const bytes_after: usize = repacketizer_payload_bytes(&rp);
+    try assert_eq_i32(frames_after as i32, 1);
+    try assert_eq_i32(bytes_after as i32, 3);
 }
