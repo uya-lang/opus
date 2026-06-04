@@ -12,6 +12,9 @@ use src.opus.core.saturate.sat16;
 use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusMode;
 use src.opus.core.types.PacketInfo;
+use src.opus.dsp.resampler.ResamplerConfig;
+use src.opus.dsp.resampler.resampler_config_init;
+use src.opus.dsp.resampler.resampler_process_i16;
 use tests.hybrid_payload.hybrid_test_encode_wb_lowband_payload;
 
 const RFC8251_TESTVECTOR01_PACKET0: [byte: 731] = [
@@ -877,6 +880,41 @@ test "decoder api applies gain after output resampling" {
         i = i + 1;
     }
     try assert(exercised_gain, "resampled gain test must exercise non-zero decoded public PCM output");
+}
+
+test "decoder api non-48k output matches one final resample from 48k pcm" {
+    var packet: [byte: 65] = [0: 65];
+    packet[0] = (132 as! byte).value;
+    var i: usize = 1;
+    while i < 65 {
+        packet[i] = ((i * 31 + 9) as! byte).value;
+        i = i + 1;
+    }
+
+    var reference_decoder: OpusDecoder = OpusDecoder{};
+    const reference_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&reference_decoder, &reference_config);
+    var reference_48k: [i16: 120] = [0: 120];
+    const reference_decoded: i32 = try decoder_decode_i16(&reference_decoder, &packet[0:65], &reference_48k[0:120], 120, false);
+    try assert_eq_i32(reference_decoded, 120);
+
+    const final_resampler: ResamplerConfig = try resampler_config_init(48000, 16000, 1, 120);
+    var expected_16k: [i16: 40] = [0: 40];
+    const expected_written: usize = try resampler_process_i16(&reference_48k[0:120], &final_resampler, &expected_16k[0:40]);
+    try assert_eq_i32(expected_written as i32, 40);
+
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+    var actual_16k: [i16: 40] = [0: 40];
+    const actual_decoded: i32 = try decoder_decode_i16(&decoder, &packet[0:65], &actual_16k[0:40], 40, false);
+    try assert_eq_i32(actual_decoded, 40);
+
+    i = 0;
+    while i < 40 {
+        try assert_eq_i32(actual_16k[i] as i32, expected_16k[i] as i32);
+        i = i + 1;
+    }
 }
 
 test "decoder api uses celt frequency history on packet loss after a decoded packet" {

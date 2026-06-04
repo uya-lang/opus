@@ -47,6 +47,11 @@ API_DECODER_INIT_FORBIDDEN_SCRATCH_CLEARS = (
     ("decoder.scratch.celt_plc", "CeltPlcScratch"),
     ("decoder.scratch.hybrid", "HybridDecoderScratch"),
 )
+API_FINAL_RESAMPLE_DECODE_FUNCTIONS = (
+    "decoder_decode_empty_packet_i16",
+    "decoder_decode_celt_parsed_i16",
+    "decoder_decode_hybrid_parsed_i16",
+)
 
 
 def uya_files(paths: list[Path], test_prefix: str) -> list[Path]:
@@ -152,6 +157,31 @@ def check_api_decoder_init_avoids_large_scratch_clears(violations: list[str]) ->
                 )
 
 
+def count_token_in_function(path: Path, function_name: str, token: str) -> int:
+    return sum(line.count(token) for _, line in function_body_lines(path, function_name))
+
+
+def check_api_decode_uses_single_final_resample(violations: list[str]) -> None:
+    rel = API_DECODER_FILE.relative_to(ROOT)
+    direct_resample_calls: int = count_token_in_function(API_DECODER_FILE, "decoder_resample_output_i16", "resampler_process_i16(")
+    if direct_resample_calls != 1:
+        violations.append(
+            f"{rel}: decoder_resample_output_i16 must contain exactly one direct resampler_process_i16 call"
+        )
+
+    for function_name in API_FINAL_RESAMPLE_DECODE_FUNCTIONS:
+        final_resample_calls: int = count_token_in_function(API_DECODER_FILE, function_name, "decoder_resample_output_i16(")
+        direct_calls: int = count_token_in_function(API_DECODER_FILE, function_name, "resampler_process_i16(")
+        if final_resample_calls != 1:
+            violations.append(
+                f"{rel}: {function_name} must route non-48k output through exactly one final resample helper"
+            )
+        if direct_calls != 0:
+            violations.append(
+                f"{rel}: {function_name} must not call resampler_process_i16 directly"
+            )
+
+
 def main() -> int:
     violations: list[str] = []
     for boundary in BOUNDARIES:
@@ -170,6 +200,7 @@ def main() -> int:
     check_hybrid_glue_state_ownership(violations)
     check_api_public_structs_do_not_embed_codec_state(violations)
     check_api_decoder_init_avoids_large_scratch_clears(violations)
+    check_api_decode_uses_single_final_resample(violations)
 
     if violations:
         for violation in violations:
