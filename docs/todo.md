@@ -420,12 +420,12 @@
 - [x] 测试拼接同 config packets。
 - [x] 测试非法混合 config。
 - [x] 测试 120ms 超限。
-- [ ] 测试输出 packet 可被 decoder 解析。
+- [x] 测试输出 packet 可被 decoder 解析。
 
 验收标准：
 
 - [ ] Repacketizer 不解码音频。
-- [ ] 输出 packet parser roundtrip 成功。
+- [x] 输出 packet parser roundtrip 成功。
 
 ## 15. Multistream
 

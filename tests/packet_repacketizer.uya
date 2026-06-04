@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.core.types.PacketInfo;
 use src.opus.packet.repacketizer.Repacketizer;
 use src.opus.packet.repacketizer.repacketizer_add_packet;
 use src.opus.packet.repacketizer.repacketizer_duration_samples_48k;
@@ -13,6 +14,7 @@ use src.opus.packet.repacketizer.repacketizer_payload_bytes;
 use src.opus.packet.repacketizer.repacketizer_remove_padding;
 use src.opus.packet.repacketizer.repacketizer_reset;
 use src.opus.packet.toc.PacketParseResult;
+use src.opus.packet.toc.decoder_get_packet_info;
 use src.opus.packet.toc.parse_packet;
 
 fn assert_byte_eq(actual: byte, expected: i32) !void {
@@ -83,6 +85,26 @@ test "repacketizer stitches packets with matching config" {
     try assert_eq_i32(parsed.frames[0].len as i32, 3);
     try assert_eq_i32(parsed.frames[1].len as i32, 2);
     try assert_eq_i32(parsed.frames[2].len as i32, 2);
+}
+
+test "repacketizer output packet exposes decoder packet info" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var one_frame: [byte: 4] = [248, 17, 18, 19];
+    var two_cbr: [byte: 5] = [249, 20, 21, 22, 23];
+    try repacketizer_add_packet(&rp, &one_frame[0:4]);
+    try repacketizer_add_packet(&rp, &two_cbr[0:5]);
+
+    var out: [byte: 16] = [0: 16];
+    const written: usize = try repacketizer_output_packet(&rp, &out[0:16], true);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&out[0:written], &info);
+    try assert_eq_i32(info.frame_count as i32, 3);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 2880);
+    try assert_eq_i32(info.channels as i32, 1);
 }
 
 test "repacketizer add packet rejects malformed packet without state changes" {
