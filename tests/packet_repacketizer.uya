@@ -56,6 +56,35 @@ test "repacketizer add packet appends parsed frame payloads" {
     try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 7);
 }
 
+test "repacketizer stitches packets with matching config" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var one_frame: [byte: 4] = [248, 17, 18, 19];
+    var two_cbr: [byte: 5] = [249, 20, 21, 22, 23];
+    try repacketizer_add_packet(&rp, &one_frame[0:4]);
+    try repacketizer_add_packet(&rp, &two_cbr[0:5]);
+
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 3);
+    try assert_eq_i32(repacketizer_duration_us(&rp) as i32, 60000);
+
+    var out: [byte: 16] = [0: 16];
+    const written: usize = try repacketizer_output_packet(&rp, &out[0:16], true);
+    try assert_eq_i32(written as i32, 11);
+    try assert_byte_eq(out[0], 251);
+    try assert_byte_eq(out[1], 131);
+    try assert_byte_eq(out[4], 17);
+    try assert_byte_eq(out[7], 20);
+    try assert_byte_eq(out[9], 22);
+
+    var parsed: PacketParseResult = PacketParseResult{};
+    try parse_packet(&out[0:written], &parsed);
+    try assert_eq_i32(parsed.info.frame_count as i32, 3);
+    try assert_eq_i32(parsed.frames[0].len as i32, 3);
+    try assert_eq_i32(parsed.frames[1].len as i32, 2);
+    try assert_eq_i32(parsed.frames[2].len as i32, 2);
+}
+
 test "repacketizer add packet rejects malformed packet without state changes" {
     var rp: Repacketizer = Repacketizer{};
     try repacketizer_init(&rp);
