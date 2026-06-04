@@ -185,8 +185,8 @@ directory or, when `UOPUS_DECODE_CMD` is set, runs
 
 ## RFC8251 Full-Corpus Probe
 
-A full-corpus probe with all 120 RFC8251 manifest cases enabled reaches the
-Uya decoder and fails at the first actual PCM generation case:
+An earlier full-corpus probe with all 120 RFC8251 manifest cases enabled
+reached the Uya decoder and failed at the first actual PCM generation case:
 
 ```sh
 python3 tools/generate_actual_decode.py /tmp/uopus-rfc8251-full-manifest.json \
@@ -195,10 +195,11 @@ python3 tools/generate_actual_decode.py /tmp/uopus-rfc8251-full-manifest.json \
   --decoder build/uopus-decode-vector
 ```
 
-Current full-vector result after the fourth packet fix:
+Current focused `testvector01` decode result after the packet 34 fix:
 
 ```text
-uopus-decode-vector: decode failed
+build/uopus-decode-vector 8000 1 0 tests/vectors/rfc8251/testvector01.bit /tmp/testvector01.s16le
+ok: output size 471680 bytes
 ```
 
 `tests/vectors/rfc8251/testvector01.bit` validates as an opus_demo stream with
@@ -242,13 +243,21 @@ TOC `0xff` and count byte `0x83`, carrying three VBR frames of 200, 200, and
 same floor `b/2` split as upstream instead of assigning odd fractional q3
 remainders to the left channel.
 
-The current first blocker is now the fifteenth packet of `testvector01.bit`:
-it is 1001 bytes with TOC `0xff` and count byte `0x85`, carrying five VBR
-frames of 198, 200, 199, 200, and 198 bytes. A full-file decode of
-`rfc8251-testvector01-8000-mono` writes 11200 bytes for the first fourteen
-packets and then fails during the next packet. The next RFC8251 step should
-continue from that fifteenth packet rather than from vector plumbing or public
-API channel dispatch.
+The fifteenth packet of `testvector01.bit` is 1001 bytes with TOC `0xff` and
+count byte `0x85`, carrying five VBR frames of 198, 200, 199, 200, and 198
+bytes. It now decodes after the CELT path falls back to the upstream global flag
+consume order for postfilter, transient, and intra-energy flags.
+
+The next post-fifteenth blocker was the thirty-fourth packet of
+`testvector01.bit`: it is 1013 bytes with TOC `0xff` and count byte `0x85`,
+carrying five VBR frames of 201, 201, 201, 204, and 200 bytes. Its first frame
+triggered a range-coder error in the simplified high-band shape decode. The
+fallback now restores the spectral decode snapshot and decodes lower bands
+until the first over-reading wide band, leaving that band and later bands zero
+instead of failing the packet. A full-file decode of
+`rfc8251-testvector01-8000-mono` now writes all 2147 packets, producing 471680
+bytes. The next RFC8251 step should enable manifest/diff coverage and continue
+from the next corpus-level decoder or vector-plumbing failure.
 
 ## Acceptance Commands
 

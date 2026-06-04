@@ -686,6 +686,89 @@ fn celt_decode_spectral_shapes_i16(
     };
 }
 
+fn celt_decode_spectral_shapes_legacy_bounded_i16(
+    state: &CeltDecoderState,
+    dec: &EcDec,
+    total_bits: i32,
+    total_dim: usize,
+    scratch: &CeltMonoDecodeScratch,
+) !void {
+    clear_i32(&scratch.pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.channel_pulse_bits[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.fine_quant[0:CELT_MAX_BANDS]);
+    clear_i32(&scratch.pulses[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+    clear_i16(&scratch.shape_q15[0:CELT_MONO_DECODE_MAX_SPECTRAL]);
+
+    _ = celt_rate_decode_legacy_allocation(
+        state,
+        dec,
+        total_bits,
+        &scratch.pulse_bits[0:CELT_MAX_BANDS],
+        &scratch.fine_quant[0:CELT_MAX_BANDS],
+    ) catch {
+        return error.CeltDecodeError;
+    };
+
+    celt_decode_fine_energy(state, dec, &scratch.fine_quant[0:CELT_MAX_BANDS]) catch {
+        return error.CeltDecodeError;
+    };
+
+    var channel: i32 = 0;
+    var stop: bool = false;
+    while channel < state.channels && !stop {
+        const spectral_offset: usize = (channel as usize) * total_dim;
+        try celt_prepare_channel_pulse_bits_from_legacy_allocation(state, channel, scratch);
+
+        // Fallback for wide-band CELT frames while full quant_partition is not implemented:
+        // keep lower decoded bands and leave the first over-reading band plus later bands zero.
+        var band_offset: usize = 0;
+        var band: i32 = state.start_band;
+        while band < state.end_band {
+            if band < 0 || band >= (CELT_MAX_BANDS as i32) {
+                return error.CeltDecodeError;
+            }
+            const band_index: usize = band as usize;
+            if band_index >= CELT_MAX_BANDS {
+                return error.CeltDecodeError;
+            }
+            const dim: i32 = scratch.band_dims[band_index];
+            if dim <= 0 || band_offset + (dim as usize) > total_dim {
+                return error.CeltDecodeError;
+            }
+            const dim_usize: usize = dim as usize;
+
+            var band_dec: EcDec = EcDec{};
+            celt_copy_ec_dec(&band_dec, dec);
+            _ = celt_decode_band_shapes(
+                dec,
+                band,
+                band + 1,
+                &scratch.band_dims[0:CELT_MAX_BANDS],
+                &scratch.channel_pulse_bits[0:CELT_MAX_BANDS],
+                &scratch.pulses[spectral_offset + band_offset:dim_usize],
+                &scratch.shape_q15[spectral_offset + band_offset:dim_usize],
+            ) catch {
+                return error.CeltDecodeError;
+            };
+            if dec.err {
+                celt_copy_ec_dec(dec, &band_dec);
+                clear_i32(&scratch.pulses[spectral_offset + band_offset:total_dim - band_offset]);
+                clear_i16(&scratch.shape_q15[spectral_offset + band_offset:total_dim - band_offset]);
+                stop = true;
+                break;
+            }
+
+            band_offset = band_offset + dim_usize;
+            band = band + 1;
+        }
+        channel = channel + 1;
+    }
+
+    ec_dec_check(dec) catch {
+        return error.CeltDecodeError;
+    };
+}
+
 fn celt_mono_prepare_tables(state: &const CeltDecoderState, scratch: &CeltMonoDecodeScratch) !void {
     const imdct_len: i32 = state.frame_size * 2;
     if imdct_len <= 0 || imdct_len > (CELT_MONO_DECODE_MAX_IMDCT as i32) {
@@ -752,7 +835,11 @@ fn celt_decode_channels_from_ec_i16_attempt(
         celt_copy_ec_dec(dec, &allocation_dec);
         try copy_i16_values(&state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN], &allocation_old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
         celt_decode_spectral_shapes_i16(state, dec, total_bits, total_dim, scratch, true) catch {
-            return error.CeltDecodeError;
+            celt_copy_ec_dec(dec, &allocation_dec);
+            try copy_i16_values(&state.old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN], &allocation_old_ebands_q8[0:CELT_ENERGY_HISTORY_LEN]);
+            celt_decode_spectral_shapes_legacy_bounded_i16(state, dec, total_bits, total_dim, scratch) catch {
+                return error.CeltDecodeError;
+            };
         };
     };
 
