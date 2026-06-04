@@ -1,3 +1,4 @@
+use src.opus.core.constants.MAX_PACKET_MS;
 use src.opus.packet.toc.TocByte;
 use src.opus.packet.toc.PacketParseResult;
 use src.opus.packet.toc.parse_toc_byte;
@@ -71,6 +72,13 @@ fn repacketizer_parsed_payload_bytes(parsed: &const PacketParseResult) usize {
     return bytes;
 }
 
+fn repacketizer_validate_duration(toc: &const TocByte, frame_count: usize) !void {
+    const duration_us: u32 = toc.config.frame_duration_us * (frame_count as u32);
+    if duration_us > (MAX_PACKET_MS * 1000) as u32 {
+        return error.RepacketizerError;
+    }
+}
+
 fn repacketizer_copy_parsed_frames(state: &RepacketizerState, packet: &[byte], parsed: &const PacketParseResult) void {
     var source_index: usize = 0;
     var dest_index: usize = state.frame_count;
@@ -132,6 +140,7 @@ export fn repacketizer_add_packet(rp: &Repacketizer, packet: &[byte]) !void {
     if state.frame_count + parsed_frame_count > REPACKETIZER_MAX_FRAMES {
         return error.RepacketizerError;
     }
+    try repacketizer_validate_duration(&parsed.toc, state.frame_count + parsed_frame_count);
 
     const parsed_bytes: usize = repacketizer_parsed_payload_bytes(&parsed);
     if state.frame_data_len + parsed_bytes > REPACKETIZER_MAX_FRAME_DATA_BYTES {

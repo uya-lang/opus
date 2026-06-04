@@ -64,3 +64,29 @@ test "repacketizer add packet rejects malformed packet without state changes" {
     try assert_eq_i32(frames_after as i32, 1);
     try assert_eq_i32(bytes_after as i32, 3);
 }
+
+test "repacketizer add packet rejects aggregate duration over 120ms" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    var frame: [byte: 4] = [248, 17, 18, 19];
+    var i: usize = 0;
+    while i < 6 {
+        try repacketizer_add_packet(&rp, &frame[0:4]);
+        i = i + 1;
+    }
+
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 6);
+    try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 18);
+
+    const too_long: !void = repacketizer_add_packet(&rp, &frame[0:4]);
+    match too_long {
+        error.RepacketizerError => {}
+        else => { try assert(false, "aggregate duration above 120ms must be rejected"); }
+    }
+
+    const frames_after: usize = repacketizer_frame_count(&rp);
+    const bytes_after: usize = repacketizer_payload_bytes(&rp);
+    try assert_eq_i32(frames_after as i32, 6);
+    try assert_eq_i32(bytes_after as i32, 18);
+}
