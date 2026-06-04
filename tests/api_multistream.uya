@@ -1,0 +1,86 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.api.multistream.MultistreamDecoder;
+use src.opus.api.multistream.MultistreamDecoderConfig;
+use src.opus.api.multistream.OPUS_MULTISTREAM_DECODER_STORAGE_WORDS;
+use src.opus.api.multistream.OPUS_MULTISTREAM_MAPPING_SILENT;
+use src.opus.api.multistream.OPUS_MULTISTREAM_MAX_CHANNELS;
+use src.opus.api.multistream.multistream_decoder_channel_count;
+use src.opus.api.multistream.multistream_decoder_coupled_count;
+use src.opus.api.multistream.multistream_decoder_init;
+use src.opus.api.multistream.multistream_decoder_is_initialized;
+use src.opus.api.multistream.multistream_decoder_mapping_at;
+use src.opus.api.multistream.multistream_decoder_mapping_family;
+use src.opus.api.multistream.multistream_decoder_stream_count;
+use src.opus.api.multistream.multistream_validate_decoder_config;
+
+fn stereo_family0_config() MultistreamDecoderConfig {
+    var mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    mapping[0] = 0;
+    mapping[1] = 1;
+    return MultistreamDecoderConfig{
+        sample_rate_hz: 48000,
+        channel_count: 2,
+        stream_count: 1,
+        coupled_count: 1,
+        mapping_family: 0,
+        mapping: mapping,
+    };
+}
+
+test "multistream decoder init stores stream layout metadata" {
+    var decoder: MultistreamDecoder = MultistreamDecoder{};
+    var config: MultistreamDecoderConfig = stereo_family0_config();
+
+    try multistream_decoder_init(&decoder, &config);
+
+    try assert(multistream_decoder_is_initialized(&decoder), "multistream decoder must record initialization");
+    try assert_eq_i32(multistream_decoder_channel_count(&decoder) as i32, 2);
+    try assert_eq_i32(multistream_decoder_stream_count(&decoder) as i32, 1);
+    try assert_eq_i32(multistream_decoder_coupled_count(&decoder) as i32, 1);
+    try assert_eq_i32(multistream_decoder_mapping_family(&decoder) as i32, 0);
+    try assert_eq_i32((try multistream_decoder_mapping_at(&decoder, 0)) as i32, 0);
+    try assert_eq_i32((try multistream_decoder_mapping_at(&decoder, 1)) as i32, 1);
+}
+
+test "multistream decoder config validates counts and mapping bounds" {
+    var config: MultistreamDecoderConfig = stereo_family0_config();
+    try multistream_validate_decoder_config(&config);
+
+    config.stream_count = 0;
+    const no_streams: !void = multistream_validate_decoder_config(&config);
+    match no_streams {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "zero stream count must be rejected"); }
+    }
+
+    config = stereo_family0_config();
+    config.coupled_count = 2;
+    const too_many_coupled: !void = multistream_validate_decoder_config(&config);
+    match too_many_coupled {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "coupled count cannot exceed stream count"); }
+    }
+
+    config = stereo_family0_config();
+    config.mapping[1] = 2;
+    const bad_mapping: !void = multistream_validate_decoder_config(&config);
+    match bad_mapping {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "mapping must stay within decoded channel count"); }
+    }
+}
+
+test "multistream decoder accepts silent mapped output channels" {
+    var config: MultistreamDecoderConfig = stereo_family0_config();
+    config.mapping[1] = OPUS_MULTISTREAM_MAPPING_SILENT;
+    try multistream_validate_decoder_config(&config);
+
+    var decoder: MultistreamDecoder = MultistreamDecoder{};
+    try multistream_decoder_init(&decoder, &config);
+    try assert_eq_i32((try multistream_decoder_mapping_at(&decoder, 1)) as i32, OPUS_MULTISTREAM_MAPPING_SILENT as i32);
+}
+
+test "multistream decoder metadata storage is not sized for max decoder slots" {
+    try assert(OPUS_MULTISTREAM_DECODER_STORAGE_WORDS < 1024, "metadata storage must stay small until caller-provided decoder slots are implemented");
+}

@@ -429,7 +429,7 @@
 
 ## 15. Multistream
 
-- [ ] 实现 `api/multistream.uya`。
+- [x] 实现 `api/multistream.uya`。
 - [ ] 实现 mapping family 0。
 - [ ] 实现 mapping family 1。
 - [ ] 实现 mapping family 255。
@@ -445,9 +445,9 @@
 
 验收标准：
 
-- [ ] 单流 decoder 不依赖 multistream。
+- [x] 单流 decoder 不依赖 multistream。
 - [ ] Multistream 错误不会污染单流 decoder state。
-- [ ] Multistream init 不构造或清零 `OPUS_MAX_STREAMS` 个完整 decoder。
+- [x] Multistream init 不构造或清零 `OPUS_MAX_STREAMS` 个完整 decoder。
 
 ## 16. Basic Encoder
 
