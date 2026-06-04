@@ -2,9 +2,11 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.api.multistream.MultistreamDecoder;
 use src.opus.api.multistream.MultistreamDecoderConfig;
+use src.opus.api.multistream.MultistreamPacketSplit;
 use src.opus.api.multistream.OPUS_MULTISTREAM_DECODER_STORAGE_WORDS;
 use src.opus.api.multistream.OPUS_MULTISTREAM_MAPPING_SILENT;
 use src.opus.api.multistream.OPUS_MULTISTREAM_MAX_CHANNELS;
+use src.opus.api.multistream.multistream_split_stream_packets;
 use src.opus.api.multistream.multistream_decoder_channel_count;
 use src.opus.api.multistream.multistream_decoder_coupled_count;
 use src.opus.api.multistream.multistream_decoder_config_family0;
@@ -229,5 +231,63 @@ test "mapping family 255 rejects malformed explicit layouts" {
     match bad_rate {
         error.MultistreamApiError => {}
         else => { try assert(false, "family 255 must validate Opus API sample rates"); }
+    }
+}
+
+test "multistream packet split reads self-delimited code0 stream packets" {
+    const packet: [byte: 8] = [128, 2, 1, 2, 128, 3, 4, 5];
+    var split: MultistreamPacketSplit = MultistreamPacketSplit{};
+    try multistream_split_stream_packets(&packet[0:8], 2, &split);
+
+    try assert_eq_i32(split.stream_count as i32, 2);
+    try assert_eq_i32(split.streams[0].offset as i32, 0);
+    try assert_eq_i32(split.streams[0].len as i32, 4);
+    try assert_eq_i32(split.streams[1].offset as i32, 4);
+    try assert_eq_i32(split.streams[1].len as i32, 4);
+}
+
+test "multistream packet split reads self-delimited CBR stream packets" {
+    const packet: [byte: 9] = [129, 2, 10, 11, 12, 13, 128, 1, 99];
+    var split: MultistreamPacketSplit = MultistreamPacketSplit{};
+    try multistream_split_stream_packets(&packet[0:9], 2, &split);
+
+    try assert_eq_i32(split.streams[0].offset as i32, 0);
+    try assert_eq_i32(split.streams[0].len as i32, 6);
+    try assert_eq_i32(split.streams[1].offset as i32, 6);
+    try assert_eq_i32(split.streams[1].len as i32, 3);
+}
+
+test "multistream packet split reads self-delimited VBR stream packets" {
+    const code2_packet: [byte: 9] = [130, 2, 1, 10, 11, 12, 128, 1, 99];
+    var split: MultistreamPacketSplit = MultistreamPacketSplit{};
+    try multistream_split_stream_packets(&code2_packet[0:9], 2, &split);
+
+    try assert_eq_i32(split.streams[0].offset as i32, 0);
+    try assert_eq_i32(split.streams[0].len as i32, 6);
+    try assert_eq_i32(split.streams[1].offset as i32, 6);
+    try assert_eq_i32(split.streams[1].len as i32, 3);
+
+    const code3_packet: [byte: 10] = [131, 130, 2, 1, 10, 11, 12, 128, 1, 99];
+    try multistream_split_stream_packets(&code3_packet[0:10], 2, &split);
+
+    try assert_eq_i32(split.streams[0].offset as i32, 0);
+    try assert_eq_i32(split.streams[0].len as i32, 7);
+    try assert_eq_i32(split.streams[1].offset as i32, 7);
+    try assert_eq_i32(split.streams[1].len as i32, 3);
+}
+
+test "multistream packet split rejects malformed stream framing" {
+    const packet: [byte: 4] = [128, 5, 1, 2];
+    var split: MultistreamPacketSplit = MultistreamPacketSplit{};
+    const truncated: !void = multistream_split_stream_packets(&packet[0:4], 2, &split);
+    match truncated {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "self-delimited stream length must fit available data"); }
+    }
+
+    const no_streams: !void = multistream_split_stream_packets(&packet[0:4], 0, &split);
+    match no_streams {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "split helper must reject zero streams"); }
     }
 }

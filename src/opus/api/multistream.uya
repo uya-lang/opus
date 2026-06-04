@@ -1,3 +1,4 @@
+use src.opus.core.constants.MAX_FRAME_BYTES;
 use src.opus.core.errors.validate_sample_rate;
 
 export error MultistreamApiError;
@@ -33,6 +34,16 @@ export struct MultistreamDecoderConfig {
     coupled_count: u8,
     mapping_family: u8,
     mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS],
+}
+
+export struct MultistreamPacketSpan {
+    offset: usize,
+    len: usize,
+}
+
+export struct MultistreamPacketSplit {
+    stream_count: u8,
+    streams: [MultistreamPacketSpan: OPUS_MULTISTREAM_MAX_STREAMS],
 }
 
 struct MultistreamDecoderState {
@@ -210,6 +221,229 @@ fn multistream_copy_mapping(dest: &[u8], src: &[const u8]) void {
         dest.ptr[i] = src.ptr[i];
         i = i + 1;
     }
+}
+
+fn multistream_clear_packet_split(split: &MultistreamPacketSplit) void {
+    split.stream_count = 0;
+    var i: usize = 0;
+    while i < OPUS_MULTISTREAM_MAX_STREAMS {
+        split.streams[i] = MultistreamPacketSpan{ offset: 0, len: 0 };
+        i = i + 1;
+    }
+}
+
+fn multistream_check_frame_len(len: usize) !void {
+    if len > MAX_FRAME_BYTES {
+        return error.MultistreamApiError;
+    }
+}
+
+fn multistream_read_size(packet: &[byte], cursor: &usize, end: usize) !usize {
+    if *cursor >= end {
+        return error.MultistreamApiError;
+    }
+
+    const first: usize = packet.ptr[*cursor] as usize;
+    *cursor = *cursor + 1;
+    if first < 252 {
+        return first;
+    }
+
+    if *cursor >= end {
+        return error.MultistreamApiError;
+    }
+    const second: usize = packet.ptr[*cursor] as usize;
+    *cursor = *cursor + 1;
+    return first + (second * 4);
+}
+
+fn multistream_read_padding(packet: &[byte], cursor: &usize, end: usize) !usize {
+    var padding: usize = 0;
+    while true {
+        if *cursor >= end {
+            return error.MultistreamApiError;
+        }
+        const b: usize = packet.ptr[*cursor] as usize;
+        *cursor = *cursor + 1;
+        padding = padding + b;
+        if padding > end - *cursor {
+            return error.MultistreamApiError;
+        }
+        if b != 255 {
+            break;
+        }
+    }
+    return padding;
+}
+
+fn multistream_add_frame_len(total: &usize, len: usize) !void {
+    try multistream_check_frame_len(len);
+    *total = *total + len;
+}
+
+fn multistream_parse_code3_packet_len(packet: &[byte], start: usize, end: usize, self_delimited: bool) !usize {
+    var cursor: usize = start + 1;
+    if cursor >= end {
+        return error.MultistreamApiError;
+    }
+
+    const count_byte: byte = packet.ptr[cursor];
+    cursor = cursor + 1;
+    const frame_count: u8 = ((count_byte & (63 as byte)) as! u8).value;
+    const is_vbr: bool = (count_byte & (128 as byte)) != 0;
+    const has_padding: bool = (count_byte & (64 as byte)) != 0;
+    if frame_count == 0 || frame_count > 48 {
+        return error.MultistreamApiError;
+    }
+
+    var padding_len: usize = 0;
+    if has_padding {
+        padding_len = try multistream_read_padding(packet, &cursor, end);
+    }
+    if padding_len > end - cursor {
+        return error.MultistreamApiError;
+    }
+    const payload_limit: usize = end - padding_len;
+    if cursor > payload_limit {
+        return error.MultistreamApiError;
+    }
+
+    if is_vbr {
+        var frame_total: usize = 0;
+        var i: usize = 0;
+        while i + 1 < frame_count as usize {
+            const frame_len: usize = try multistream_read_size(packet, &cursor, payload_limit);
+            try multistream_add_frame_len(&frame_total, frame_len);
+            i = i + 1;
+        }
+
+        if self_delimited {
+            const last_len: usize = try multistream_read_size(packet, &cursor, payload_limit);
+            try multistream_add_frame_len(&frame_total, last_len);
+            if frame_total > payload_limit - cursor {
+                return error.MultistreamApiError;
+            }
+            return (cursor - start) + frame_total + padding_len;
+        }
+
+        if frame_total > payload_limit - cursor {
+            return error.MultistreamApiError;
+        }
+        const remaining_len: usize = (payload_limit - cursor) - frame_total;
+        try multistream_check_frame_len(remaining_len);
+        return end - start;
+    }
+
+    if self_delimited {
+        const frame_len: usize = try multistream_read_size(packet, &cursor, payload_limit);
+        try multistream_check_frame_len(frame_len);
+        const frame_total: usize = frame_len * (frame_count as usize);
+        if frame_total > payload_limit - cursor {
+            return error.MultistreamApiError;
+        }
+        return (cursor - start) + frame_total + padding_len;
+    }
+
+    const data_len: usize = payload_limit - cursor;
+    if data_len % (frame_count as usize) != 0 {
+        return error.MultistreamApiError;
+    }
+    const frame_len: usize = data_len / (frame_count as usize);
+    try multistream_check_frame_len(frame_len);
+    return end - start;
+}
+
+fn multistream_parse_stream_packet_len(packet: &[byte], start: usize, end: usize, self_delimited: bool) !usize {
+    if start >= end {
+        return error.MultistreamApiError;
+    }
+
+    const code: u8 = ((packet.ptr[start] & (3 as byte)) as! u8).value;
+    var cursor: usize = start + 1;
+
+    if code == 0 {
+        var frame_len: usize = end - cursor;
+        if self_delimited {
+            frame_len = try multistream_read_size(packet, &cursor, end);
+        }
+        try multistream_check_frame_len(frame_len);
+        if frame_len > end - cursor {
+            return error.MultistreamApiError;
+        }
+        return (cursor - start) + frame_len;
+    }
+
+    if code == 1 {
+        if self_delimited {
+            const frame_len: usize = try multistream_read_size(packet, &cursor, end);
+            try multistream_check_frame_len(frame_len);
+            const frame_total: usize = frame_len * 2;
+            if frame_total > end - cursor {
+                return error.MultistreamApiError;
+            }
+            return (cursor - start) + frame_total;
+        }
+
+        const payload_len: usize = end - cursor;
+        if (payload_len & (1 as usize)) != 0 {
+            return error.MultistreamApiError;
+        }
+        const frame_len: usize = payload_len / 2;
+        try multistream_check_frame_len(frame_len);
+        return end - start;
+    }
+
+    if code == 2 {
+        const first_len: usize = try multistream_read_size(packet, &cursor, end);
+        try multistream_check_frame_len(first_len);
+        if self_delimited {
+            const second_len: usize = try multistream_read_size(packet, &cursor, end);
+            try multistream_check_frame_len(second_len);
+            const frame_total: usize = first_len + second_len;
+            if frame_total > end - cursor {
+                return error.MultistreamApiError;
+            }
+            return (cursor - start) + frame_total;
+        }
+
+        if first_len > end - cursor {
+            return error.MultistreamApiError;
+        }
+        const second_len: usize = (end - cursor) - first_len;
+        try multistream_check_frame_len(second_len);
+        return end - start;
+    }
+
+    return try multistream_parse_code3_packet_len(packet, start, end, self_delimited);
+}
+
+export fn multistream_split_stream_packets(packet: &[byte], stream_count: u8, split: &MultistreamPacketSplit) !void {
+    multistream_clear_packet_split(split);
+    if packet.len == 0 || stream_count == 0 {
+        return error.MultistreamApiError;
+    }
+    if (stream_count as usize) > OPUS_MULTISTREAM_MAX_STREAMS {
+        return error.MultistreamApiError;
+    }
+
+    var cursor: usize = 0;
+    var stream: usize = 0;
+    while stream < stream_count as usize {
+        const self_delimited: bool = stream + 1 < stream_count as usize;
+        const packet_len: usize = try multistream_parse_stream_packet_len(packet, cursor, packet.len, self_delimited);
+        if packet_len == 0 || packet_len > packet.len - cursor {
+            return error.MultistreamApiError;
+        }
+
+        split.streams[stream] = MultistreamPacketSpan{ offset: cursor, len: packet_len };
+        cursor = cursor + packet_len;
+        stream = stream + 1;
+    }
+
+    if cursor != packet.len {
+        return error.MultistreamApiError;
+    }
+    split.stream_count = stream_count;
 }
 
 export fn multistream_decoder_init(decoder: &MultistreamDecoder, config: &const MultistreamDecoderConfig) !void {
