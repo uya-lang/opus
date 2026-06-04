@@ -1,0 +1,27 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.packet.repacketizer.Repacketizer;
+use src.opus.packet.repacketizer.repacketizer_frame_count;
+use src.opus.packet.repacketizer.repacketizer_init;
+use src.opus.packet.repacketizer.repacketizer_is_empty;
+use src.opus.packet.repacketizer.repacketizer_payload_bytes;
+use src.opus.packet.repacketizer.repacketizer_reset;
+
+test "repacketizer initializes as an empty packet builder" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+
+    try assert(repacketizer_is_empty(&rp), "new repacketizer must start empty");
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 0);
+    try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 0);
+}
+
+test "repacketizer reset leaves the builder empty and reusable" {
+    var rp: Repacketizer = Repacketizer{};
+    try repacketizer_init(&rp);
+    try repacketizer_reset(&rp);
+
+    try assert(repacketizer_is_empty(&rp), "reset repacketizer must be empty");
+    try assert_eq_i32(repacketizer_frame_count(&rp) as i32, 0);
+    try assert_eq_i32(repacketizer_payload_bytes(&rp) as i32, 0);
+}

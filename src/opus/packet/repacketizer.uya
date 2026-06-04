@@ -1,0 +1,83 @@
+use src.opus.packet.toc.TocByte;
+use src.opus.packet.toc.parse_toc_byte;
+
+export error RepacketizerError;
+
+export const REPACKETIZER_MAX_FRAMES: usize = 48;
+export const REPACKETIZER_MAX_FRAME_DATA_BYTES: usize = 61200;
+
+struct RepacketizerFrame {
+    offset: usize,
+    len: usize,
+}
+
+struct RepacketizerState {
+    initialized: bool,
+    toc: TocByte,
+    frame_count: usize,
+    frame_data_len: usize,
+    frames: [RepacketizerFrame: REPACKETIZER_MAX_FRAMES],
+    frame_data: [byte: REPACKETIZER_MAX_FRAME_DATA_BYTES],
+}
+
+const REPACKETIZER_STORAGE_WORDS: usize = 8192;
+const REPACKETIZER_STORAGE_BYTES: usize = REPACKETIZER_STORAGE_WORDS * @size_of(usize);
+
+export struct Repacketizer {
+    storage: [usize: 8192],
+}
+
+fn repacketizer_storage_fits_state() bool {
+    return @size_of(RepacketizerState) <= REPACKETIZER_STORAGE_BYTES;
+}
+
+fn repacketizer_state(rp: &Repacketizer) &RepacketizerState {
+    return ((&rp.storage as &usize) as &RepacketizerState);
+}
+
+fn repacketizer_state_const(rp: &const Repacketizer) &const RepacketizerState {
+    return ((&rp.storage as &const usize) as &const RepacketizerState);
+}
+
+fn repacketizer_clear_frames(state: &RepacketizerState) void {
+    var i: usize = 0;
+    while i < REPACKETIZER_MAX_FRAMES {
+        state.frames[i] = RepacketizerFrame{ offset: 0, len: 0 };
+        i = i + 1;
+    }
+}
+
+fn repacketizer_reset_state(state: &RepacketizerState) void {
+    state.initialized = true;
+    state.toc = parse_toc_byte(0);
+    state.frame_count = 0;
+    state.frame_data_len = 0;
+    repacketizer_clear_frames(state);
+}
+
+export fn repacketizer_init(rp: &Repacketizer) !void {
+    if !repacketizer_storage_fits_state() {
+        return error.RepacketizerError;
+    }
+    repacketizer_reset_state(repacketizer_state(rp));
+}
+
+export fn repacketizer_reset(rp: &Repacketizer) !void {
+    if !repacketizer_storage_fits_state() {
+        return error.RepacketizerError;
+    }
+    repacketizer_reset_state(repacketizer_state(rp));
+}
+
+export fn repacketizer_is_empty(rp: &const Repacketizer) bool {
+    const state: &const RepacketizerState = repacketizer_state_const(rp);
+    return state.frame_count == 0 && state.frame_data_len == 0;
+}
+
+export fn repacketizer_frame_count(rp: &const Repacketizer) usize {
+    return repacketizer_state_const(rp).frame_count;
+}
+
+export fn repacketizer_payload_bytes(rp: &const Repacketizer) usize {
+    return repacketizer_state_const(rp).frame_data_len;
+}
