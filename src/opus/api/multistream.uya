@@ -68,6 +68,11 @@ export struct MultistreamDecoder {
     storage: [usize: OPUS_MULTISTREAM_DECODER_STORAGE_WORDS],
 }
 
+export struct MultistreamDecoderPool {
+    stream_count: u8,
+    slots: &[OpusDecoder],
+}
+
 fn multistream_decoder_storage_fits_state() bool {
     return @size_of(MultistreamDecoderState) <= MULTISTREAM_DECODER_STORAGE_BYTES;
 }
@@ -261,6 +266,16 @@ fn multistream_validate_single_uncoupled_stream_state(state: &const MultistreamD
         return error.MultistreamApiError;
     }
     try multistream_validate_state_mapping(state, 1);
+}
+
+fn multistream_stream_decoder_channels(state: &const MultistreamDecoderState, stream_index: u8) !u8 {
+    if !state.initialized || stream_index >= state.stream_count {
+        return error.MultistreamApiError;
+    }
+    if stream_index < state.coupled_count {
+        return 2 as u8;
+    }
+    return 1 as u8;
 }
 
 fn multistream_reorder_interleaved_frame_i16(
@@ -578,6 +593,44 @@ export fn multistream_split_stream_packets(packet: &[byte], stream_count: u8, sp
         return error.MultistreamApiError;
     }
     split.stream_count = stream_count;
+}
+
+export fn multistream_decoder_pool_init(decoder: &const MultistreamDecoder, pool: &MultistreamDecoderPool, slots: &[OpusDecoder]) !void {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    if !state.initialized || state.stream_count == 0 {
+        return error.MultistreamApiError;
+    }
+    if slots.len < state.stream_count as usize {
+        return error.MultistreamApiError;
+    }
+
+    pool.stream_count = state.stream_count;
+    pool.slots = slots;
+}
+
+export fn multistream_decoder_pool_stream_count(pool: &const MultistreamDecoderPool) u8 {
+    return pool.stream_count;
+}
+
+export fn multistream_decoder_pool_capacity(pool: &const MultistreamDecoderPool) usize {
+    return pool.slots.len;
+}
+
+export fn multistream_decoder_pool_init_slots(decoder: &const MultistreamDecoder, pool: &MultistreamDecoderPool) !void {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    if !state.initialized || pool.stream_count != state.stream_count || pool.slots.len < state.stream_count as usize {
+        return error.MultistreamApiError;
+    }
+
+    var stream: usize = 0;
+    while stream < state.stream_count as usize {
+        const channels: u8 = try multistream_stream_decoder_channels(state, stream as u8);
+        const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: state.sample_rate_hz, channels: channels };
+        decoder_init(&pool.slots.ptr[stream], &config) catch {
+            return error.MultistreamApiError;
+        };
+        stream = stream + 1;
+    }
 }
 
 export fn multistream_decoder_init_coupled_stream_slot(decoder: &const MultistreamDecoder, stream_decoder: &OpusDecoder) !void {

@@ -1,10 +1,12 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.api.decoder.DecoderApiError;
 use src.opus.api.decoder.OpusDecoder;
 use src.opus.api.decoder.decoder_decode_i16;
 use src.opus.api.decoder.decoder_init;
 use src.opus.api.multistream.MultistreamDecoder;
 use src.opus.api.multistream.MultistreamDecoderConfig;
+use src.opus.api.multistream.MultistreamDecoderPool;
 use src.opus.api.multistream.MultistreamPacketSplit;
 use src.opus.api.multistream.OPUS_MULTISTREAM_DECODER_STORAGE_WORDS;
 use src.opus.api.multistream.OPUS_MULTISTREAM_MAPPING_SILENT;
@@ -24,6 +26,10 @@ use src.opus.api.multistream.multistream_decoder_init_uncoupled_stream_slot;
 use src.opus.api.multistream.multistream_decoder_is_initialized;
 use src.opus.api.multistream.multistream_decoder_mapping_at;
 use src.opus.api.multistream.multistream_decoder_mapping_family;
+use src.opus.api.multistream.multistream_decoder_pool_capacity;
+use src.opus.api.multistream.multistream_decoder_pool_init;
+use src.opus.api.multistream.multistream_decoder_pool_init_slots;
+use src.opus.api.multistream.multistream_decoder_pool_stream_count;
 use src.opus.api.multistream.multistream_decoder_stream_count;
 use src.opus.api.multistream.multistream_validate_decoder_config;
 use src.opus.core.types.OpusDecoderConfig;
@@ -128,7 +134,42 @@ test "multistream decoder accepts silent mapped output channels" {
 }
 
 test "multistream decoder metadata storage is not sized for max decoder slots" {
-    try assert(OPUS_MULTISTREAM_DECODER_STORAGE_WORDS < 1024, "metadata storage must stay small until caller-provided decoder slots are implemented");
+    try assert(OPUS_MULTISTREAM_DECODER_STORAGE_WORDS < 1024, "metadata storage must stay small while decoder slots live in an external pool");
+}
+
+test "multistream decoder pool uses actual stream count slots" {
+    const two_stream_mapping: [u8: 3] = [0, 2, 1];
+    const two_stream_config: MultistreamDecoderConfig = try multistream_decoder_config_family255(48000, 3, 2, 1, &two_stream_mapping[0:3]);
+    var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
+    try multistream_decoder_init(&multistream_decoder, &two_stream_config);
+
+    var slots: [OpusDecoder: 1] = [OpusDecoder{}];
+    var pool: MultistreamDecoderPool = MultistreamDecoderPool{ stream_count: 0 as u8, slots: &slots[0:1] };
+    const short_pool: !void = multistream_decoder_pool_init(&multistream_decoder, &pool, &slots[0:1]);
+    match short_pool {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "pool capacity must cover the actual stream count"); }
+    }
+
+    const stereo_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
+    try multistream_decoder_init(&multistream_decoder, &stereo_config);
+    try multistream_decoder_pool_init(&multistream_decoder, &pool, &slots[0:1]);
+    try assert_eq_i32(multistream_decoder_pool_stream_count(&pool) as i32, 1);
+    try assert_eq_i32(multistream_decoder_pool_capacity(&pool) as i32, 1);
+    try multistream_decoder_pool_init_slots(&multistream_decoder, &pool);
+
+    var stereo_packet: [byte: 65] = [0: 65];
+    fill_multistream_stereo_celt_packet(&stereo_packet[0:65]);
+    var stereo_short_pcm: [i16: 120] = [0: 120];
+    const stereo_short: !i32 = decoder_decode_i16(&slots[0], &stereo_packet[0:65], &stereo_short_pcm[0:120], 120, false);
+    match stereo_short {
+        error.DecoderApiError => {}
+        else => { try assert(false, "coupled stream slot must be initialized as stereo"); }
+    }
+
+    var stereo_pcm: [i16: 240] = [0: 240];
+    const stereo_decoded: i32 = try decoder_decode_i16(&slots[0], &stereo_packet[0:65], &stereo_pcm[0:240], 120, false);
+    try assert_eq_i32(stereo_decoded, 120);
 }
 
 test "mapping family 0 config derives mono and stereo layouts" {

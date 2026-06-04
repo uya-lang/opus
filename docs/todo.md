@@ -440,7 +440,7 @@
 - Channel mapping reorder 拆分：
   - [x] 实现 multistream interleaved PCM mapping helper。
   - [x] 将 mapping helper 接入 single-stream coupled/uncoupled decode。
-- [ ] 实现按实际 `stream_count` 持有 decoder slots 的 pool。
+- [x] 实现按实际 `stream_count` 持有 decoder slots 的 pool。
 - [ ] 支持 caller-provided multistream decoder storage。
 - [ ] 测试 mono。
 - [ ] 测试 stereo。
