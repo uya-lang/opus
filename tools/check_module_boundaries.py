@@ -52,6 +52,14 @@ API_FINAL_RESAMPLE_DECODE_FUNCTIONS = (
     "decoder_decode_celt_parsed_i16",
     "decoder_decode_hybrid_parsed_i16",
 )
+REPACKETIZER_FILE = ROOT / "src" / "opus" / "packet" / "repacketizer.uya"
+REPACKETIZER_FORBIDDEN_IMPORTS = (
+    ("src.opus.api", "public decoder API"),
+    ("src.opus.celt", "CELT decoder"),
+    ("src.opus.silk", "SILK decoder"),
+    ("src.opus.hybrid", "Hybrid decoder"),
+    ("src.opus.dsp", "DSP/audio processing"),
+)
 
 
 def uya_files(paths: list[Path], test_prefix: str) -> list[Path]:
@@ -182,6 +190,19 @@ def check_api_decode_uses_single_final_resample(violations: list[str]) -> None:
             )
 
 
+def check_repacketizer_stays_packet_only(violations: list[str]) -> None:
+    rel = REPACKETIZER_FILE.relative_to(ROOT)
+    for line_no, line in enumerate(REPACKETIZER_FILE.read_text().splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped.startswith("use "):
+            continue
+        for import_prefix, label in REPACKETIZER_FORBIDDEN_IMPORTS:
+            if import_prefix in stripped:
+                violations.append(
+                    f"{rel}:{line_no}: repacketizer must not import {label}: {stripped}"
+                )
+
+
 def main() -> int:
     violations: list[str] = []
     for boundary in BOUNDARIES:
@@ -201,6 +222,7 @@ def main() -> int:
     check_api_public_structs_do_not_embed_codec_state(violations)
     check_api_decoder_init_avoids_large_scratch_clears(violations)
     check_api_decode_uses_single_final_resample(violations)
+    check_repacketizer_stays_packet_only(violations)
 
     if violations:
         for violation in violations:

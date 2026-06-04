@@ -424,7 +424,7 @@
 
 验收标准：
 
-- [ ] Repacketizer 不解码音频。
+- [x] Repacketizer 不解码音频。
 - [x] 输出 packet parser roundtrip 成功。
 
 ## 15. Multistream
