@@ -408,7 +408,7 @@
 - [x] 实现 add packet。
 - [x] 实现 frame duration 校验。
 - [x] 实现 get packet duration。
-- [ ] 实现 output CBR/VBR packet。
+- [x] 实现 output CBR/VBR packet。
 - [ ] 实现 padding 添加/移除。
 - [ ] 测试拼接同 config packets。
 - [ ] 测试非法混合 config。

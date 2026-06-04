@@ -93,6 +93,92 @@ fn repacketizer_state_duration_samples_48k(state: &const RepacketizerState) u32 
     return state.toc.config.frame_samples_48k * (state.frame_count as u32);
 }
 
+fn repacketizer_toc_byte_with_code(toc: &const TocByte, code: usize) byte {
+    var value: usize = (toc.config_index as usize) * 8 + code;
+    if toc.stereo {
+        value = value + 4;
+    }
+    return (value as! byte).value;
+}
+
+fn repacketizer_length_code_bytes(len: usize) usize {
+    if len < 252 {
+        return 1;
+    }
+    return 2;
+}
+
+fn repacketizer_write_length(out: &[byte], cursor: &usize, len: usize) void {
+    if len < 252 {
+        out.ptr[*cursor] = (len as! byte).value;
+        *cursor = *cursor + 1;
+        return;
+    }
+
+    const first: usize = (252 as usize) + (len % (4 as usize));
+    out.ptr[*cursor] = (first as! byte).value;
+    *cursor = *cursor + 1;
+    out.ptr[*cursor] = (((len - first) / 4) as! byte).value;
+    *cursor = *cursor + 1;
+}
+
+fn repacketizer_frames_are_equal_size(state: &const RepacketizerState) bool {
+    if state.frame_count <= 1 {
+        return true;
+    }
+
+    const frame_len: usize = state.frames[0].len;
+    var i: usize = 1;
+    while i < state.frame_count {
+        if state.frames[i].len != frame_len {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn repacketizer_output_size(state: &const RepacketizerState, use_vbr: bool) !usize {
+    if state.frame_count == 0 {
+        return error.RepacketizerError;
+    }
+
+    if state.frame_count == 1 {
+        return (1 as usize) + state.frame_data_len;
+    }
+
+    if state.frame_count == 2 {
+        if !use_vbr && repacketizer_frames_are_equal_size(state) {
+            return (1 as usize) + state.frame_data_len;
+        }
+        return (1 as usize) + repacketizer_length_code_bytes(state.frames[0].len) + state.frame_data_len;
+    }
+
+    if !use_vbr {
+        if !repacketizer_frames_are_equal_size(state) {
+            return error.RepacketizerError;
+        }
+        return (2 as usize) + state.frame_data_len;
+    }
+
+    var bytes: usize = (2 as usize) + state.frame_data_len;
+    var i: usize = 0;
+    while i + 1 < state.frame_count {
+        bytes = bytes + repacketizer_length_code_bytes(state.frames[i].len);
+        i = i + 1;
+    }
+    return bytes;
+}
+
+fn repacketizer_write_frame_data(state: &const RepacketizerState, out: &[byte], cursor: &usize) void {
+    var i: usize = 0;
+    while i < state.frame_data_len {
+        out.ptr[*cursor + i] = state.frame_data[i];
+        i = i + 1;
+    }
+    *cursor = *cursor + state.frame_data_len;
+}
+
 fn repacketizer_copy_parsed_frames(state: &RepacketizerState, packet: &[byte], parsed: &const PacketParseResult) void {
     var source_index: usize = 0;
     var dest_index: usize = state.frame_count;
@@ -178,6 +264,62 @@ export fn repacketizer_frame_count(rp: &const Repacketizer) usize {
 
 export fn repacketizer_payload_bytes(rp: &const Repacketizer) usize {
     return repacketizer_state_const(rp).frame_data_len;
+}
+
+export fn repacketizer_output_packet(rp: &const Repacketizer, out: &[byte], use_vbr: bool) !usize {
+    const state: &const RepacketizerState = repacketizer_state_const(rp);
+    if !state.initialized {
+        return error.RepacketizerError;
+    }
+
+    const needed: usize = try repacketizer_output_size(state, use_vbr);
+    if out.len < needed {
+        return error.RepacketizerError;
+    }
+
+    var cursor: usize = 0;
+    if state.frame_count == 1 {
+        out.ptr[cursor] = repacketizer_toc_byte_with_code(&state.toc, 0);
+        cursor = cursor + 1;
+        repacketizer_write_frame_data(state, out, &cursor);
+        return cursor;
+    }
+
+    if state.frame_count == 2 {
+        if !use_vbr && repacketizer_frames_are_equal_size(state) {
+            out.ptr[cursor] = repacketizer_toc_byte_with_code(&state.toc, 1);
+            cursor = cursor + 1;
+            repacketizer_write_frame_data(state, out, &cursor);
+            return cursor;
+        }
+
+        out.ptr[cursor] = repacketizer_toc_byte_with_code(&state.toc, 2);
+        cursor = cursor + 1;
+        repacketizer_write_length(out, &cursor, state.frames[0].len);
+        repacketizer_write_frame_data(state, out, &cursor);
+        return cursor;
+    }
+
+    out.ptr[cursor] = repacketizer_toc_byte_with_code(&state.toc, 3);
+    cursor = cursor + 1;
+
+    var count_byte: usize = state.frame_count;
+    if use_vbr {
+        count_byte = count_byte + 128;
+    }
+    out.ptr[cursor] = (count_byte as! byte).value;
+    cursor = cursor + 1;
+
+    if use_vbr {
+        var i: usize = 0;
+        while i + 1 < state.frame_count {
+            repacketizer_write_length(out, &cursor, state.frames[i].len);
+            i = i + 1;
+        }
+    }
+
+    repacketizer_write_frame_data(state, out, &cursor);
+    return cursor;
 }
 
 export fn repacketizer_duration_us(rp: &const Repacketizer) u32 {
