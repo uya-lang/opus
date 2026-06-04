@@ -5,6 +5,7 @@ export error MultistreamApiError;
 export const OPUS_MULTISTREAM_MAX_CHANNELS: usize = 255;
 export const OPUS_MULTISTREAM_MAX_STREAMS: usize = 255;
 export const OPUS_MULTISTREAM_MAPPING_SILENT: u8 = 255;
+export const OPUS_MULTISTREAM_MAPPING_FAMILY_0: u8 = 0;
 export const OPUS_MULTISTREAM_DECODER_STORAGE_WORDS: usize = 128;
 
 export struct MultistreamDecoderConfig {
@@ -46,6 +47,35 @@ fn multistream_decoder_state_const(decoder: &const MultistreamDecoder) &const Mu
 
 fn multistream_decoded_channel_count(config: &const MultistreamDecoderConfig) u16 {
     return (config.stream_count as u16) + (config.coupled_count as u16);
+}
+
+export fn multistream_decoder_config_family0(sample_rate_hz: u32, channel_count: u8) !MultistreamDecoderConfig {
+    validate_sample_rate(sample_rate_hz) catch {
+        return error.MultistreamApiError;
+    };
+    if channel_count != 1 && channel_count != 2 {
+        return error.MultistreamApiError;
+    }
+
+    var mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    var coupled_count: u8 = 0;
+    if channel_count == 2 {
+        coupled_count = 1;
+        mapping[1] = 1;
+    }
+
+    const config: MultistreamDecoderConfig = MultistreamDecoderConfig{
+        sample_rate_hz: sample_rate_hz,
+        channel_count: channel_count,
+        stream_count: 1,
+        coupled_count: coupled_count,
+        mapping_family: OPUS_MULTISTREAM_MAPPING_FAMILY_0,
+        mapping: mapping,
+    };
+    multistream_validate_decoder_config(&config) catch {
+        return error.MultistreamApiError;
+    };
+    return config;
 }
 
 export fn multistream_validate_decoder_config(config: &const MultistreamDecoderConfig) !void {

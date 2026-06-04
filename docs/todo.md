@@ -430,7 +430,7 @@
 ## 15. Multistream
 
 - [x] 实现 `api/multistream.uya`。
-- [ ] 实现 mapping family 0。
+- [x] 实现 mapping family 0。
 - [ ] 实现 mapping family 1。
 - [ ] 实现 mapping family 255。
 - [ ] 实现 coupled stream decode。

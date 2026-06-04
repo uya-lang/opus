@@ -7,6 +7,7 @@ use src.opus.api.multistream.OPUS_MULTISTREAM_MAPPING_SILENT;
 use src.opus.api.multistream.OPUS_MULTISTREAM_MAX_CHANNELS;
 use src.opus.api.multistream.multistream_decoder_channel_count;
 use src.opus.api.multistream.multistream_decoder_coupled_count;
+use src.opus.api.multistream.multistream_decoder_config_family0;
 use src.opus.api.multistream.multistream_decoder_init;
 use src.opus.api.multistream.multistream_decoder_is_initialized;
 use src.opus.api.multistream.multistream_decoder_mapping_at;
@@ -83,4 +84,41 @@ test "multistream decoder accepts silent mapped output channels" {
 
 test "multistream decoder metadata storage is not sized for max decoder slots" {
     try assert(OPUS_MULTISTREAM_DECODER_STORAGE_WORDS < 1024, "metadata storage must stay small until caller-provided decoder slots are implemented");
+}
+
+test "mapping family 0 config derives mono and stereo layouts" {
+    const mono: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 1);
+    try assert_eq_i32(mono.channel_count as i32, 1);
+    try assert_eq_i32(mono.stream_count as i32, 1);
+    try assert_eq_i32(mono.coupled_count as i32, 0);
+    try assert_eq_i32(mono.mapping_family as i32, 0);
+    try assert_eq_i32(mono.mapping[0] as i32, 0);
+
+    const stereo: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
+    try assert_eq_i32(stereo.channel_count as i32, 2);
+    try assert_eq_i32(stereo.stream_count as i32, 1);
+    try assert_eq_i32(stereo.coupled_count as i32, 1);
+    try assert_eq_i32(stereo.mapping_family as i32, 0);
+    try assert_eq_i32(stereo.mapping[0] as i32, 0);
+    try assert_eq_i32(stereo.mapping[1] as i32, 1);
+}
+
+test "mapping family 0 rejects unsupported layout inputs" {
+    const zero_channels: !MultistreamDecoderConfig = multistream_decoder_config_family0(48000, 0);
+    match zero_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 0 must reject zero channels"); }
+    }
+
+    const too_many_channels: !MultistreamDecoderConfig = multistream_decoder_config_family0(48000, 3);
+    match too_many_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 0 only supports mono and stereo"); }
+    }
+
+    const bad_rate: !MultistreamDecoderConfig = multistream_decoder_config_family0(44100, 2);
+    match bad_rate {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 0 must validate Opus API sample rates"); }
+    }
 }
