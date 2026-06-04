@@ -6,7 +6,24 @@ export const OPUS_MULTISTREAM_MAX_CHANNELS: usize = 255;
 export const OPUS_MULTISTREAM_MAX_STREAMS: usize = 255;
 export const OPUS_MULTISTREAM_MAPPING_SILENT: u8 = 255;
 export const OPUS_MULTISTREAM_MAPPING_FAMILY_0: u8 = 0;
+export const OPUS_MULTISTREAM_MAPPING_FAMILY_1: u8 = 1;
 export const OPUS_MULTISTREAM_DECODER_STORAGE_WORDS: usize = 128;
+
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS: usize = 8;
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_STRIDE: usize = 8;
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE: usize = OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS * OPUS_MULTISTREAM_MAPPING_FAMILY_1_STRIDE;
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_STREAM_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [1, 1, 2, 2, 3, 4, 4, 5];
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_COUPLED_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [0, 1, 1, 2, 2, 2, 3, 3];
+const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE] = [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 0, 0, 0, 0, 0, 0,
+    0, 2, 1, 0, 0, 0, 0, 0,
+    0, 1, 2, 3, 0, 0, 0, 0,
+    0, 4, 1, 2, 3, 0, 0, 0,
+    0, 4, 1, 2, 3, 5, 0, 0,
+    0, 4, 1, 2, 3, 5, 6, 0,
+    0, 6, 1, 2, 3, 4, 5, 7,
+];
 
 export struct MultistreamDecoderConfig {
     sample_rate_hz: u32,
@@ -70,6 +87,44 @@ export fn multistream_decoder_config_family0(sample_rate_hz: u32, channel_count:
         stream_count: 1,
         coupled_count: coupled_count,
         mapping_family: OPUS_MULTISTREAM_MAPPING_FAMILY_0,
+        mapping: mapping,
+    };
+    multistream_validate_decoder_config(&config) catch {
+        return error.MultistreamApiError;
+    };
+    return config;
+}
+
+export fn multistream_decoder_config_family1(sample_rate_hz: u32, channel_count: u8) !MultistreamDecoderConfig {
+    validate_sample_rate(sample_rate_hz) catch {
+        return error.MultistreamApiError;
+    };
+    if channel_count == 0 || (channel_count as usize) > OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS {
+        return error.MultistreamApiError;
+    }
+
+    const layout_index: usize = (channel_count as usize) - 1;
+    if layout_index >= OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS {
+        return error.MultistreamApiError;
+    }
+
+    var mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    var i: usize = 0;
+    while i < channel_count as usize {
+        const table_index: usize = layout_index * OPUS_MULTISTREAM_MAPPING_FAMILY_1_STRIDE + i;
+        if table_index >= OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE {
+            return error.MultistreamApiError;
+        }
+        mapping[i] = OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE[table_index];
+        i = i + 1;
+    }
+
+    const config: MultistreamDecoderConfig = MultistreamDecoderConfig{
+        sample_rate_hz: sample_rate_hz,
+        channel_count: channel_count,
+        stream_count: OPUS_MULTISTREAM_MAPPING_FAMILY_1_STREAM_COUNTS[layout_index],
+        coupled_count: OPUS_MULTISTREAM_MAPPING_FAMILY_1_COUPLED_COUNTS[layout_index],
+        mapping_family: OPUS_MULTISTREAM_MAPPING_FAMILY_1,
         mapping: mapping,
     };
     multistream_validate_decoder_config(&config) catch {

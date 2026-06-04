@@ -8,6 +8,7 @@ use src.opus.api.multistream.OPUS_MULTISTREAM_MAX_CHANNELS;
 use src.opus.api.multistream.multistream_decoder_channel_count;
 use src.opus.api.multistream.multistream_decoder_coupled_count;
 use src.opus.api.multistream.multistream_decoder_config_family0;
+use src.opus.api.multistream.multistream_decoder_config_family1;
 use src.opus.api.multistream.multistream_decoder_init;
 use src.opus.api.multistream.multistream_decoder_is_initialized;
 use src.opus.api.multistream.multistream_decoder_mapping_at;
@@ -27,6 +28,20 @@ fn stereo_family0_config() MultistreamDecoderConfig {
         mapping_family: 0,
         mapping: mapping,
     };
+}
+
+fn assert_family1_layout(channel_count: u8, stream_count: u8, coupled_count: u8, expected_mapping: &[const u8]) !void {
+    const config: MultistreamDecoderConfig = try multistream_decoder_config_family1(48000, channel_count);
+    try assert_eq_i32(config.channel_count as i32, channel_count as i32);
+    try assert_eq_i32(config.stream_count as i32, stream_count as i32);
+    try assert_eq_i32(config.coupled_count as i32, coupled_count as i32);
+    try assert_eq_i32(config.mapping_family as i32, 1);
+
+    var i: usize = 0;
+    while i < expected_mapping.len {
+        try assert_eq_i32(config.mapping[i] as i32, expected_mapping.ptr[i] as i32);
+        i = i + 1;
+    }
 }
 
 test "multistream decoder init stores stream layout metadata" {
@@ -120,5 +135,45 @@ test "mapping family 0 rejects unsupported layout inputs" {
     match bad_rate {
         error.MultistreamApiError => {}
         else => { try assert(false, "family 0 must validate Opus API sample rates"); }
+    }
+}
+
+test "mapping family 1 derives Vorbis-order surround layouts" {
+    const map1: [u8: 1] = [0];
+    const map2: [u8: 2] = [0, 1];
+    const map3: [u8: 3] = [0, 2, 1];
+    const map4: [u8: 4] = [0, 1, 2, 3];
+    const map5: [u8: 5] = [0, 4, 1, 2, 3];
+    const map6: [u8: 6] = [0, 4, 1, 2, 3, 5];
+    const map7: [u8: 7] = [0, 4, 1, 2, 3, 5, 6];
+    const map8: [u8: 8] = [0, 6, 1, 2, 3, 4, 5, 7];
+
+    try assert_family1_layout(1, 1, 0, &map1[0:1]);
+    try assert_family1_layout(2, 1, 1, &map2[0:2]);
+    try assert_family1_layout(3, 2, 1, &map3[0:3]);
+    try assert_family1_layout(4, 2, 2, &map4[0:4]);
+    try assert_family1_layout(5, 3, 2, &map5[0:5]);
+    try assert_family1_layout(6, 4, 2, &map6[0:6]);
+    try assert_family1_layout(7, 4, 3, &map7[0:7]);
+    try assert_family1_layout(8, 5, 3, &map8[0:8]);
+}
+
+test "mapping family 1 rejects unsupported layout inputs" {
+    const zero_channels: !MultistreamDecoderConfig = multistream_decoder_config_family1(48000, 0);
+    match zero_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 1 must reject zero channels"); }
+    }
+
+    const too_many_channels: !MultistreamDecoderConfig = multistream_decoder_config_family1(48000, 9);
+    match too_many_channels {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 1 only supports one through eight channels"); }
+    }
+
+    const bad_rate: !MultistreamDecoderConfig = multistream_decoder_config_family1(44100, 6);
+    match bad_rate {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "family 1 must validate Opus API sample rates"); }
     }
 }
