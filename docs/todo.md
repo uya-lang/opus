@@ -407,7 +407,7 @@
 - [x] 实现 `packet/repacketizer.uya`。
 - [x] 实现 add packet。
 - [x] 实现 frame duration 校验。
-- [ ] 实现 get packet duration。
+- [x] 实现 get packet duration。
 - [ ] 实现 output CBR/VBR packet。
 - [ ] 实现 padding 添加/移除。
 - [ ] 测试拼接同 config packets。

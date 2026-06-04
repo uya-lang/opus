@@ -79,6 +79,20 @@ fn repacketizer_validate_duration(toc: &const TocByte, frame_count: usize) !void
     }
 }
 
+fn repacketizer_state_duration_us(state: &const RepacketizerState) u32 {
+    if state.frame_count == 0 {
+        return 0;
+    }
+    return state.toc.config.frame_duration_us * (state.frame_count as u32);
+}
+
+fn repacketizer_state_duration_samples_48k(state: &const RepacketizerState) u32 {
+    if state.frame_count == 0 {
+        return 0;
+    }
+    return state.toc.config.frame_samples_48k * (state.frame_count as u32);
+}
+
 fn repacketizer_copy_parsed_frames(state: &RepacketizerState, packet: &[byte], parsed: &const PacketParseResult) void {
     var source_index: usize = 0;
     var dest_index: usize = state.frame_count;
@@ -164,4 +178,12 @@ export fn repacketizer_frame_count(rp: &const Repacketizer) usize {
 
 export fn repacketizer_payload_bytes(rp: &const Repacketizer) usize {
     return repacketizer_state_const(rp).frame_data_len;
+}
+
+export fn repacketizer_duration_us(rp: &const Repacketizer) u32 {
+    return repacketizer_state_duration_us(repacketizer_state_const(rp));
+}
+
+export fn repacketizer_duration_samples_48k(rp: &const Repacketizer) u32 {
+    return repacketizer_state_duration_samples_48k(repacketizer_state_const(rp));
 }
