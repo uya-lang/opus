@@ -78,6 +78,35 @@ fn encoder_bandwidth_is_valid(bandwidth: OpusBandwidth) bool {
     return bandwidth >= OpusBandwidth.NARROWBAND && bandwidth <= OpusBandwidth.FULLBAND;
 }
 
+fn encoder_bandwidth_min(a: OpusBandwidth, b: OpusBandwidth) OpusBandwidth {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn encoder_sample_rate_bandwidth_cap(sample_rate_hz: u32) OpusBandwidth {
+    if sample_rate_hz <= 8000 {
+        return OpusBandwidth.NARROWBAND;
+    }
+    if sample_rate_hz <= 12000 {
+        return OpusBandwidth.MEDIUMBAND;
+    }
+    if sample_rate_hz <= 16000 {
+        return OpusBandwidth.WIDEBAND;
+    }
+    if sample_rate_hz <= 24000 {
+        return OpusBandwidth.SUPERWIDEBAND;
+    }
+    return OpusBandwidth.FULLBAND;
+}
+
+fn encoder_effective_encode_config(config: &const OpusEncoderConfig) OpusEncoderConfig {
+    var effective: OpusEncoderConfig = *config;
+    effective.max_bandwidth = encoder_bandwidth_min(config.max_bandwidth, encoder_sample_rate_bandwidth_cap(config.sample_rate_hz));
+    return effective;
+}
+
 export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
     validate_encoder_config(config) catch {
         return error.EncoderApiError;
@@ -136,8 +165,8 @@ fn encoder_validate_encode_request(encoder: &const OpusEncoderState, pcm: &[cons
     return frame_size_48k;
 }
 
-fn encoder_encode_celt_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
-    const profile: CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&encoder.config, frame_size_48k) catch {
+fn encoder_encode_celt_i16(encoder: &OpusEncoderState, config: &const OpusEncoderConfig, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
+    const profile: CeltBasicEncoderProfile = celt_basic_encoder_profile_init(config, frame_size_48k) catch {
         return error.EncoderApiUnsupported;
     };
     celt_encoder_state_init(&encoder.celt, &profile) catch {
@@ -148,8 +177,8 @@ fn encoder_encode_celt_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_
     };
 }
 
-fn encoder_encode_silk_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
-    const profile: SilkBasicEncoderProfile = silk_basic_encoder_profile_init(&encoder.config, frame_size_48k) catch {
+fn encoder_encode_silk_i16(encoder: &OpusEncoderState, config: &const OpusEncoderConfig, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
+    const profile: SilkBasicEncoderProfile = silk_basic_encoder_profile_init(config, frame_size_48k) catch {
         return error.EncoderApiUnsupported;
     };
     silk_encoder_state_init(&encoder.silk, &profile) catch {
@@ -161,13 +190,14 @@ fn encoder_encode_silk_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_
 }
 
 fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
-    const silk_encoded: !i32 = encoder_encode_silk_i16(encoder, pcm, frame_size_48k, packet_out);
+    const effective_config: OpusEncoderConfig = encoder_effective_encode_config(&encoder.config);
+    const silk_encoded: !i32 = encoder_encode_silk_i16(encoder, &effective_config, pcm, frame_size_48k, packet_out);
     match silk_encoded {
         encoded => { return encoded; }
         error.EncoderApiUnsupported => {}
         error.EncoderApiError => { return error.EncoderApiError; }
     };
-    return encoder_encode_celt_i16(encoder, pcm, frame_size_48k, packet_out);
+    return encoder_encode_celt_i16(encoder, &effective_config, pcm, frame_size_48k, packet_out);
 }
 
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {

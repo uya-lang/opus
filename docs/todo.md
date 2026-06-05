@@ -480,7 +480,7 @@
 
 - [x] 实现 VBR bit allocation。
 - [x] 实现 bitrate 控制。
-- [ ] 实现 bandwidth decision。
+- [x] 实现 bandwidth decision。
 - [ ] 实现 mode decision。
 - [ ] 实现 frame duration decision。
 - [ ] 实现语音/音乐粗分类。

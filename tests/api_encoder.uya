@@ -348,3 +348,25 @@ test "encoder writes basic silk only wideband mono packet" {
     try assert_eq_i32(info.payload_offset as i32, 1);
     try assert_eq_i32(info.payload_len as i32, encoded - 1);
 }
+
+test "encoder bandwidth decision caps fullband request to wideband for 16k mono" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 320] = [0: 320];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:320], 320, &packet[0:1275]);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.SILK as i32);
+    try assert_eq_i32(info.bandwidth as i32, OpusBandwidth.WIDEBAND as i32);
+    try assert_eq_i32(info.channels as i32, 1);
+    try assert(encoder_silk_is_initialized(&encoder), "bandwidth decision must route 16k mono requests into SILK");
+}
