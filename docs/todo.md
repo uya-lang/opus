@@ -495,7 +495,7 @@
 - [x] 实现 DTX。
 - [x] 实现 complexity 0..10 的主要开关。
 - [x] 建立 objective quality bench。
-- [ ] 建立主观样本集。
+- [x] 建立主观样本集。
 
 验收标准：
 

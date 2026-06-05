@@ -1,0 +1,50 @@
+{
+  "format": "uopus.subjective-samples.v1",
+  "description": "Synthetic listening samples for encoder subjective checks.",
+  "cases": [
+    {
+      "id": "speech-pulses-16k-mono",
+      "title": "Synthetic Voiced Speech Pulses",
+      "category": "speech",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "duration_ms": 3000,
+      "generator": "voice_pulses",
+      "output_wav": "speech-pulses-16k-mono.wav",
+      "notes": "Voiced syllable-like pulses with deterministic fricative noise."
+    },
+    {
+      "id": "music-harmonic-48k-stereo",
+      "title": "Harmonic Stereo Music Phrase",
+      "category": "music",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "duration_ms": 3000,
+      "generator": "stereo_music",
+      "output_wav": "music-harmonic-48k-stereo.wav",
+      "notes": "Bass, lead, and side energy for stereo/intensity decisions."
+    },
+    {
+      "id": "transients-48k-stereo",
+      "title": "Stereo Transient Bursts",
+      "category": "transient",
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "duration_ms": 2000,
+      "generator": "transient_stereo",
+      "output_wav": "transients-48k-stereo.wav",
+      "notes": "Short deterministic bursts for transient handling checks."
+    },
+    {
+      "id": "lowband-sweep-8k-mono",
+      "title": "Lowband Mono Sweep",
+      "category": "speech",
+      "sample_rate_hz": 8000,
+      "channels": 1,
+      "duration_ms": 3000,
+      "generator": "lowband_sweep",
+      "output_wav": "lowband-sweep-8k-mono.wav",
+      "notes": "Narrowband tonal sweep for low-rate speech tuning."
+    }
+  ]
+}

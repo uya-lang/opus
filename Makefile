@@ -21,12 +21,14 @@ MDCT_DEBUG_BIN := $(BUILD_DIR)/debug-mdct
 VECTOR_DECODE_SRC := tools/decode_vector.uya
 VECTOR_DECODE_BIN := $(BUILD_DIR)/uopus-decode-vector
 SILK_ENCODER_LIBOPUS_CHECK := tools/check_silk_encoder_libopus.py
+SUBJECTIVE_SAMPLES_MANIFEST := samples/subjective/manifest.json
+SUBJECTIVE_SAMPLES_DIR := $(BUILD_DIR)/subjective-samples
 TEST_SRCS := tests/scaffold_modules.uya tests/core_types.uya tests/core_constants.uya tests/core_errors.uya tests/core_qformat.uya tests/core_saturate.uya tests/core_bitops.uya tests/dsp_filters.uya tests/dsp_resampler.uya tests/dsp_pitch.uya tests/dsp_window.uya tests/dsp_mdct.uya tests/packet_toc.uya tests/packet_repacketizer.uya tests/entropy_range_dec.uya tests/entropy_range_enc.uya tests/celt_mode.uya tests/celt_rate.uya tests/celt_cwrs.uya tests/celt_bands.uya tests/celt_deemphasis.uya tests/celt_state.uya tests/celt_quant_bands.uya tests/celt_tf.uya tests/celt_spread.uya tests/celt_mdct_bridge.uya tests/celt_decode.uya tests/celt_plc.uya tests/celt_encoder.uya tests/silk_state.uya tests/silk_decoder_control.uya tests/silk_frame_params.uya tests/silk_entropy_decode.uya tests/silk_shell_coder.uya tests/silk_pulse_sign.uya tests/silk_pulses.uya tests/silk_synthesis.uya tests/silk_decoder.uya tests/silk_nlsf.uya tests/silk_lpc.uya tests/silk_ltp.uya tests/silk_stereo.uya tests/silk_plc.uya tests/silk_fec.uya tests/silk_encoder.uya tests/hybrid_state.uya tests/hybrid_delay.uya tests/hybrid_merge.uya tests/hybrid_budget.uya tests/hybrid_lowband.uya tests/hybrid_highband.uya tests/hybrid_decoder.uya tests/api_decoder.uya tests/api_multistream.uya tests/api_encoder.uya tests/encoder_smoke.uya tests/encoder_quality_bench.uya tools/check_tables.uya
 SILK_TEST_SRCS := tests/silk_state.uya tests/silk_decoder_control.uya tests/silk_frame_params.uya tests/silk_entropy_decode.uya tests/silk_shell_coder.uya tests/silk_pulse_sign.uya tests/silk_pulses.uya tests/silk_synthesis.uya tests/silk_decoder.uya tests/silk_nlsf.uya tests/silk_lpc.uya tests/silk_ltp.uya tests/silk_stereo.uya tests/silk_plc.uya tests/silk_fec.uya tests/silk_encoder.uya
 LOCAL_UYA := /media/winger/_dde_data/winger/uya/uya/bin/uya
 UYA ?= $(shell if command -v uya >/dev/null 2>&1; then command -v uya; elif test -x "$(LOCAL_UYA)"; then printf '%s' "$(LOCAL_UYA)"; else printf '%s' uya; fi)
 
-.PHONY: all bench check clean conformance debug-cwrs debug-mdct decode-vector require-uya smoke test test-silk
+.PHONY: all bench check clean conformance debug-cwrs debug-mdct decode-vector require-uya smoke subjective-samples test test-silk
 
 all: smoke
 
@@ -62,6 +64,7 @@ test: check
 	done
 	@python3 $(SILK_ENCODER_LIBOPUS_CHECK)
 	@python3 tools/check_tables.py
+	@python3 tests/test_subjective_samples.py
 
 conformance:
 	@$(MAKE) test
@@ -85,6 +88,9 @@ bench: require-uya
 	@$(SILK_DECODE_WB_20MS_BENCH_BIN)
 	@$(UYA) build $(OBJECTIVE_QUALITY_BENCH_SRC) --project-root . -o $(OBJECTIVE_QUALITY_BENCH_BIN)
 	@$(OBJECTIVE_QUALITY_BENCH_BIN)
+
+subjective-samples:
+	@python3 tools/subjective_samples.py generate $(SUBJECTIVE_SAMPLES_MANIFEST) --output-dir $(SUBJECTIVE_SAMPLES_DIR)
 
 debug-cwrs: require-uya
 	@mkdir -p $(BUILD_DIR)
