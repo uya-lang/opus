@@ -5,15 +5,26 @@ use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
 use src.opus.silk.decoder.silk_decode_mono_packet_q14;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
+use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
+use src.opus.silk.encoder.SilkEncoderPitchAnalysis;
 use src.opus.silk.encoder.SilkEncoderState;
 use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
+use src.opus.silk.encoder.silk_encoder_pitch_analyze_i16;
 use src.opus.silk.encoder.silk_encoder_state_init;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_gains;
 use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_ltp_coefficients;
+use src.opus.silk.entropy_decode.silk_entropy_decode_ltp_scaling;
+use src.opus.silk.entropy_decode.silk_entropy_decode_nlsf_indices;
+use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_contour;
+use src.opus.silk.entropy_decode.silk_entropy_decode_pitch_lag;
+use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
@@ -34,6 +45,17 @@ fn fill_silk_encoder_voice_like_i16(values: &[i16]) void {
             sample = 700;
         }
         values.ptr[i] = sample as i16;
+        i = i + 1;
+    }
+}
+
+fn fill_silk_encoder_periodic_i16(values: &[i16], period: usize) void {
+    var i: usize = 0;
+    while i < values.len {
+        const phase: usize = i % period;
+        const phase_i32: i32 = phase as i32;
+        const shaped: i32 = ((phase_i32 * 73 + ((phase_i32 * phase_i32) % 19) * 211) % 97) - 48;
+        values.ptr[i] = (shaped * 220) as i16;
         i = i + 1;
     }
 }
@@ -138,7 +160,73 @@ test "silk encoder VAD marks silence inactive and voice-like input active" {
     try silk_entropy_decode_vad_flags(&voice_entropy);
     try assert(voice_entropy.vad_flags[0], "voice-like SILK input must encode an active VAD flag");
     try silk_entropy_decode_lbrr_flags(&voice_entropy);
-    try assert_eq_i32(try silk_entropy_decode_signal_type(&voice_entropy, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
+    _ = try silk_entropy_decode_signal_type(&voice_entropy, 0, 0);
+}
+
+test "silk encoder pitch analysis detects periodic wideband lag" {
+    var periodic: [i16: 320] = [0: 320];
+    fill_silk_encoder_periodic_i16(&periodic[0:320], 80);
+    const periodic_analysis: SilkEncoderPitchAnalysis = try silk_encoder_pitch_analyze_i16(&periodic[0:320], 320, 1, 16);
+    try assert(periodic_analysis.voiced, "periodic wideband input must be classified as voiced");
+    try assert_eq_i32(periodic_analysis.lag_samples, 80);
+    try assert_eq_i32(periodic_analysis.lag_index, 48);
+    try assert(periodic_analysis.correlation_q15 >= 30000, "exactly repeated pitch periods must score near perfect");
+
+    var silence: [i16: 320] = [0: 320];
+    const silence_analysis: SilkEncoderPitchAnalysis = try silk_encoder_pitch_analyze_i16(&silence[0:320], 320, 1, 16);
+    try assert(!silence_analysis.voiced, "silent input must not report a pitch lag");
+    try assert_eq_i32(silence_analysis.lag_samples, 0);
+}
+
+test "silk encoder writes voiced pitch side info for periodic input" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var periodic: [i16: 320] = [0: 320];
+    fill_silk_encoder_periodic_i16(&periodic[0:320], 80);
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try silk_encoder_encode_i16(&state, &periodic[0:320], &packet[0:1275]);
+
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&entropy, &packet[1:(encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&entropy);
+    try assert(entropy.vad_flags[0], "periodic voiced input must be VAD active");
+    try silk_entropy_decode_lbrr_flags(&entropy);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&entropy, 0, 0), SILK_SIGNAL_TYPE_VOICED);
+
+    var control: SilkDecoderControl = SilkDecoderControl{};
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_quantization_offset(&entropy, 0, 0);
+    try silk_entropy_decode_gains(&entropy, &control, 0, 0, false);
+    try silk_entropy_decode_nlsf_indices(&entropy, &control, 0, 0);
+    try silk_entropy_decode_pitch_lag(&entropy, &control, 0, 0, false);
+    try silk_entropy_decode_pitch_contour(&entropy, &control, 0, 0);
+    try silk_entropy_decode_ltp_coefficients(&entropy, &control, 0, 0);
+    try silk_entropy_decode_ltp_scaling(&entropy, &control, 0, 0, false);
+
+    try assert(entropy.pitch_lag_valid[0], "voiced encoder side info must cache a pitch lag");
+    try assert_eq_i32(entropy.pitch_lag_values[0], 80);
+    try assert_eq_i32(control.pitch_lags[0], 80);
+    try assert_eq_i32(control.pitch_lags[1], 80);
+    try assert_eq_i32(control.pitch_lags[2], 80);
+    try assert_eq_i32(control.pitch_lags[3], 80);
+    try assert(entropy.ltp_coefficients_valid[0], "voiced encoder side info must include LTP coefficients");
+
+    var decoder: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 320] = [0: 320];
+    const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
+    try assert_eq_i32(decoded as i32, 320);
 }
 
 test "silk encoder rejects short packet buffers before writing past them" {

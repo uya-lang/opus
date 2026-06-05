@@ -485,7 +485,7 @@
 - [x] 实现 frame duration decision。
 - [x] 实现语音/音乐粗分类。
 - [x] 实现 SILK VAD。
-- [ ] 实现 SILK pitch analysis。
+- [x] 实现 SILK pitch analysis。
 - [ ] 实现 SILK gain control。
 - [ ] 实现 SILK NLSF quantization。
 - [ ] 实现 SILK NSQ。

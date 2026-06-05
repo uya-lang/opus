@@ -10,7 +10,10 @@ use src.opus.core.errors.validate_sample_rate;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.entropy_decode.silk_entropy_pulse_block_count;
+use src.opus.silk.ltp.silk_ltp_gain_icdf_value;
+use src.opus.silk.ltp.silk_ltp_per_index_icdf_value;
 use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
 use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
 use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
@@ -19,13 +22,19 @@ use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
 use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
 use src.opus.silk.tables.silk_delta_gain_icdf_value;
 use src.opus.silk.tables.silk_gain_icdf_value;
+use src.opus.silk.tables.silk_ltp_scale_icdf_value;
 use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pitch_contour_icdf_value;
+use src.opus.silk.tables.silk_pitch_lag_icdf_value;
 use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
 use src.opus.silk.tables.silk_rate_levels_icdf_value;
 use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform6_icdf_value;
 use src.opus.silk.tables.silk_uniform8_icdf_value;
+use src.opus.silk.state.SILK_MAX_PITCH_LAG_MS;
+use src.opus.silk.state.SILK_MIN_PITCH_LAG_MS;
 
 export error SilkEncoderError;
 export error SilkEncoderUnsupported;
@@ -34,15 +43,22 @@ export const SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ: u32 = 16000;
 export const SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES: i32 = 320;
 export const SILK_BASIC_ENCODER_WB_20MS_FRAME_SIZE_48K: i32 = 960;
 export const SILK_BASIC_ENCODER_WB_20MS_DURATION_US: u32 = 20000;
+const SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR: i32 = 4;
 export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_CONFIG_INDEX: u8 = 9;
 export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0: byte = 72;
 const SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES: usize = 384;
 const SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES: usize = SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES - 1;
 const SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL: i32 = 1;
+const SILK_BASIC_ENCODER_VOICED_TYPE_OFFSET_SYMBOL: i32 = 2;
 const SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL: i32 = 5;
 const SILK_BASIC_ENCODER_VAD_MIN_AVG_ABS: u32 = 96;
 const SILK_BASIC_ENCODER_VAD_MIN_PEAK_ABS: u32 = 384;
 const SILK_BASIC_ENCODER_VAD_MIN_AVG_DELTA: u32 = 48;
+const SILK_BASIC_ENCODER_PITCH_MIN_CORRELATION_Q15: u32 = 24576;
+const SILK_BASIC_ENCODER_PITCH_CONTOUR_INDEX: i32 = 0;
+const SILK_BASIC_ENCODER_LTP_PERIODICITY_INDEX: i32 = 0;
+const SILK_BASIC_ENCODER_LTP_CODEBOOK_INDEX: i32 = 1;
+const SILK_BASIC_ENCODER_LTP_SCALE_INDEX: i32 = 0;
 
 export struct SilkBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -64,6 +80,13 @@ export struct SilkEncoderVadFeatures {
     average_abs: u32,
     average_delta: u32,
     peak_abs: u32,
+}
+
+export struct SilkEncoderPitchAnalysis {
+    voiced: bool,
+    lag_samples: i32,
+    lag_index: i32,
+    correlation_q15: u32,
 }
 
 export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !SilkBasicEncoderProfile {
@@ -217,6 +240,85 @@ export fn silk_encoder_vad_i16(pcm: &[const i16], frame_samples: i32, channels: 
     return silk_encoder_vad_from_features(&features);
 }
 
+fn silk_encoder_pitch_empty(correlation_q15: u32) SilkEncoderPitchAnalysis {
+    return SilkEncoderPitchAnalysis{ voiced: false, lag_samples: 0, lag_index: 0, correlation_q15: correlation_q15 };
+}
+
+export fn silk_encoder_pitch_analyze_i16(pcm: &[const i16], frame_samples: i32, channels: u8, fs_khz: i32) !SilkEncoderPitchAnalysis {
+    if frame_samples <= 1 || channels == 0 || channels > 2 {
+        return error.SilkEncoderError;
+    }
+    if fs_khz != 8 && fs_khz != 12 && fs_khz != 16 {
+        return error.SilkEncoderError;
+    }
+    const frame_count: usize = frame_samples as usize;
+    const channel_count: usize = channels as usize;
+    const required_pcm: usize = frame_count * channel_count;
+    if pcm.len < required_pcm {
+        return error.SilkEncoderError;
+    }
+
+    const vad_active: bool = try silk_encoder_vad_i16(pcm, frame_samples, channels);
+    if !vad_active {
+        return silk_encoder_pitch_empty(0);
+    }
+
+    const min_lag: i32 = SILK_MIN_PITCH_LAG_MS * fs_khz;
+    var max_lag: i32 = SILK_MAX_PITCH_LAG_MS * fs_khz;
+    if max_lag >= frame_samples {
+        max_lag = frame_samples - 1;
+    }
+    if min_lag <= 0 || min_lag > max_lag {
+        return silk_encoder_pitch_empty(0);
+    }
+
+    var best_lag: i32 = 0;
+    var best_score_q15: u32 = 0;
+    var lag: i32 = min_lag;
+    while lag <= max_lag {
+        var sum_abs: u64 = 0;
+        var sum_diff: u64 = 0;
+        var frame: usize = lag as usize;
+        while frame < frame_count {
+            var channel: usize = 0;
+            while channel < channel_count {
+                const current_index: usize = (frame * channel_count) + channel;
+                const delayed_index: usize = ((frame - (lag as usize)) * channel_count) + channel;
+                const current: i32 = pcm.ptr[current_index] as i32;
+                const delayed: i32 = pcm.ptr[delayed_index] as i32;
+                sum_abs = sum_abs + (silk_encoder_abs_i32(current) as u64) + (silk_encoder_abs_i32(delayed) as u64);
+                sum_diff = sum_diff + (silk_encoder_abs_i32(current - delayed) as u64);
+                channel = channel + 1;
+            }
+            frame = frame + 1;
+        }
+
+        var score_q15: u32 = 0;
+        if sum_abs > 0 {
+            var clipped_diff: u64 = sum_diff;
+            if clipped_diff > sum_abs {
+                clipped_diff = sum_abs;
+            }
+            score_q15 = (((sum_abs - clipped_diff) * 32768) / sum_abs) as u32;
+        }
+        if score_q15 > best_score_q15 {
+            best_score_q15 = score_q15;
+            best_lag = lag;
+        }
+        lag = lag + 1;
+    }
+
+    if best_lag <= 0 || best_score_q15 < SILK_BASIC_ENCODER_PITCH_MIN_CORRELATION_Q15 {
+        return silk_encoder_pitch_empty(best_score_q15);
+    }
+    return SilkEncoderPitchAnalysis{
+        voiced: true,
+        lag_samples: best_lag,
+        lag_index: best_lag - min_lag,
+        correlation_q15: best_score_q15,
+    };
+}
+
 fn silk_encoder_fill_type_offset_icdf(out: &[byte], vad_active: bool) !usize {
     if vad_active {
         if out.len < 4 {
@@ -239,6 +341,103 @@ fn silk_encoder_fill_type_offset_icdf(out: &[byte], vad_active: bool) !usize {
         j = j + 1;
     }
     return 2 as usize;
+}
+
+fn silk_encoder_fill_pitch_lag_icdf(out: &[byte]) !void {
+    if out.len < 32 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_pitch_lag_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_uniform6_icdf(out: &[byte]) !void {
+    if out.len < 6 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 6 {
+        out.ptr[i] = silk_uniform6_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_pitch_low_bits_icdf(out: &[byte], fs_khz: i32) !usize {
+    if fs_khz == 8 {
+        try silk_encoder_fill_uniform4_icdf(out);
+        return 4 as usize;
+    }
+    if fs_khz == 12 {
+        try silk_encoder_fill_uniform6_icdf(out);
+        return 6 as usize;
+    }
+    if fs_khz == 16 {
+        try silk_encoder_fill_uniform8_icdf(out);
+        return 8 as usize;
+    }
+    return error.SilkEncoderError;
+}
+
+fn silk_encoder_fill_pitch_contour_icdf(out: &[byte], fs_khz: i32, nb_subframes: i32) !usize {
+    if (fs_khz == 12 || fs_khz == 16) && nb_subframes == SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR {
+        if out.len < 34 {
+            return error.SilkEncoderError;
+        }
+        var i: usize = 0;
+        while i < 34 {
+            out.ptr[i] = silk_pitch_contour_icdf_value(i);
+            i = i + 1;
+        }
+        return 34 as usize;
+    }
+    return error.SilkEncoderError;
+}
+
+fn silk_encoder_fill_ltp_periodicity_icdf(out: &[byte]) !void {
+    if out.len < 3 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 3 {
+        out.ptr[i] = silk_ltp_per_index_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_ltp_gain_icdf(out: &[byte], periodicity_index: i32) !usize {
+    var len: usize = 0;
+    if periodicity_index == 0 {
+        len = 8;
+    } else if periodicity_index == 1 {
+        len = 16;
+    } else if periodicity_index == 2 {
+        len = 32;
+    } else {
+        return error.SilkEncoderError;
+    }
+    if out.len < len {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < len {
+        out.ptr[i] = silk_ltp_gain_icdf_value(periodicity_index, i);
+        i = i + 1;
+    }
+    return len;
+}
+
+fn silk_encoder_fill_ltp_scale_icdf(out: &[byte]) !void {
+    if out.len < 3 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 3 {
+        out.ptr[i] = silk_ltp_scale_icdf_value(i);
+        i = i + 1;
+    }
 }
 
 fn silk_encoder_fill_gain_icdf(out: &[byte], signal_table: i32) !void {
@@ -285,11 +484,11 @@ fn silk_encoder_fill_uniform4_icdf(out: &[byte]) !void {
     }
 }
 
-fn silk_encoder_fill_nlsf_cb1_icdf(out: &[byte]) !void {
-    if out.len < 32 {
+fn silk_encoder_fill_nlsf_cb1_icdf(out: &[byte], signal_type: i32) !void {
+    if out.len < 32 || (signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED) {
         return error.SilkEncoderError;
     }
-    const base: usize = (SILK_SIGNAL_TYPE_UNVOICED as usize) * 32;
+    const base: usize = (signal_type as usize) * 32;
     var i: usize = 0;
     while i < 32 {
         out.ptr[i] = silk_nlsf_cb1_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
@@ -320,13 +519,13 @@ fn silk_encoder_fill_nlsf_interpolation_icdf(out: &[byte]) !void {
     }
 }
 
-fn silk_encoder_fill_rate_levels_icdf(out: &[byte]) !void {
-    if out.len < 9 {
+fn silk_encoder_fill_rate_levels_icdf(out: &[byte], signal_type: i32) !void {
+    if out.len < 9 || (signal_type != SILK_SIGNAL_TYPE_UNVOICED && signal_type != SILK_SIGNAL_TYPE_VOICED) {
         return error.SilkEncoderError;
     }
     var i: usize = 0;
     while i < 9 {
-        out.ptr[i] = silk_rate_levels_icdf_value(SILK_SIGNAL_TYPE_UNVOICED, i);
+        out.ptr[i] = silk_rate_levels_icdf_value(signal_type, i);
         i = i + 1;
     }
 }
@@ -342,7 +541,7 @@ fn silk_encoder_fill_pulses_per_block_icdf(out: &[byte], rate_level: i32) !void 
     }
 }
 
-fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32) !void {
+fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32, signal_type: i32) !void {
     const blocks_i32: i32 = silk_entropy_pulse_block_count(frame_length) catch {
         return error.SilkEncoderError;
     };
@@ -351,7 +550,7 @@ fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32) !void {
     }
 
     var rate_icdf: [byte: 9] = [0: 9];
-    try silk_encoder_fill_rate_levels_icdf(&rate_icdf[0:9]);
+    try silk_encoder_fill_rate_levels_icdf(&rate_icdf[0:9], signal_type);
     ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL, &rate_icdf[0:9], 8);
 
     var pulse_icdf: [byte: 18] = [0: 18];
@@ -363,14 +562,73 @@ fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32) !void {
     }
 }
 
-fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc, vad_active: bool) !void {
+fn silk_encoder_encode_pitch_lag_absolute(enc: &EcEnc, fs_khz: i32, lag_index: i32) !void {
+    const low_bits_len: i32 = fs_khz >> 1;
+    if low_bits_len != 4 && low_bits_len != 6 && low_bits_len != 8 {
+        return error.SilkEncoderError;
+    }
+    if lag_index < 0 {
+        return error.SilkEncoderError;
+    }
+    const high_symbol: i32 = lag_index / low_bits_len;
+    const low_symbol: i32 = lag_index - (high_symbol * low_bits_len);
+    if high_symbol < 0 || high_symbol >= 32 || low_symbol < 0 || low_symbol >= low_bits_len {
+        return error.SilkEncoderError;
+    }
+
+    var pitch_icdf: [byte: 32] = [0: 32];
+    try silk_encoder_fill_pitch_lag_icdf(&pitch_icdf[0:32]);
+    ec_enc_icdf(enc, high_symbol, &pitch_icdf[0:32], 8);
+
+    var low_icdf: [byte: 8] = [0: 8];
+    const low_len: usize = try silk_encoder_fill_pitch_low_bits_icdf(&low_icdf[0:8], fs_khz);
+    ec_enc_icdf(enc, low_symbol, &low_icdf[0:low_len], 8);
+}
+
+fn silk_encoder_encode_wb20_voiced_pitch_info(enc: &EcEnc, pitch: &const SilkEncoderPitchAnalysis) !void {
+    if !pitch.voiced || pitch.lag_index < 0 {
+        return error.SilkEncoderError;
+    }
+    try silk_encoder_encode_pitch_lag_absolute(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ as i32 / 1000, pitch.lag_index);
+
+    var contour_icdf: [byte: 34] = [0: 34];
+    const contour_len: usize = try silk_encoder_fill_pitch_contour_icdf(&contour_icdf[0:34], SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ as i32 / 1000, SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_PITCH_CONTOUR_INDEX, &contour_icdf[0:contour_len], 8);
+
+    var per_icdf: [byte: 3] = [0: 3];
+    try silk_encoder_fill_ltp_periodicity_icdf(&per_icdf[0:3]);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_LTP_PERIODICITY_INDEX, &per_icdf[0:3], 8);
+
+    var gain_icdf: [byte: 32] = [0: 32];
+    const gain_len: usize = try silk_encoder_fill_ltp_gain_icdf(&gain_icdf[0:32], SILK_BASIC_ENCODER_LTP_PERIODICITY_INDEX);
+    var subframe: i32 = 0;
+    while subframe < SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR {
+        ec_enc_icdf(enc, SILK_BASIC_ENCODER_LTP_CODEBOOK_INDEX, &gain_icdf[0:gain_len], 8);
+        subframe = subframe + 1;
+    }
+
+    var scale_icdf: [byte: 3] = [0: 3];
+    try silk_encoder_fill_ltp_scale_icdf(&scale_icdf[0:3]);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_LTP_SCALE_INDEX, &scale_icdf[0:3], 8);
+}
+
+fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &const SilkEncoderPitchAnalysis) !void {
+    var signal_type: i32 = SILK_SIGNAL_TYPE_UNVOICED;
+    var type_offset_symbol: i32 = SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL;
+    if vad_active && pitch.voiced {
+        signal_type = SILK_SIGNAL_TYPE_VOICED;
+        type_offset_symbol = SILK_BASIC_ENCODER_VOICED_TYPE_OFFSET_SYMBOL;
+    }
+
     var type_icdf: [byte: 4] = [0: 4];
     const type_icdf_len: usize = try silk_encoder_fill_type_offset_icdf(&type_icdf[0:4], vad_active);
-    ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL, &type_icdf[0:type_icdf_len], 8);
+    ec_enc_icdf(enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
 
     var gain_icdf: [byte: 8] = [0: 8];
     var gain_signal_table: i32 = 0;
-    if vad_active {
+    if signal_type == SILK_SIGNAL_TYPE_VOICED {
+        gain_signal_table = 2;
+    } else if vad_active {
         gain_signal_table = 1;
     }
     try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], gain_signal_table);
@@ -389,7 +647,7 @@ fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc, vad_active: bool) !v
     }
 
     var cb1_icdf: [byte: 32] = [0: 32];
-    try silk_encoder_fill_nlsf_cb1_icdf(&cb1_icdf[0:32]);
+    try silk_encoder_fill_nlsf_cb1_icdf(&cb1_icdf[0:32], signal_type);
     ec_enc_icdf(enc, 0, &cb1_icdf[0:32], 8);
 
     var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
@@ -410,14 +668,18 @@ fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc, vad_active: bool) !v
     try silk_encoder_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
     ec_enc_icdf(enc, 4, &interpolation_icdf[0:5], 8);
 
+    if signal_type == SILK_SIGNAL_TYPE_VOICED {
+        try silk_encoder_encode_wb20_voiced_pitch_info(enc, pitch);
+    }
+
     var seed_icdf: [byte: 4] = [0: 4];
     try silk_encoder_fill_uniform4_icdf(&seed_icdf[0:4]);
     ec_enc_icdf(enc, 2, &seed_icdf[0:4], 8);
 
-    try silk_encoder_encode_zero_pulse_blocks(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES);
+    try silk_encoder_encode_zero_pulse_blocks(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES, signal_type);
 }
 
-fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool) !usize {
+fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &const SilkEncoderPitchAnalysis) !usize {
     if payload.len < SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES {
         return error.SilkEncoderError;
     }
@@ -430,7 +692,7 @@ fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool) !usize {
     }
     ec_enc_bit_logp(&enc, vad_symbol, 1);
     ec_enc_bit_logp(&enc, 0, 1);
-    try silk_encoder_encode_wb20_unvoiced_side_info(&enc, vad_active);
+    try silk_encoder_encode_wb20_side_info(&enc, vad_active, pitch);
 
     const used: usize = ec_enc_done(&enc) catch {
         return error.SilkEncoderError;
@@ -459,6 +721,10 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     silk_encoder_clear_byte(&packet_out[0:SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES]);
     packet_out.ptr[0] = state.profile.toc_byte_code0;
     const vad_active: bool = try silk_encoder_vad_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels);
-    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active);
+    var pitch: SilkEncoderPitchAnalysis = silk_encoder_pitch_empty(0);
+    if vad_active {
+        pitch = try silk_encoder_pitch_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, state.profile.sample_rate_hz as i32 / 1000);
+    }
+    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active, &pitch);
     return SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES as i32;
 }
