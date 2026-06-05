@@ -4,6 +4,7 @@ use src.opus.celt.encoder.celt_basic_encoder_profile_init;
 use src.opus.celt.encoder.celt_encoder_encode_i16;
 use src.opus.celt.encoder.celt_encoder_is_initialized;
 use src.opus.celt.encoder.celt_encoder_state_init;
+use src.opus.core.constants.MAX_FRAME_BYTES;
 use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
 use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.errors.validate_encoder_config;
@@ -19,12 +20,17 @@ use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
+use src.opus.packet.repacketizer.Repacketizer;
+use src.opus.packet.repacketizer.repacketizer_add_packet;
+use src.opus.packet.repacketizer.repacketizer_init;
+use src.opus.packet.repacketizer.repacketizer_output_packet;
 
 export error EncoderApiError;
 export error EncoderApiUnsupported;
 
 export const OPUS_ENCODER_STORAGE_WORDS: usize = 1024;
 const OPUS_ENCODER_STORAGE_BYTES: usize = OPUS_ENCODER_STORAGE_WORDS * @size_of(usize);
+const ENCODER_BASIC_FRAME_UNIT_48K: i32 = 960;
 
 struct OpusEncoderState {
     config: OpusEncoderConfig,
@@ -37,6 +43,11 @@ struct EncoderModeDecision {
     primary: OpusMode,
     fallback: OpusMode,
     allow_fallback: bool,
+}
+
+struct EncoderFrameDurationDecision {
+    subframe_size_48k: i32,
+    frame_count: u8,
 }
 
 export struct OpusEncoder {
@@ -141,6 +152,31 @@ fn encoder_decide_mode(config: &const OpusEncoderConfig) EncoderModeDecision {
     return encoder_mode_decision_make(OpusMode.CELT, true);
 }
 
+fn encoder_decide_frame_duration(frame_size_48k: i32) !EncoderFrameDurationDecision {
+    if frame_size_48k == ENCODER_BASIC_FRAME_UNIT_48K {
+        return EncoderFrameDurationDecision{ subframe_size_48k: ENCODER_BASIC_FRAME_UNIT_48K, frame_count: 1 };
+    }
+    if frame_size_48k == ENCODER_BASIC_FRAME_UNIT_48K * 2 {
+        return EncoderFrameDurationDecision{ subframe_size_48k: ENCODER_BASIC_FRAME_UNIT_48K, frame_count: 2 };
+    }
+    if frame_size_48k == ENCODER_BASIC_FRAME_UNIT_48K * 3 {
+        return EncoderFrameDurationDecision{ subframe_size_48k: ENCODER_BASIC_FRAME_UNIT_48K, frame_count: 3 };
+    }
+    return error.EncoderApiUnsupported;
+}
+
+fn encoder_input_samples_for_48k(config: &const OpusEncoderConfig, frame_size_48k: i32) !usize {
+    if frame_size_48k <= 0 {
+        return error.EncoderApiError;
+    }
+    const numerator: u64 = (frame_size_48k as u64) * (config.sample_rate_hz as u64);
+    const denominator: u64 = SAMPLE_RATE_48K as u64;
+    if (numerator % denominator) != 0 {
+        return error.EncoderApiError;
+    }
+    return (numerator / denominator) as usize;
+}
+
 export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
     validate_encoder_config(config) catch {
         return error.EncoderApiError;
@@ -233,10 +269,51 @@ fn encoder_encode_mode_i16(encoder: &OpusEncoderState, mode: OpusMode, config: &
     return error.EncoderApiUnsupported;
 }
 
+fn encoder_encode_decided_duration_i16(encoder: &OpusEncoderState, mode: OpusMode, config: &const OpusEncoderConfig, pcm: &[const i16], frame_decision: &const EncoderFrameDurationDecision, packet_out: &[byte]) !i32 {
+    if frame_decision.frame_count == 1 {
+        return encoder_encode_mode_i16(encoder, mode, config, pcm, frame_decision.subframe_size_48k, packet_out);
+    }
+
+    var rp: Repacketizer = Repacketizer{};
+    repacketizer_init(&rp) catch {
+        return error.EncoderApiError;
+    };
+
+    const input_subframe_samples: usize = try encoder_input_samples_for_48k(config, frame_decision.subframe_size_48k);
+    const input_subframe_len: usize = input_subframe_samples * (config.channels as usize);
+    var frame_packet: [byte: MAX_FRAME_BYTES] = [0: MAX_FRAME_BYTES];
+
+    var frame_index: usize = 0;
+    while frame_index < frame_decision.frame_count as usize {
+        const pcm_offset: usize = frame_index * input_subframe_len;
+        const encoded: i32 = try encoder_encode_mode_i16(
+            encoder,
+            mode,
+            config,
+            &pcm[pcm_offset:input_subframe_len],
+            frame_decision.subframe_size_48k,
+            &frame_packet[0:MAX_FRAME_BYTES],
+        );
+        if encoded <= 0 {
+            return error.EncoderApiError;
+        }
+        repacketizer_add_packet(&rp, &frame_packet[0:(encoded as usize)]) catch {
+            return error.EncoderApiError;
+        };
+        frame_index = frame_index + 1;
+    }
+
+    const packet_len: usize = repacketizer_output_packet(&rp, packet_out, config.vbr) catch {
+        return error.EncoderApiError;
+    };
+    return packet_len as i32;
+}
+
 fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
     const effective_config: OpusEncoderConfig = encoder_effective_encode_config(&encoder.config);
     const decision: EncoderModeDecision = encoder_decide_mode(&effective_config);
-    const primary_encoded: !i32 = encoder_encode_mode_i16(encoder, decision.primary, &effective_config, pcm, frame_size_48k, packet_out);
+    const frame_decision: EncoderFrameDurationDecision = try encoder_decide_frame_duration(frame_size_48k);
+    const primary_encoded: !i32 = encoder_encode_decided_duration_i16(encoder, decision.primary, &effective_config, pcm, &frame_decision, packet_out);
     match primary_encoded {
         encoded => { return encoded; }
         error.EncoderApiUnsupported => {}
@@ -245,7 +322,7 @@ fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame
     if !decision.allow_fallback {
         return error.EncoderApiUnsupported;
     }
-    return encoder_encode_mode_i16(encoder, decision.fallback, &effective_config, pcm, frame_size_48k, packet_out);
+    return encoder_encode_decided_duration_i16(encoder, decision.fallback, &effective_config, pcm, &frame_decision, packet_out);
 }
 
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {

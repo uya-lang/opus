@@ -391,3 +391,50 @@ test "encoder mode decision keeps restricted lowdelay on CELT path" {
     try assert(!encoder_silk_is_initialized(&encoder), "restricted lowdelay must leave SILK state untouched");
     try assert(!encoder_celt_is_initialized(&encoder), "unsupported CELT profile must not mark CELT state initialized");
 }
+
+test "encoder frame duration decision packetizes 40ms voice as two SILK frames" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 640] = [0: 640];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:640], 640, &packet[0:1275]);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.SILK as i32);
+    try assert_eq_i32(info.bandwidth as i32, OpusBandwidth.WIDEBAND as i32);
+    try assert_eq_i32(info.frame_count as i32, 2);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 1920);
+    try assert(encoder_silk_is_initialized(&encoder), "40ms voice decision must still drive SILK state");
+}
+
+test "encoder frame duration decision packetizes 60ms stereo as three CELT frames" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 5760] = [0: 5760];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:5760], 2880, &packet[0:1275]);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.CELT as i32);
+    try assert_eq_i32(info.bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 3);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 2880);
+    try assert(encoder_celt_is_initialized(&encoder), "60ms stereo decision must still drive CELT state");
+}
