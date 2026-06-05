@@ -1,4 +1,3 @@
-use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.errors.validate_sample_rate;
@@ -97,7 +96,7 @@ export fn silk_encoder_is_initialized(state: &const SilkEncoderState) bool {
     return state.initialized;
 }
 
-export fn silk_encoder_encode_i16_placeholder(state: &SilkEncoderState, pcm: &[const i16], packet_out: &[byte]) !i32 {
+export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], packet_out: &[byte]) !i32 {
     if !state.initialized {
         return error.SilkEncoderError;
     }
@@ -109,5 +108,6 @@ export fn silk_encoder_encode_i16_placeholder(state: &SilkEncoderState, pcm: &[c
         return error.SilkEncoderError;
     }
 
-    return error.SilkEncoderUnsupported;
+    packet_out.ptr[0] = state.profile.toc_byte_code0;
+    return 1;
 }

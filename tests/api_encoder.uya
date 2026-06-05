@@ -210,7 +210,7 @@ test "encoder range encode output is parseable as a CELT packet" {
     try assert_eq_i32(info.payload_len as i32, encoded - 1);
 }
 
-test "encoder routes basic silk only profile to explicit placeholder" {
+test "encoder writes basic silk only wideband mono packet shell" {
     var encoder: OpusEncoder = OpusEncoder{};
     var config: OpusEncoderConfig = opus_encoder_config_default();
     config.sample_rate_hz = 16000;
@@ -225,11 +225,19 @@ test "encoder routes basic silk only profile to explicit placeholder" {
     try assert(!encoder_celt_is_initialized(&encoder), "fresh SILK profile must not pre-mark CELT state");
     try assert(!encoder_silk_is_initialized(&encoder), "fresh SILK profile must not pre-mark SILK state");
 
-    const encoded: !i32 = encoder_encode_i16(&encoder, &pcm[0:320], 320, &packet[0:1275]);
-    match encoded {
-        error.EncoderApiUnsupported => {}
-        else => { try assert(false, "basic SILK WB/20ms/mono must route to the explicit placeholder until legal packets are implemented"); }
-    };
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:320], 320, &packet[0:1275]);
+    try assert_eq_i32(encoded, 1);
     try assert(!encoder_celt_is_initialized(&encoder), "SILK-only requests must not fall through into CELT state");
-    try assert(encoder_silk_is_initialized(&encoder), "recognized SILK-only requests must reach the SILK placeholder state");
+    try assert(encoder_silk_is_initialized(&encoder), "recognized SILK-only requests must reach the SILK state");
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.SILK as i32);
+    try assert_eq_i32(info.bandwidth as i32, OpusBandwidth.WIDEBAND as i32);
+    try assert_eq_i32(info.channels as i32, 1);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+    try assert_eq_i32(info.payload_offset as i32, 1);
+    try assert_eq_i32(info.payload_len as i32, 0);
 }

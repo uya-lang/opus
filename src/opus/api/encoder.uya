@@ -15,7 +15,7 @@ use src.opus.core.types.OpusSignalHint;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderState;
 use src.opus.silk.encoder.silk_basic_encoder_profile_init;
-use src.opus.silk.encoder.silk_encoder_encode_i16_placeholder;
+use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
 
@@ -155,8 +155,8 @@ fn encoder_encode_silk_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_
     silk_encoder_state_init(&encoder.silk, &profile) catch {
         return error.EncoderApiError;
     };
-    return silk_encoder_encode_i16_placeholder(&encoder.silk, pcm, packet_out) catch {
-        return error.EncoderApiUnsupported;
+    return silk_encoder_encode_i16(&encoder.silk, pcm, packet_out) catch {
+        return error.EncoderApiError;
     };
 }
 

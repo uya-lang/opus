@@ -7,7 +7,7 @@ use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderState;
 use src.opus.silk.encoder.silk_basic_encoder_profile_init;
-use src.opus.silk.encoder.silk_encoder_encode_i16_placeholder;
+use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
 
@@ -58,7 +58,7 @@ test "silk basic encoder profile separates invalid and unsupported configs" {
     };
 }
 
-test "silk encoder state initializes but encode remains an explicit placeholder" {
+test "silk encoder writes wideband mono packet shell" {
     var config: OpusEncoderConfig = opus_encoder_config_default();
     config.sample_rate_hz = 16000;
     config.channels = 1;
@@ -72,9 +72,7 @@ test "silk encoder state initializes but encode remains an explicit placeholder"
 
     var pcm: [i16: 320] = [0: 320];
     var packet: [byte: 1275] = [0: 1275];
-    const encoded: !i32 = silk_encoder_encode_i16_placeholder(&state, &pcm[0:320], &packet[0:1275]);
-    match encoded {
-        error.SilkEncoderUnsupported => {}
-        else => { try assert(false, "SILK encode remains unsupported until the legal WB/20ms/mono path is implemented"); }
-    };
+    const encoded: i32 = try silk_encoder_encode_i16(&state, &pcm[0:320], &packet[0:1275]);
+    try assert_eq_i32(encoded, 1);
+    try assert_eq_i32(packet[0] as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
 }
