@@ -315,6 +315,33 @@ test "mapping family 1 derives Vorbis-order surround layouts" {
     try assert_family1_layout(8, 5, 3, &map8[0:8]);
 }
 
+test "multistream family1 5.1 mapping reorders decoded channels" {
+    const config: MultistreamDecoderConfig = try multistream_decoder_config_family1(48000, 6);
+    try assert_eq_i32(config.stream_count as i32, 4);
+    try assert_eq_i32(config.coupled_count as i32, 2);
+
+    var decoded: [i16: 12] = [
+        10, 11, 12, 13, 14, 15,
+        20, 21, 22, 23, 24, 25,
+    ];
+    var mapped: [i16: 12] = [0: 12];
+
+    try multistream_reorder_interleaved_i16(&decoded[0:12], 6, &config.mapping[0:6], 6, &mapped[0:12], 2);
+
+    try assert_eq_i32(mapped[0] as i32, 10);
+    try assert_eq_i32(mapped[1] as i32, 14);
+    try assert_eq_i32(mapped[2] as i32, 11);
+    try assert_eq_i32(mapped[3] as i32, 12);
+    try assert_eq_i32(mapped[4] as i32, 13);
+    try assert_eq_i32(mapped[5] as i32, 15);
+    try assert_eq_i32(mapped[6] as i32, 20);
+    try assert_eq_i32(mapped[7] as i32, 24);
+    try assert_eq_i32(mapped[8] as i32, 21);
+    try assert_eq_i32(mapped[9] as i32, 22);
+    try assert_eq_i32(mapped[10] as i32, 23);
+    try assert_eq_i32(mapped[11] as i32, 25);
+}
+
 test "mapping family 1 rejects unsupported layout inputs" {
     const zero_channels: !MultistreamDecoderConfig = multistream_decoder_config_family1(48000, 0);
     match zero_channels {

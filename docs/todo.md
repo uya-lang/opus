@@ -444,7 +444,7 @@
 - [x] 支持 caller-provided multistream decoder storage。
 - [x] 测试 mono。
 - [x] 测试 stereo。
-- [ ] 测试 5.1 mapping。
+- [x] 测试 5.1 mapping。
 - [ ] 测试非法 mapping。
 
 验收标准：
