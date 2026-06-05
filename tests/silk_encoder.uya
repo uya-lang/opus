@@ -10,12 +10,14 @@ use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderGainAnalysis;
+use src.opus.silk.encoder.SilkEncoderNlsfAnalysis;
 use src.opus.silk.encoder.SilkEncoderPitchAnalysis;
 use src.opus.silk.encoder.SilkEncoderState;
 use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_gain_analyze_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
+use src.opus.silk.encoder.silk_encoder_nlsf_quantize_i16;
 use src.opus.silk.encoder.silk_encoder_pitch_analyze_i16;
 use src.opus.silk.encoder.silk_encoder_state_init;
 use src.opus.silk.entropy_decode.SilkEntropyDecoder;
@@ -30,6 +32,7 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_quantization_offset;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
 use src.opus.silk.state.SilkDecoderState;
 
 fn fill_silk_encoder_voice_like_i16(values: &[i16]) void {
@@ -103,6 +106,33 @@ fn decode_silk_encoder_packet_gains(packet: &[byte], encoded: i32, entropy: &Sil
     control.nb_subframes = 4;
     control.lpc_order = 16;
     try silk_entropy_decode_gains(entropy, control, 0, 0, false);
+}
+
+fn decode_silk_encoder_packet_nlsf(packet: &[byte], encoded: i32, entropy: &SilkEntropyDecoder, control: &SilkDecoderControl) !void {
+    try decode_silk_encoder_packet_gains(packet, encoded, entropy, control);
+    try silk_entropy_decode_nlsf_indices(entropy, control, 0, 0);
+}
+
+fn silk_encoder_nlsf_has_nonzero_residual(nlsf: &const SilkEncoderNlsfAnalysis) bool {
+    var i: usize = 0;
+    while i < 16 {
+        if nlsf.residual_indices[i] != 0 {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn silk_encoder_control_nlsf_differs(a: &const SilkDecoderControl, b: &const SilkDecoderControl) bool {
+    var i: usize = 0;
+    while i < 16 {
+        if a.nlsf_q15[i] != b.nlsf_q15[i] {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
 test "silk basic encoder profile records wideband mono placeholder layout" {
@@ -334,6 +364,52 @@ test "silk encoder writes input dependent gain side info" {
     var ramp_control: SilkDecoderControl = SilkDecoderControl{};
     try decode_silk_encoder_packet_gains(&ramp_packet[0:(ramp_encoded as usize)], ramp_encoded, &ramp_entropy, &ramp_control);
     try assert(ramp_control.gains_q16[3] > ramp_control.gains_q16[0], "ramped input must decode to a higher last-subframe gain");
+}
+
+test "silk encoder NLSF quantization follows input spectrum" {
+    var periodic: [i16: 320] = [0: 320];
+    fill_silk_encoder_periodic_i16(&periodic[0:320], 80);
+    const periodic_nlsf: SilkEncoderNlsfAnalysis = try silk_encoder_nlsf_quantize_i16(&periodic[0:320], 320, 1, SILK_NLSF_CODEBOOK_WB);
+    try assert(periodic_nlsf.cb1_index >= 0, "NLSF quantizer must choose a first-stage vector");
+    try assert(periodic_nlsf.decoded_q15[0] > 0, "decoded NLSF must stay inside Q15 range");
+    try assert(periodic_nlsf.decoded_q15[15] > periodic_nlsf.decoded_q15[0], "decoded NLSF must be ordered");
+    try assert(silk_encoder_nlsf_has_nonzero_residual(&periodic_nlsf), "NLSF quantizer must emit residual indices for a non-codebook target");
+
+    var bright: [i16: 320] = [0: 320];
+    fill_silk_encoder_level_i16(&bright[0:320], 12000);
+    const bright_nlsf: SilkEncoderNlsfAnalysis = try silk_encoder_nlsf_quantize_i16(&bright[0:320], 320, 1, SILK_NLSF_CODEBOOK_WB);
+    try assert(bright_nlsf.cb1_index != periodic_nlsf.cb1_index || bright_nlsf.decoded_q15[0] != periodic_nlsf.decoded_q15[0], "different spectral shapes must quantize to different NLSF output");
+}
+
+test "silk encoder writes input dependent NLSF side info" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var periodic: [i16: 320] = [0: 320];
+    fill_silk_encoder_periodic_i16(&periodic[0:320], 80);
+    var periodic_packet: [byte: 1275] = [0: 1275];
+    const periodic_encoded: i32 = try silk_encoder_encode_i16(&state, &periodic[0:320], &periodic_packet[0:1275]);
+    var periodic_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    var periodic_control: SilkDecoderControl = SilkDecoderControl{};
+    try decode_silk_encoder_packet_nlsf(&periodic_packet[0:(periodic_encoded as usize)], periodic_encoded, &periodic_entropy, &periodic_control);
+    try assert(periodic_entropy.nlsf_valid[0], "encoded packet must carry decodable NLSF indices");
+
+    var bright: [i16: 320] = [0: 320];
+    fill_silk_encoder_level_i16(&bright[0:320], 12000);
+    var bright_packet: [byte: 1275] = [0: 1275];
+    const bright_encoded: i32 = try silk_encoder_encode_i16(&state, &bright[0:320], &bright_packet[0:1275]);
+    var bright_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    var bright_control: SilkDecoderControl = SilkDecoderControl{};
+    try decode_silk_encoder_packet_nlsf(&bright_packet[0:(bright_encoded as usize)], bright_encoded, &bright_entropy, &bright_control);
+
+    try assert(silk_encoder_control_nlsf_differs(&periodic_control, &bright_control), "different encoder inputs must decode to different NLSF control vectors");
+    try assert(periodic_entropy.nlsf_indices[0] != 0 || periodic_entropy.nlsf_indices[1] != 0, "NLSF side info must no longer be the fixed all-zero vector");
 }
 
 test "silk encoder rejects short packet buffers before writing past them" {

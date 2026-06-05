@@ -487,7 +487,7 @@
 - [x] 实现 SILK VAD。
 - [x] 实现 SILK pitch analysis。
 - [x] 实现 SILK gain control。
-- [ ] 实现 SILK NLSF quantization。
+- [x] 实现 SILK NLSF quantization。
 - [ ] 实现 SILK NSQ。
 - [ ] 实现 CELT transient detection。
 - [ ] 实现 CELT stereo intensity decision。
