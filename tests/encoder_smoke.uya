@@ -1,0 +1,155 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_celt_is_initialized;
+use src.opus.api.encoder.encoder_encode_i16;
+use src.opus.api.encoder.encoder_init;
+use src.opus.api.encoder.encoder_silk_is_initialized;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusMode;
+use src.opus.core.types.OpusSignalHint;
+use src.opus.core.types.PacketInfo;
+use src.opus.core.types.opus_encoder_config_default;
+use src.opus.packet.toc.decoder_get_packet_info;
+use src.opus.silk.decoder.silk_decode_mono_packet_q14;
+use src.opus.silk.state.SilkDecoderState;
+
+const ENCODER_SMOKE_PACKET_BYTES: usize = 1275;
+const ENCODER_SMOKE_CELT_FRAME_SAMPLES: i32 = 960;
+const ENCODER_SMOKE_CELT_PCM_SAMPLES: usize = 1920;
+const ENCODER_SMOKE_SILK_FRAME_SAMPLES: i32 = 320;
+
+fn fill_sine_like_stereo(pcm: &[i16]) void {
+    const wave: [i16: 32] = [
+        0, 1951, 3827, 5556, 7071, 8315, 9239, 9808,
+        10000, 9808, 9239, 8315, 7071, 5556, 3827, 1951,
+        0, -1951, -3827, -5556, -7071, -8315, -9239, -9808,
+        -10000, -9808, -9239, -8315, -7071, -5556, -3827, -1951,
+    ];
+    var frame: usize = 0;
+    while frame < (ENCODER_SMOKE_CELT_FRAME_SAMPLES as usize) {
+        const sample: i16 = wave[frame % (32 as usize)];
+        pcm.ptr[frame * 2] = sample;
+        pcm.ptr[(frame * 2) + 1] = sample;
+        frame = frame + 1;
+    }
+}
+
+fn fill_music_like_stereo(pcm: &[i16]) void {
+    const wave: [i16: 32] = [
+        0, 1951, 3827, 5556, 7071, 8315, 9239, 9808,
+        10000, 9808, 9239, 8315, 7071, 5556, 3827, 1951,
+        0, -1951, -3827, -5556, -7071, -8315, -9239, -9808,
+        -10000, -9808, -9239, -8315, -7071, -5556, -3827, -1951,
+    ];
+    var frame: usize = 0;
+    while frame < (ENCODER_SMOKE_CELT_FRAME_SAMPLES as usize) {
+        const bass: i32 = (wave[frame % (32 as usize)] as i32) / 2;
+        const lead: i32 = (wave[(frame * 3) % (32 as usize)] as i32) / 3;
+        pcm.ptr[frame * 2] = (bass + lead) as i16;
+        pcm.ptr[(frame * 2) + 1] = (bass - lead) as i16;
+        frame = frame + 1;
+    }
+}
+
+fn fill_voice_like_mono(pcm: &[i16]) void {
+    var i: usize = 0;
+    while i < (ENCODER_SMOKE_SILK_FRAME_SAMPLES as usize) {
+        const phase: usize = i % (80 as usize);
+        var sample: i32 = 0;
+        if phase < 20 {
+            sample = 10000 - ((phase as i32) * 350);
+        } else if phase < 40 {
+            sample = 2500 - (((phase - 20) as i32) * 120);
+        } else if phase < 60 {
+            sample = -1800;
+        } else {
+            sample = 900;
+        }
+        pcm.ptr[i] = sample as i16;
+        i = i + 1;
+    }
+}
+
+fn assert_packet_shape(packet: &[byte], encoded: i32, mode: OpusMode, bandwidth: OpusBandwidth, channels: i32) !void {
+    try assert(encoded > 1, "encoder smoke must produce TOC plus payload");
+    try assert(encoded <= (ENCODER_SMOKE_PACKET_BYTES as i32), "encoder smoke must fit the caller packet buffer");
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, mode as i32);
+    try assert_eq_i32(info.bandwidth as i32, bandwidth as i32);
+    try assert_eq_i32(info.channels as i32, channels);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+    try assert_eq_i32(info.payload_offset as i32, 1);
+    try assert_eq_i32(info.payload_len as i32, encoded - 1);
+}
+
+test "encoder smoke encodes sine-like fullband stereo input" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.application = OpusApplication.AUDIO;
+    config.signal_hint = OpusSignalHint.AUTO;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: ENCODER_SMOKE_CELT_PCM_SAMPLES] = [0: ENCODER_SMOKE_CELT_PCM_SAMPLES];
+    fill_sine_like_stereo(&pcm[0:ENCODER_SMOKE_CELT_PCM_SAMPLES]);
+    var packet: [byte: ENCODER_SMOKE_PACKET_BYTES] = [0: ENCODER_SMOKE_PACKET_BYTES];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:ENCODER_SMOKE_CELT_PCM_SAMPLES], ENCODER_SMOKE_CELT_FRAME_SAMPLES, &packet[0:ENCODER_SMOKE_PACKET_BYTES]);
+
+    try assert(encoder_celt_is_initialized(&encoder), "sine smoke must use the CELT basic profile");
+    try assert(!encoder_silk_is_initialized(&encoder), "sine smoke must not use SILK");
+    try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.CELT, OpusBandwidth.FULLBAND, 2);
+}
+
+test "encoder smoke encodes music-like fullband stereo input" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.application = OpusApplication.AUDIO;
+    config.signal_hint = OpusSignalHint.MUSIC;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: ENCODER_SMOKE_CELT_PCM_SAMPLES] = [0: ENCODER_SMOKE_CELT_PCM_SAMPLES];
+    fill_music_like_stereo(&pcm[0:ENCODER_SMOKE_CELT_PCM_SAMPLES]);
+    var packet: [byte: ENCODER_SMOKE_PACKET_BYTES] = [0: ENCODER_SMOKE_PACKET_BYTES];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:ENCODER_SMOKE_CELT_PCM_SAMPLES], ENCODER_SMOKE_CELT_FRAME_SAMPLES, &packet[0:ENCODER_SMOKE_PACKET_BYTES]);
+
+    try assert(encoder_celt_is_initialized(&encoder), "music smoke must use the CELT basic profile");
+    try assert(!encoder_silk_is_initialized(&encoder), "music smoke must not use SILK");
+    try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.CELT, OpusBandwidth.FULLBAND, 2);
+}
+
+test "encoder smoke encodes voice-like wideband mono input" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: ENCODER_SMOKE_SILK_FRAME_SAMPLES] = [0: ENCODER_SMOKE_SILK_FRAME_SAMPLES];
+    fill_voice_like_mono(&pcm[0:ENCODER_SMOKE_SILK_FRAME_SAMPLES]);
+    var packet: [byte: ENCODER_SMOKE_PACKET_BYTES] = [0: ENCODER_SMOKE_PACKET_BYTES];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:ENCODER_SMOKE_SILK_FRAME_SAMPLES], ENCODER_SMOKE_SILK_FRAME_SAMPLES, &packet[0:ENCODER_SMOKE_PACKET_BYTES]);
+
+    try assert(!encoder_celt_is_initialized(&encoder), "voice smoke must not use CELT");
+    try assert(encoder_silk_is_initialized(&encoder), "voice smoke must use the SILK basic profile");
+    try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.SILK, OpusBandwidth.WIDEBAND, 1);
+
+    var decoder: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: ENCODER_SMOKE_SILK_FRAME_SAMPLES] = [0: ENCODER_SMOKE_SILK_FRAME_SAMPLES];
+    const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:ENCODER_SMOKE_SILK_FRAME_SAMPLES]);
+    try assert_eq_i32(decoded as i32, ENCODER_SMOKE_SILK_FRAME_SAMPLES);
+}

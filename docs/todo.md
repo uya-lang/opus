@@ -469,7 +469,7 @@
 - [x] 支持 WB/20ms/mono。
 - [x] 输出 packet 可被 Uya decoder 解码。
 - [x] 输出 packet 可被 libopus 解码。
-- [ ] 写 sine/music/voice smoke tests。
+- [x] 写 sine/music/voice smoke tests。
 
 验收标准：
 
