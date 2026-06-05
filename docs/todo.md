@@ -450,7 +450,7 @@
 验收标准：
 
 - [x] 单流 decoder 不依赖 multistream。
-- [ ] Multistream 错误不会污染单流 decoder state。
+- [x] Multistream 错误不会污染单流 decoder state。
 - [x] Multistream init 不构造或清零 `OPUS_MAX_STREAMS` 个完整 decoder。
 
 ## 16. Basic Encoder
