@@ -35,6 +35,10 @@ use src.opus.silk.entropy_decode.silk_entropy_decode_random_seed;
 use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
 use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
 use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
+use src.opus.silk.fec.SilkDelayedFecResult;
+use src.opus.silk.fec.SilkFecPlan;
+use src.opus.silk.fec.silk_fec_decode_delayed_mono_q14;
+use src.opus.silk.fec.silk_fec_detect_lbrr_packet;
 use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
 use src.opus.silk.state.SilkDecoderState;
 
@@ -194,6 +198,8 @@ test "silk basic encoder profile records wideband mono placeholder layout" {
     try assert_eq_i32(profile.frame_duration_us as i32, 20000);
     try assert_eq_i32(profile.toc_config_index as i32, 9);
     try assert_eq_i32(profile.toc_byte_code0 as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
+    try assert(!profile.inband_fec, "default SILK profile must preserve disabled FEC");
+    try assert_eq_i32(profile.packet_loss_percent as i32, 0);
 }
 
 test "silk basic encoder profile separates invalid and unsupported configs" {
@@ -280,6 +286,81 @@ test "silk encoder VAD marks silence inactive and voice-like input active" {
     try assert(voice_entropy.vad_flags[0], "voice-like SILK input must encode an active VAD flag");
     try silk_entropy_decode_lbrr_flags(&voice_entropy);
     _ = try silk_entropy_decode_signal_type(&voice_entropy, 0, 0);
+}
+
+test "silk encoder writes in-band fec lbrr for active configured voice" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.inband_fec = true;
+    config.packet_loss_percent = 10;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_voice_like_i16(&voice_pcm[0:320]);
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try silk_encoder_encode_i16(&state, &voice_pcm[0:320], &packet[0:1275]);
+
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&entropy, &packet[1:(encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&entropy);
+    try silk_entropy_decode_lbrr_flags(&entropy);
+    try assert(entropy.vad_flags[0], "FEC source frame must still be VAD active");
+    try assert(entropy.lbrr_channel_flags[0], "enabled in-band FEC must set the mono LBRR channel flag");
+    try assert(entropy.lbrr_flags[0], "single-frame LBRR must mark frame zero recoverable");
+
+    var plan: SilkFecPlan = SilkFecPlan{};
+    try silk_fec_detect_lbrr_packet(&plan, &packet[0:(encoded as usize)], 0);
+    try assert(plan.can_recover, "encoded packet must be detectable as delayed FEC");
+
+    var decoder: SilkDecoderState = SilkDecoderState{};
+    var result: SilkDelayedFecResult = SilkDelayedFecResult{};
+    var out_q14: [i32: 320] = [0: 320];
+    try silk_fec_decode_delayed_mono_q14(&result, &decoder, &packet[0:(encoded as usize)], 0, &out_q14[0:320]);
+    try assert(result.used_fec, "delayed FEC decode must use the encoded LBRR frame");
+    try assert(!result.used_plc, "available LBRR must avoid PLC fallback");
+    try assert_eq_i32(result.decoded_samples as i32, 320);
+}
+
+test "silk encoder leaves lbrr clear when fec is disabled or inactive" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.inband_fec = false;
+    config.packet_loss_percent = 10;
+    const disabled_profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var disabled_state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&disabled_state, &disabled_profile);
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_voice_like_i16(&voice_pcm[0:320]);
+    var disabled_packet: [byte: 1275] = [0: 1275];
+    const disabled_encoded: i32 = try silk_encoder_encode_i16(&disabled_state, &voice_pcm[0:320], &disabled_packet[0:1275]);
+    var disabled_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&disabled_entropy, &disabled_packet[1:(disabled_encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&disabled_entropy);
+    try silk_entropy_decode_lbrr_flags(&disabled_entropy);
+    try assert(!disabled_entropy.lbrr_channel_flags[0], "disabled in-band FEC must not set LBRR");
+
+    config.inband_fec = true;
+    config.packet_loss_percent = 10;
+    const inactive_profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+    var inactive_state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&inactive_state, &inactive_profile);
+    var silence_pcm: [i16: 320] = [0: 320];
+    var inactive_packet: [byte: 1275] = [0: 1275];
+    const inactive_encoded: i32 = try silk_encoder_encode_i16(&inactive_state, &silence_pcm[0:320], &inactive_packet[0:1275]);
+    var inactive_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&inactive_entropy, &inactive_packet[1:(inactive_encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&inactive_entropy);
+    try silk_entropy_decode_lbrr_flags(&inactive_entropy);
+    try assert(!inactive_entropy.vad_flags[0], "silence must remain VAD inactive");
+    try assert(!inactive_entropy.lbrr_channel_flags[0], "inactive speech must not spend LBRR bits");
 }
 
 test "silk encoder pitch analysis detects periodic wideband lag" {

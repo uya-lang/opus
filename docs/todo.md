@@ -491,7 +491,7 @@
 - [x] 实现 SILK NSQ。
 - [x] 实现 CELT transient detection。
 - [x] 实现 CELT stereo intensity decision。
-- [ ] 实现 in-band FEC encoder。
+- [x] 实现 in-band FEC encoder。
 - [ ] 实现 DTX。
 - [ ] 实现 complexity 0..10 的主要开关。
 - [ ] 建立 objective quality bench。

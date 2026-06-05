@@ -95,6 +95,8 @@ export struct SilkBasicEncoderProfile {
     frame_duration_us: u32,
     toc_config_index: u8,
     toc_byte_code0: byte,
+    inband_fec: bool,
+    packet_loss_percent: u8,
 }
 
 export struct SilkEncoderState {
@@ -172,6 +174,8 @@ export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
         frame_duration_us: SILK_BASIC_ENCODER_WB_20MS_DURATION_US,
         toc_config_index: SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_CONFIG_INDEX,
         toc_byte_code0: SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0,
+        inband_fec: config.inband_fec,
+        packet_loss_percent: config.packet_loss_percent,
     };
 }
 
@@ -1377,7 +1381,7 @@ fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &con
     try silk_encoder_encode_pulse_blocks(enc, nsq, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES, signal_type, type_offset_symbol & 1);
 }
 
-fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &const SilkEncoderPitchAnalysis, gains: &const SilkEncoderGainAnalysis, nlsf: &const SilkEncoderNlsfAnalysis, nsq: &SilkEncoderNsqAnalysis) !usize {
+fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, lbrr_active: bool, pitch: &const SilkEncoderPitchAnalysis, gains: &const SilkEncoderGainAnalysis, nlsf: &const SilkEncoderNlsfAnalysis, nsq: &SilkEncoderNsqAnalysis) !usize {
     if payload.len < SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES {
         return error.SilkEncoderError;
     }
@@ -1389,7 +1393,11 @@ fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &
         vad_symbol = 1;
     }
     ec_enc_bit_logp(&enc, vad_symbol, 1);
-    ec_enc_bit_logp(&enc, 0, 1);
+    var lbrr_symbol: i32 = 0;
+    if lbrr_active {
+        lbrr_symbol = 1;
+    }
+    ec_enc_bit_logp(&enc, lbrr_symbol, 1);
     try silk_encoder_encode_wb20_side_info(&enc, vad_active, pitch, gains, nlsf, nsq);
 
     const used: usize = ec_enc_done(&enc) catch {
@@ -1426,6 +1434,7 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     const gains: SilkEncoderGainAnalysis = try silk_encoder_gain_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR);
     const nlsf: SilkEncoderNlsfAnalysis = try silk_encoder_nlsf_quantize_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, SILK_NLSF_CODEBOOK_WB);
     var nsq: SilkEncoderNsqAnalysis = try silk_encoder_nsq_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, &gains, &pitch);
-    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active, &pitch, &gains, &nlsf, &nsq);
+    const lbrr_active: bool = state.profile.inband_fec && state.profile.packet_loss_percent > 0 && vad_active;
+    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active, lbrr_active, &pitch, &gains, &nlsf, &nsq);
     return SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES as i32;
 }
