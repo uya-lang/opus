@@ -18,8 +18,10 @@ use src.opus.container.ogg_opus.ogg_opus_head_encoded_len;
 use src.opus.container.ogg_opus.ogg_opus_parse_head;
 use src.opus.container.ogg_opus.ogg_opus_parse_tags;
 use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
+use src.opus.container.ogg_opus.ogg_opus_tags_encoded_len;
 use src.opus.container.ogg_opus.ogg_opus_validate_page_version;
 use src.opus.container.ogg_opus.ogg_opus_write_head;
+use src.opus.container.ogg_opus.ogg_opus_write_tags;
 use src.opus.container.ogg_opus.opus_head_magic_byte;
 use src.opus.container.ogg_opus.opus_tags_magic_byte;
 
@@ -437,5 +439,76 @@ test "opus tags parser rejects malformed tags as container errors" {
     match comment_res {
         error.TruncatedTags => {}
         else => { try assert(false, "truncated OpusTags comment must be rejected"); }
+    }
+}
+
+test "opus tags writer encodes canonical packet without trailing bytes" {
+    const source: [byte: 50] = [
+        79, 112, 117, 115, 84, 97, 103, 115,
+        4, 0, 0, 0,
+        85, 121, 97, 33,
+        2, 0, 0, 0,
+        11, 0, 0, 0,
+        65, 82, 84, 73, 83, 84, 61, 85, 121, 97, 33,
+        9, 0, 0, 0,
+        84, 73, 84, 76, 69, 61, 79, 110, 101,
+        0, 0,
+    ];
+    var tags: OpusTags = OpusTags{};
+    try ogg_opus_parse_tags(&source[0:50], &tags);
+
+    var out: [byte: 64] = [170: 64];
+    const written: usize = try ogg_opus_write_tags(&tags, &source[0:50], &out[0:64]);
+    try assert_eq_i32(written as i32, 48);
+    try assert_eq_i32((try ogg_opus_tags_encoded_len(&tags)) as i32, 48);
+    try assert_eq_i32(out[0] as i32, 79);
+    try assert_eq_i32(out[7] as i32, 115);
+    try assert_eq_i32(out[8] as i32, 4);
+    try assert_eq_i32(out[12] as i32, 85);
+    try assert_eq_i32(out[16] as i32, 2);
+    try assert_eq_i32(out[20] as i32, 11);
+    try assert_eq_i32(out[24] as i32, 65);
+    try assert_eq_i32(out[35] as i32, 9);
+    try assert_eq_i32(out[47] as i32, 101);
+    try assert_eq_i32(out[48] as i32, 170);
+
+    var reparsed: OpusTags = OpusTags{};
+    try ogg_opus_parse_tags(&out[0:written], &reparsed);
+    try assert_eq_i32(reparsed.comment_count as i32, 2);
+    try assert_eq_i32(reparsed.trailing.len as i32, 0);
+}
+
+test "opus tags writer encodes empty vendor and no comments" {
+    const source: [byte: 1] = [0];
+    const tags: OpusTags = OpusTags{};
+    var out: [byte: 16] = [99: 16];
+    const written: usize = try ogg_opus_write_tags(&tags, &source[0:1], &out[0:16]);
+    try assert_eq_i32(written as i32, 16);
+    try assert_eq_i32(out[0] as i32, 79);
+    try assert_eq_i32(out[8] as i32, 0);
+    try assert_eq_i32(out[12] as i32, 0);
+}
+
+test "opus tags writer validates output buffer and source spans" {
+    const source: [byte: 4] = [65, 66, 67, 68];
+    var tags: OpusTags = OpusTags{};
+    tags.vendor.offset = 0;
+    tags.vendor.len = 4;
+    tags.comment_count = 0;
+
+    var short_out: [byte: 19] = [0: 19];
+    const short_res: !usize = ogg_opus_write_tags(&tags, &source[0:4], &short_out[0:19]);
+    match short_res {
+        error.TruncatedTags => {}
+        else => { try assert(false, "OpusTags writer must reject short output"); }
+    }
+
+    tags.vendor.offset = 3;
+    tags.vendor.len = 2;
+    var out: [byte: 32] = [0: 32];
+    const span_res: !usize = ogg_opus_write_tags(&tags, &source[0:4], &out[0:32]);
+    match span_res {
+        error.InvalidTags => {}
+        else => { try assert(false, "OpusTags writer must reject source spans outside input"); }
     }
 }
