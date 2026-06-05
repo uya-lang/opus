@@ -3,6 +3,8 @@ use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
 use src.opus.celt.mode.celt_mode_for_sample_rate;
 use src.opus.celt.mode.celt_mode_lm_from_frame_size;
 use src.opus.celt.mode.CeltMode;
+use src.opus.celt.quant_bands.CeltEnergyQuantState;
+use src.opus.celt.quant_bands.celt_energy_quant_state_init;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.errors.validate_sample_rate;
@@ -32,6 +34,7 @@ export struct CeltBasicEncoderProfile {
 
 export struct CeltEncoderState {
     profile: CeltBasicEncoderProfile,
+    energy: CeltEnergyQuantState,
     initialized: bool,
 }
 
@@ -95,6 +98,9 @@ export fn celt_encoder_state_init(state: &CeltEncoderState, profile: &const Celt
         return error.CeltEncoderError;
     }
     state.profile = *profile;
+    celt_energy_quant_state_init(&state.energy, profile.channels as i32, 0, profile.end_band, profile.lm) catch {
+        return error.CeltEncoderError;
+    };
     state.initialized = true;
 }
 

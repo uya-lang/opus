@@ -1,8 +1,13 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.quant_bands.CELT_ENERGY_DB_SHIFT;
+use src.opus.celt.quant_bands.CeltEnergyQuantState;
 use src.opus.celt.quant_bands.celt_decode_coarse_energy;
 use src.opus.celt.quant_bands.celt_decode_fine_energy;
+use src.opus.celt.quant_bands.celt_encode_coarse_energy;
+use src.opus.celt.quant_bands.celt_encode_fine_energy;
+use src.opus.celt.quant_bands.celt_energy_quant_index;
+use src.opus.celt.quant_bands.celt_energy_quant_state_init;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_configure_frame;
 use src.opus.celt.state.celt_state_init;
@@ -161,4 +166,62 @@ test "fine energy decode validates quantizer table" {
         error.CeltQuantBandsError => {}
         else => { try assert(false, "fine bits above supported bound must fail"); }
     }
+}
+
+test "coarse energy encode roundtrips through decoder state" {
+    var packet: [byte: 64] = [0: 64];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:64]);
+
+    var quant: CeltEnergyQuantState = CeltEnergyQuantState{};
+    try celt_energy_quant_state_init(&quant, 2, 0, 2, 3);
+    var target: [i16: 4] = [1024, 2048, -1024, 0];
+    try celt_encode_coarse_energy(&quant, &enc, true, &target[0:4]);
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var decoded: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&decoded, 2);
+    try celt_state_configure_frame(&decoded, 960, 0, 2);
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:64]);
+    try celt_decode_coarse_energy(&decoded, &dec, true);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decoded.old_ebands_q8[0] as i32, quant.old_ebands_q10[0] as i32);
+    try assert_eq_i32(decoded.old_ebands_q8[1] as i32, quant.old_ebands_q10[1] as i32);
+    try assert_eq_i32(decoded.old_ebands_q8[21] as i32, quant.old_ebands_q10[21] as i32);
+    try assert_eq_i32(decoded.old_ebands_q8[22] as i32, quant.old_ebands_q10[22] as i32);
+}
+
+test "fine energy encode writes residual bits by band and channel" {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+
+    var quant: CeltEnergyQuantState = CeltEnergyQuantState{};
+    try celt_energy_quant_state_init(&quant, 2, 1, 2, 1);
+    quant.old_ebands_q10[try celt_energy_quant_index(&quant, 0, 1)] = 100;
+    quant.old_ebands_q10[try celt_energy_quant_index(&quant, 1, 1)] = 100;
+    var fine_quant: [i32: 21] = [0: 21];
+    fine_quant[1] = 1;
+    var target: [i16: 4] = [0, 356, 0, -156];
+    try celt_encode_fine_energy(&quant, &enc, &fine_quant[0:21], &target[0:4]);
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var decoded: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&decoded, 2);
+    try celt_state_configure_frame(&decoded, 240, 1, 2);
+    decoded.old_ebands_q8[1] = 100;
+    decoded.old_ebands_q8[22] = 100;
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    try celt_decode_fine_energy(&decoded, &dec, &fine_quant[0:21]);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(decoded.old_ebands_q8[1] as i32, quant.old_ebands_q10[1] as i32);
+    try assert_eq_i32(decoded.old_ebands_q8[22] as i32, quant.old_ebands_q10[22] as i32);
+    try assert_eq_i32(quant.old_ebands_q10[1] as i32, 356);
+    try assert_eq_i32(quant.old_ebands_q10[22] as i32, -156);
 }

@@ -91,4 +91,8 @@ test "celt encoder state initializes from a validated profile" {
     try assert(celt_encoder_is_initialized(&state), "state init must mark CELT encoder active");
     try assert_eq_i32(state.profile.channels as i32, 2);
     try assert_eq_i32(state.profile.frame_size_48k, 960);
+    try assert_eq_i32(state.energy.channels, 2);
+    try assert_eq_i32(state.energy.start_band, 0);
+    try assert_eq_i32(state.energy.end_band, 21);
+    try assert_eq_i32(state.energy.lm, 3);
 }

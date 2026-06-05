@@ -1,4 +1,6 @@
+use src.opus.celt.state.CELT_ENERGY_HISTORY_LEN;
 use src.opus.celt.state.CELT_MAX_BANDS;
+use src.opus.celt.state.CELT_STATE_MAX_CHANNELS;
 use src.opus.celt.state.CeltDecoderState;
 use src.opus.celt.state.celt_state_energy_index;
 use src.opus.celt.tables.CELT_BETA_INTRA_Q15;
@@ -7,11 +9,17 @@ use src.opus.celt.tables.celt_energy_pred_coef_q15;
 use src.opus.celt.tables.celt_energy_prob_model_q8;
 use src.opus.core.saturate.sat32;
 use src.opus.entropy.laplace.ec_laplace_decode;
+use src.opus.entropy.laplace.ec_laplace_encode;
 use src.opus.entropy.range_dec.EcDec;
 use src.opus.entropy.range_dec.ec_dec_bit_logp;
 use src.opus.entropy.range_dec.ec_dec_bits;
 use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_tell;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_bits;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_tell_enc;
 
 export error CeltQuantBandsError;
 
@@ -19,6 +27,14 @@ export const CELT_ENERGY_DB_SHIFT: i32 = 10;
 const CELT_COARSE_MIN_Q10: i32 = -9 << CELT_ENERGY_DB_SHIFT;
 const CELT_COARSE_TMP_MIN_Q17: i32 = -28 << (CELT_ENERGY_DB_SHIFT + 7);
 const CELT_SMALL_ENERGY_ICDF_FTB: u32 = 2;
+
+export struct CeltEnergyQuantState {
+    channels: i32,
+    start_band: i32,
+    end_band: i32,
+    lm: i32,
+    old_ebands_q10: [i16: CELT_ENERGY_HISTORY_LEN],
+}
 
 fn round_shift_i64(value: i64, shift: i32) i32 {
     const half: i64 = 1L << (shift - 1);
@@ -52,6 +68,67 @@ fn small_energy_symbol_to_qi(symbol: i32) i32 {
     return 1;
 }
 
+fn clear_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn validate_energy_quant_layout(channels: i32, start_band: i32, end_band: i32, lm: i32) !void {
+    if channels < 1 || channels > (CELT_STATE_MAX_CHANNELS as i32) {
+        return error.CeltQuantBandsError;
+    }
+    if start_band < 0 || end_band <= start_band || end_band > (CELT_MAX_BANDS as i32) {
+        return error.CeltQuantBandsError;
+    }
+    if lm < 0 || lm > 3 {
+        return error.CeltQuantBandsError;
+    }
+}
+
+export fn celt_energy_quant_state_init(state: &CeltEnergyQuantState, channels: i32, start_band: i32, end_band: i32, lm: i32) !void {
+    try validate_energy_quant_layout(channels, start_band, end_band, lm);
+    state.channels = channels;
+    state.start_band = start_band;
+    state.end_band = end_band;
+    state.lm = lm;
+    clear_i16(&state.old_ebands_q10[0:CELT_ENERGY_HISTORY_LEN]);
+}
+
+fn validate_energy_quant_state(state: &const CeltEnergyQuantState) !void {
+    try validate_energy_quant_layout(state.channels, state.start_band, state.end_band, state.lm);
+}
+
+export fn celt_energy_quant_index(state: &const CeltEnergyQuantState, channel: i32, band: i32) !usize {
+    if channel < 0 || channel >= state.channels || band < 0 || band >= (CELT_MAX_BANDS as i32) {
+        return error.CeltQuantBandsError;
+    }
+    return (channel * (CELT_MAX_BANDS as i32) + band) as usize;
+}
+
+fn celt_energy_compact_index(state: &const CeltEnergyQuantState, channel: i32, band: i32, values_len: usize) !usize {
+    if channel < 0 || channel >= state.channels || band < state.start_band || band >= state.end_band {
+        return error.CeltQuantBandsError;
+    }
+    const index: usize = (channel as usize) * (state.end_band as usize) + (band as usize);
+    if index >= values_len {
+        return error.CeltQuantBandsError;
+    }
+    return index;
+}
+
+fn small_energy_qi_to_symbol(qi: i32) i32 {
+    if qi == 0 {
+        return 0;
+    }
+    if qi < 0 {
+        return 1;
+    }
+    return 2;
+}
+
 fn decode_coarse_qi(dec: &EcDec, lm: usize, intra: bool, band: i32, budget_bits: i32) i32 {
     const tell: i32 = ec_tell(dec) as i32;
     const bits_left: i32 = budget_bits - tell;
@@ -70,6 +147,51 @@ fn decode_coarse_qi(dec: &EcDec, lm: usize, intra: bool, band: i32, budget_bits:
         return -ec_dec_bit_logp(dec, 1);
     }
     return -1;
+}
+
+fn encode_coarse_qi(enc: &EcEnc, lm: usize, intra: bool, band: i32, budget_bits: i32, qi: i32) i32 {
+    const tell: i32 = ec_tell_enc(enc) as i32;
+    const bits_left: i32 = budget_bits - tell;
+    if bits_left >= 15 {
+        const prob_index: usize = (2 * min_i32(band, 20)) as usize;
+        const fs: u32 = (celt_energy_prob_model_q8(lm, intra, prob_index) as u32) << 7;
+        const decay: i32 = (celt_energy_prob_model_q8(lm, intra, prob_index + 1) as i32) << 6;
+        var encoded_qi: i32 = qi;
+        ec_laplace_encode(enc, &encoded_qi, fs, decay);
+        return encoded_qi;
+    }
+    if bits_left >= 2 {
+        var small_icdf: [byte: 3] = [2, 1, 0];
+        const symbol: i32 = small_energy_qi_to_symbol(qi);
+        ec_enc_icdf(enc, symbol, &small_icdf[0:3], CELT_SMALL_ENERGY_ICDF_FTB);
+        return small_energy_symbol_to_qi(symbol);
+    }
+    if bits_left >= 1 {
+        var bit: i32 = 0;
+        if qi < 0 {
+            bit = 1;
+        }
+        ec_enc_bit_logp(enc, bit, 1);
+        return -bit;
+    }
+    return -1;
+}
+
+fn coarse_qi_from_target_q10(coef_q15: i16, old_q10: i32, prev_q17: i32, target_q10: i32) i32 {
+    const pred_q17: i32 = sat32((round_shift_i64((coef_q15 as i64) * (old_q10 as i64), 8) as i64) + (prev_q17 as i64));
+    const desired_delta_q17: i64 = ((target_q10 as i64) << 7) - (pred_q17 as i64);
+    return round_shift_i64(desired_delta_q17, CELT_ENERGY_DB_SHIFT + 7);
+}
+
+fn apply_coarse_qi_to_history(old_q10: i32, prev_q17: &i32, coef_q15: i16, beta_q15: i16, qi: i32) i16 {
+    const q_q10: i32 = qi << CELT_ENERGY_DB_SHIFT;
+    var tmp_q17: i32 = round_shift_i64((coef_q15 as i64) * (old_q10 as i64), 8);
+    tmp_q17 = sat32((tmp_q17 as i64) + (*prev_q17 as i64) + (((q_q10 as i64) << 7)));
+    tmp_q17 = max_i32(CELT_COARSE_TMP_MIN_Q17, tmp_q17);
+
+    const beta_term: i32 = (beta_q15 as i32) * round_shift_i64(q_q10 as i64, 8);
+    *prev_q17 = sat32((*prev_q17 as i64) + (((q_q10 as i64) << 7)) - (beta_term as i64));
+    return round_shift_i64(tmp_q17 as i64, 7) as i16;
 }
 
 export fn celt_decode_coarse_energy(state: &CeltDecoderState, dec: &EcDec, intra: bool) !void {
@@ -111,6 +233,62 @@ export fn celt_decode_coarse_energy(state: &CeltDecoderState, dec: &EcDec, intra
     }
 }
 
+export fn celt_encode_coarse_energy(state: &CeltEnergyQuantState, enc: &EcEnc, intra: bool, target_q10: &[const i16]) !void {
+    try validate_energy_quant_state(state);
+
+    const lm: usize = state.lm as usize;
+    var coef_q15: i16 = celt_energy_pred_coef_q15(lm);
+    var beta_q15: i16 = celt_energy_beta_coef_q15(lm);
+    if intra {
+        coef_q15 = 0;
+        beta_q15 = CELT_BETA_INTRA_Q15;
+    }
+
+    const budget_bits: i32 = (enc.storage * 8) as i32;
+    var prev_q17: [i32: 2] = [0: 2];
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        var channel: i32 = 0;
+        while channel < state.channels {
+            const history_index: usize = try celt_energy_quant_index(state, channel, band);
+            const target_index: usize = try celt_energy_compact_index(state, channel, band, target_q10.len);
+            const old_q10: i32 = max_i32(CELT_COARSE_MIN_Q10, state.old_ebands_q10[history_index] as i32);
+            const qi: i32 = coarse_qi_from_target_q10(coef_q15, old_q10, prev_q17[channel as usize], target_q10.ptr[target_index] as i32);
+            const encoded_qi: i32 = encode_coarse_qi(enc, lm, intra, band, budget_bits, qi);
+            state.old_ebands_q10[history_index] = apply_coarse_qi_to_history(
+                old_q10,
+                &prev_q17[channel as usize],
+                coef_q15,
+                beta_q15,
+                encoded_qi,
+            );
+            channel = channel + 1;
+        }
+        band = band + 1;
+    }
+}
+
+fn fine_offset_q10_from_bits(q2: u32, fine_bits: i32) i32 {
+    const shifted: i32 = round_shift_i64((((q2 as i64) << CELT_ENERGY_DB_SHIFT) + (1L << (CELT_ENERGY_DB_SHIFT - 1))), fine_bits);
+    return shifted - (1 << (CELT_ENERGY_DB_SHIFT - 1));
+}
+
+fn quantize_fine_q2(residual_q10: i32, fine_bits: i32) u32 {
+    if fine_bits <= 0 {
+        return 0;
+    }
+    const levels: i32 = 1 << fine_bits;
+    const numerator: i64 = (((residual_q10 + (1 << (CELT_ENERGY_DB_SHIFT - 1))) as i64) * (levels as i64)) - (1L << (CELT_ENERGY_DB_SHIFT - 1));
+    var q2: i32 = 0;
+    if numerator > 0L {
+        q2 = sat32(numerator / (1L << CELT_ENERGY_DB_SHIFT));
+    }
+    if q2 >= levels {
+        q2 = levels - 1;
+    }
+    return q2 as u32;
+}
+
 export fn celt_decode_fine_energy(state: &CeltDecoderState, dec: &EcDec, fine_quant: &[i32]) !void {
     if state.channels < 1 || state.channels > 2 || state.start_band < 0 || state.end_band <= state.start_band {
         return error.CeltQuantBandsError;
@@ -129,10 +307,38 @@ export fn celt_decode_fine_energy(state: &CeltDecoderState, dec: &EcDec, fine_qu
             var channel: i32 = 0;
             while channel < state.channels {
                 const q2: u32 = ec_dec_bits(dec, fine_bits as u32);
-                const shifted: i32 = round_shift_i64((((q2 as i64) << CELT_ENERGY_DB_SHIFT) + (1L << (CELT_ENERGY_DB_SHIFT - 1))), fine_bits);
-                const offset_q10: i32 = shifted - (1 << (CELT_ENERGY_DB_SHIFT - 1));
+                const offset_q10: i32 = fine_offset_q10_from_bits(q2, fine_bits);
                 const index: usize = try celt_state_energy_index(state, channel, band);
                 state.old_ebands_q8[index] = sat32((state.old_ebands_q8[index] as i64) + (offset_q10 as i64)) as i16;
+                channel = channel + 1;
+            }
+        }
+        band = band + 1;
+    }
+}
+
+export fn celt_encode_fine_energy(state: &CeltEnergyQuantState, enc: &EcEnc, fine_quant: &[i32], target_q10: &[const i16]) !void {
+    try validate_energy_quant_state(state);
+    if fine_quant.len < CELT_MAX_BANDS {
+        return error.CeltQuantBandsError;
+    }
+
+    var band: i32 = state.start_band;
+    while band < state.end_band {
+        const fine_bits: i32 = fine_quant.ptr[band as usize];
+        if fine_bits < 0 || fine_bits > 8 {
+            return error.CeltQuantBandsError;
+        }
+        if fine_bits > 0 {
+            var channel: i32 = 0;
+            while channel < state.channels {
+                const history_index: usize = try celt_energy_quant_index(state, channel, band);
+                const target_index: usize = try celt_energy_compact_index(state, channel, band, target_q10.len);
+                const residual_q10: i32 = (target_q10.ptr[target_index] as i32) - (state.old_ebands_q10[history_index] as i32);
+                const q2: u32 = quantize_fine_q2(residual_q10, fine_bits);
+                ec_enc_bits(enc, q2, fine_bits as u32);
+                const offset_q10: i32 = fine_offset_q10_from_bits(q2, fine_bits);
+                state.old_ebands_q10[history_index] = sat32((state.old_ebands_q10[history_index] as i64) + (offset_q10 as i64)) as i16;
                 channel = channel + 1;
             }
         }
