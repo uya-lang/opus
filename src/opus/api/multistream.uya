@@ -22,6 +22,7 @@ const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE: usize = OPUS_MULTISTREAM_MAP
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_STREAM_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [1, 1, 2, 2, 3, 4, 4, 5];
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_COUPLED_COUNTS: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_MAX_CHANNELS] = [0, 1, 1, 2, 2, 2, 3, 3];
 const MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES: usize = MAX_PACKET_SAMPLES_48K * 2;
+export const OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES: usize = MULTISTREAM_SINGLE_STREAM_SCRATCH_SAMPLES;
 const OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE: [u8: OPUS_MULTISTREAM_MAPPING_FAMILY_1_TABLE_SIZE] = [
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 1, 0, 0, 0, 0, 0, 0,
@@ -71,6 +72,12 @@ export struct MultistreamDecoder {
 export struct MultistreamDecoderPool {
     stream_count: u8,
     slots: &[OpusDecoder],
+}
+
+export struct MultistreamDecoderStorage {
+    pool: MultistreamDecoderPool,
+    split: MultistreamPacketSplit,
+    scratch_i16: &[i16],
 }
 
 fn multistream_decoder_storage_fits_state() bool {
@@ -276,6 +283,18 @@ fn multistream_stream_decoder_channels(state: &const MultistreamDecoderState, st
         return 2 as u8;
     }
     return 1 as u8;
+}
+
+fn multistream_stream_decoded_channel_base(state: &const MultistreamDecoderState, stream_index: u8) !u8 {
+    if !state.initialized || stream_index >= state.stream_count {
+        return error.MultistreamApiError;
+    }
+    if stream_index < state.coupled_count {
+        const coupled_base: u16 = (stream_index as u16) * 2;
+        return coupled_base as u8;
+    }
+    const uncoupled_base: u16 = (stream_index as u16) + (state.coupled_count as u16);
+    return uncoupled_base as u8;
 }
 
 fn multistream_reorder_interleaved_frame_i16(
@@ -633,6 +652,22 @@ export fn multistream_decoder_pool_init_slots(decoder: &const MultistreamDecoder
     }
 }
 
+export fn multistream_decoder_storage_init(
+    decoder: &const MultistreamDecoder,
+    storage: &MultistreamDecoderStorage,
+    slots: &[OpusDecoder],
+    scratch_i16: &[i16],
+) !void {
+    if scratch_i16.len < OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES {
+        return error.MultistreamApiError;
+    }
+
+    try multistream_decoder_pool_init(decoder, &storage.pool, slots);
+    try multistream_decoder_pool_init_slots(decoder, &storage.pool);
+    multistream_clear_packet_split(&storage.split);
+    storage.scratch_i16 = scratch_i16;
+}
+
 export fn multistream_decoder_init_coupled_stream_slot(decoder: &const MultistreamDecoder, stream_decoder: &OpusDecoder) !void {
     const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
     try multistream_validate_single_coupled_stream_state(state);
@@ -752,6 +787,169 @@ fn multistream_decode_mapped_single_stream_i16(
         decoded,
     );
     return decoded;
+}
+
+fn multistream_validate_decode_storage(state: &const MultistreamDecoderState, storage: &const MultistreamDecoderStorage) !void {
+    if !state.initialized || state.stream_count == 0 || state.channel_count == 0 {
+        return error.MultistreamApiError;
+    }
+    if storage.pool.stream_count != state.stream_count || storage.pool.slots.len < (state.stream_count as usize) {
+        return error.MultistreamApiError;
+    }
+    if storage.scratch_i16.len < (OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES as usize) {
+        return error.MultistreamApiError;
+    }
+
+    const decoded_channels: u16 = (state.stream_count as u16) + (state.coupled_count as u16);
+    if decoded_channels == 0 || decoded_channels > (OPUS_MULTISTREAM_MAX_CHANNELS as u16) {
+        return error.MultistreamApiError;
+    }
+    try multistream_validate_state_mapping(state, decoded_channels as u8);
+}
+
+fn multistream_clear_i16(samples: &[i16], count: usize) !void {
+    if count > samples.len {
+        return error.MultistreamApiError;
+    }
+    var i: usize = 0;
+    while i < count {
+        samples.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn multistream_mix_stream_i16(
+    decoded_pcm: &[const i16],
+    decoded_channels: u8,
+    decoded_channel_base: u8,
+    mapping: &[const u8],
+    output_channels: u8,
+    pcm: &[i16],
+    decoded_samples: usize,
+) !void {
+    const decoded_channel_count: usize = decoded_channels as usize;
+    const decoded_base: usize = decoded_channel_base as usize;
+    const output_channel_count: usize = output_channels as usize;
+    if decoded_channel_count == 0 || output_channel_count == 0 {
+        return error.MultistreamApiError;
+    }
+    if decoded_samples > decoded_pcm.len / decoded_channel_count || decoded_samples > pcm.len / output_channel_count {
+        return error.MultistreamApiError;
+    }
+    if mapping.len < output_channel_count {
+        return error.MultistreamApiError;
+    }
+
+    var frame: usize = 0;
+    while frame < decoded_samples {
+        var output_channel: usize = 0;
+        while output_channel < output_channel_count {
+            const mapped: u8 = mapping.ptr[output_channel];
+            if mapped != OPUS_MULTISTREAM_MAPPING_SILENT {
+                const mapped_channel: usize = mapped as usize;
+                if mapped_channel >= decoded_base && mapped_channel < decoded_base + decoded_channel_count {
+                    const source_channel: usize = mapped_channel - decoded_base;
+                    pcm.ptr[(frame * output_channel_count) + output_channel] = decoded_pcm.ptr[(frame * decoded_channel_count) + source_channel];
+                }
+            }
+            output_channel = output_channel + 1;
+        }
+        frame = frame + 1;
+    }
+}
+
+export fn multistream_decode_i16(
+    decoder: &const MultistreamDecoder,
+    storage: &MultistreamDecoderStorage,
+    packet: &[byte],
+    pcm: &[i16],
+    frame_size: i32,
+    decode_fec: bool,
+) !i32 {
+    const state: &const MultistreamDecoderState = multistream_decoder_state_const(decoder);
+    try multistream_validate_decode_storage(state, storage);
+    if frame_size <= 0 {
+        return error.MultistreamApiError;
+    }
+
+    const requested_samples: usize = frame_size as usize;
+    const output_channel_count: usize = state.channel_count as usize;
+    if requested_samples > MAX_PACKET_SAMPLES_48K || output_channel_count == 0 || requested_samples > pcm.len / output_channel_count {
+        return error.MultistreamApiError;
+    }
+
+    if packet.len != 0 {
+        try multistream_split_stream_packets(packet, state.stream_count, &storage.split);
+    } else {
+        multistream_clear_packet_split(&storage.split);
+        storage.split.stream_count = state.stream_count;
+    }
+
+    var decoded_frame_size: i32 = -1;
+    var stream: usize = 0;
+    while stream < state.stream_count as usize {
+        const stream_index: u8 = stream as u8;
+        const decoded_channels: u8 = try multistream_stream_decoder_channels(state, stream_index);
+        const decoded_channel_count: usize = decoded_channels as usize;
+        if requested_samples > storage.scratch_i16.len / decoded_channel_count {
+            return error.MultistreamApiError;
+        }
+
+        var stream_offset: usize = 0;
+        var stream_len: usize = 0;
+        if packet.len != 0 {
+            stream_offset = storage.split.streams[stream].offset;
+            stream_len = storage.split.streams[stream].len;
+            if stream_len == 0 || stream_offset > packet.len || stream_len > packet.len - stream_offset {
+                return error.MultistreamApiError;
+            }
+        }
+
+        const scratch_len: usize = requested_samples * decoded_channel_count;
+        const decoded: i32 = decoder_decode_i16(
+            &storage.pool.slots.ptr[stream],
+            &packet[stream_offset:stream_len],
+            &storage.scratch_i16[0:scratch_len],
+            frame_size,
+            decode_fec,
+        ) catch {
+            return error.MultistreamApiError;
+        };
+        if decoded < 0 {
+            return error.MultistreamApiError;
+        }
+
+        if decoded_frame_size < 0 {
+            decoded_frame_size = decoded;
+            const decoded_samples: usize = decoded as usize;
+            if decoded_samples > pcm.len / output_channel_count {
+                return error.MultistreamApiError;
+            }
+            try multistream_clear_i16(pcm, decoded_samples * output_channel_count);
+        } else if decoded != decoded_frame_size {
+            return error.MultistreamApiError;
+        }
+
+        const decoded_samples: usize = decoded as usize;
+        const decoded_required: usize = decoded_samples * decoded_channel_count;
+        const decoded_base: u8 = try multistream_stream_decoded_channel_base(state, stream_index);
+        try multistream_mix_stream_i16(
+            &storage.scratch_i16[0:decoded_required],
+            decoded_channels,
+            decoded_base,
+            &state.mapping[0:state.channel_count as usize],
+            state.channel_count,
+            pcm,
+            decoded_samples,
+        );
+
+        stream = stream + 1;
+    }
+
+    if decoded_frame_size < 0 {
+        return error.MultistreamApiError;
+    }
+    return decoded_frame_size;
 }
 
 export fn multistream_decode_coupled_stream_i16(
