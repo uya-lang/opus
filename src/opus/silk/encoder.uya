@@ -1,0 +1,113 @@
+use src.opus.core.constants.SAMPLE_RATE_48K;
+use src.opus.core.errors.validate_channels;
+use src.opus.core.errors.validate_frame_size_48k;
+use src.opus.core.errors.validate_sample_rate;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+
+export error SilkEncoderError;
+export error SilkEncoderUnsupported;
+
+export const SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ: u32 = 16000;
+export const SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES: i32 = 320;
+export const SILK_BASIC_ENCODER_WB_20MS_FRAME_SIZE_48K: i32 = 960;
+export const SILK_BASIC_ENCODER_WB_20MS_DURATION_US: u32 = 20000;
+export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_CONFIG_INDEX: u8 = 9;
+export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0: byte = 72;
+
+export struct SilkBasicEncoderProfile {
+    sample_rate_hz: u32,
+    channels: u8,
+    input_frame_size_samples: i32,
+    frame_size_48k: i32,
+    bandwidth: OpusBandwidth,
+    frame_duration_us: u32,
+    toc_config_index: u8,
+    toc_byte_code0: byte,
+}
+
+export struct SilkEncoderState {
+    profile: SilkBasicEncoderProfile,
+    initialized: bool,
+}
+
+export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !SilkBasicEncoderProfile {
+    validate_sample_rate(config.sample_rate_hz) catch {
+        return error.SilkEncoderError;
+    };
+    validate_channels(config.channels) catch {
+        return error.SilkEncoderError;
+    };
+    if frame_size_48k <= 0 {
+        return error.SilkEncoderError;
+    }
+    validate_frame_size_48k(frame_size_48k as u32) catch {
+        return error.SilkEncoderError;
+    };
+
+    if config.sample_rate_hz != SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ {
+        return error.SilkEncoderUnsupported;
+    }
+    if config.channels != 1 {
+        return error.SilkEncoderUnsupported;
+    }
+    if config.max_bandwidth != OpusBandwidth.WIDEBAND {
+        return error.SilkEncoderUnsupported;
+    }
+    if frame_size_48k != SILK_BASIC_ENCODER_WB_20MS_FRAME_SIZE_48K {
+        return error.SilkEncoderUnsupported;
+    }
+
+    return SilkBasicEncoderProfile{
+        sample_rate_hz: config.sample_rate_hz,
+        channels: config.channels,
+        input_frame_size_samples: SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES,
+        frame_size_48k: frame_size_48k,
+        bandwidth: config.max_bandwidth,
+        frame_duration_us: SILK_BASIC_ENCODER_WB_20MS_DURATION_US,
+        toc_config_index: SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_CONFIG_INDEX,
+        toc_byte_code0: SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0,
+    };
+}
+
+export fn silk_encoder_state_init(state: &SilkEncoderState, profile: &const SilkBasicEncoderProfile) !void {
+    if profile.sample_rate_hz != SILK_BASIC_ENCODER_WB_20MS_INPUT_RATE_HZ {
+        return error.SilkEncoderError;
+    }
+    if profile.channels != 1 {
+        return error.SilkEncoderError;
+    }
+    if profile.input_frame_size_samples != SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES {
+        return error.SilkEncoderError;
+    }
+    if profile.frame_size_48k != SILK_BASIC_ENCODER_WB_20MS_FRAME_SIZE_48K {
+        return error.SilkEncoderError;
+    }
+    if profile.bandwidth != OpusBandwidth.WIDEBAND {
+        return error.SilkEncoderError;
+    }
+    if profile.frame_duration_us != SILK_BASIC_ENCODER_WB_20MS_DURATION_US {
+        return error.SilkEncoderError;
+    }
+
+    *state = SilkEncoderState{ profile: *profile, initialized: true };
+}
+
+export fn silk_encoder_is_initialized(state: &const SilkEncoderState) bool {
+    return state.initialized;
+}
+
+export fn silk_encoder_encode_i16_placeholder(state: &SilkEncoderState, pcm: &[const i16], packet_out: &[byte]) !i32 {
+    if !state.initialized {
+        return error.SilkEncoderError;
+    }
+    const required_pcm: usize = (state.profile.input_frame_size_samples as usize) * (state.profile.channels as usize);
+    if pcm.len < required_pcm || packet_out.len == 0 {
+        return error.SilkEncoderError;
+    }
+    if state.profile.toc_byte_code0 != SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 {
+        return error.SilkEncoderError;
+    }
+
+    return error.SilkEncoderUnsupported;
+}

@@ -465,7 +465,7 @@
 - [x] 实现基本 energy quantization。
 - [x] 实现合法 PVQ 输出。
 - [x] 实现 range encode 集成。
-- [ ] 实现 SILK-only Basic encoder 占位或最小合法路径。
+- [x] 实现 SILK-only Basic encoder 占位或最小合法路径。
 - [ ] 支持 WB/20ms/mono。
 - [ ] 输出 packet 可被 Uya decoder 解码。
 - [ ] 输出 packet 可被 libopus 解码。

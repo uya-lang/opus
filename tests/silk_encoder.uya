@@ -1,0 +1,80 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.opus_encoder_config_default;
+use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
+use src.opus.silk.encoder.SilkBasicEncoderProfile;
+use src.opus.silk.encoder.SilkEncoderState;
+use src.opus.silk.encoder.silk_basic_encoder_profile_init;
+use src.opus.silk.encoder.silk_encoder_encode_i16_placeholder;
+use src.opus.silk.encoder.silk_encoder_is_initialized;
+use src.opus.silk.encoder.silk_encoder_state_init;
+
+test "silk basic encoder profile records wideband mono placeholder layout" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+    try assert_eq_i32(profile.sample_rate_hz as i32, 16000);
+    try assert_eq_i32(profile.channels as i32, 1);
+    try assert_eq_i32(profile.input_frame_size_samples, 320);
+    try assert_eq_i32(profile.frame_size_48k, 960);
+    try assert_eq_i32(profile.bandwidth as i32, OpusBandwidth.WIDEBAND as i32);
+    try assert_eq_i32(profile.frame_duration_us as i32, 20000);
+    try assert_eq_i32(profile.toc_config_index as i32, 9);
+    try assert_eq_i32(profile.toc_byte_code0 as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
+}
+
+test "silk basic encoder profile separates invalid and unsupported configs" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const stereo: !SilkBasicEncoderProfile = silk_basic_encoder_profile_init(&config, 960);
+    match stereo {
+        error.SilkEncoderUnsupported => {}
+        else => { try assert(false, "Basic SILK placeholder is mono only"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const fullband: !SilkBasicEncoderProfile = silk_basic_encoder_profile_init(&config, 960);
+    match fullband {
+        error.SilkEncoderUnsupported => {}
+        else => { try assert(false, "Basic SILK placeholder is wideband only"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.sample_rate_hz = 44100;
+    const invalid_rate: !SilkBasicEncoderProfile = silk_basic_encoder_profile_init(&config, 960);
+    match invalid_rate {
+        error.SilkEncoderError => {}
+        else => { try assert(false, "SILK profile must reject invalid API sample rates"); }
+    };
+}
+
+test "silk encoder state initializes but encode remains an explicit placeholder" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try assert(!silk_encoder_is_initialized(&state), "fresh SILK encoder state must start inactive");
+    try silk_encoder_state_init(&state, &profile);
+    try assert(silk_encoder_is_initialized(&state), "state init must mark the SILK placeholder active");
+
+    var pcm: [i16: 320] = [0: 320];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: !i32 = silk_encoder_encode_i16_placeholder(&state, &pcm[0:320], &packet[0:1275]);
+    match encoded {
+        error.SilkEncoderUnsupported => {}
+        else => { try assert(false, "SILK encode remains unsupported until the legal WB/20ms/mono path is implemented"); }
+    };
+}

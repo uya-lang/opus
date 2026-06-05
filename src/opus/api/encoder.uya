@@ -12,6 +12,12 @@ use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.OpusSignalHint;
+use src.opus.silk.encoder.SilkBasicEncoderProfile;
+use src.opus.silk.encoder.SilkEncoderState;
+use src.opus.silk.encoder.silk_basic_encoder_profile_init;
+use src.opus.silk.encoder.silk_encoder_encode_i16_placeholder;
+use src.opus.silk.encoder.silk_encoder_is_initialized;
+use src.opus.silk.encoder.silk_encoder_state_init;
 
 export error EncoderApiError;
 export error EncoderApiUnsupported;
@@ -22,6 +28,7 @@ const OPUS_ENCODER_STORAGE_BYTES: usize = OPUS_ENCODER_STORAGE_WORDS * @size_of(
 struct OpusEncoderState {
     config: OpusEncoderConfig,
     celt: CeltEncoderState,
+    silk: SilkEncoderState,
     initialized: bool,
 }
 
@@ -90,6 +97,7 @@ fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConf
     try encoder_validate_config(config);
     encoder.config = *config;
     encoder.celt = CeltEncoderState{};
+    encoder.silk = SilkEncoderState{};
     encoder.initialized = true;
 }
 
@@ -140,6 +148,28 @@ fn encoder_encode_celt_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_
     };
 }
 
+fn encoder_encode_silk_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
+    const profile: SilkBasicEncoderProfile = silk_basic_encoder_profile_init(&encoder.config, frame_size_48k) catch {
+        return error.EncoderApiUnsupported;
+    };
+    silk_encoder_state_init(&encoder.silk, &profile) catch {
+        return error.EncoderApiError;
+    };
+    return silk_encoder_encode_i16_placeholder(&encoder.silk, pcm, packet_out) catch {
+        return error.EncoderApiUnsupported;
+    };
+}
+
+fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
+    const silk_encoded: !i32 = encoder_encode_silk_i16(encoder, pcm, frame_size_48k, packet_out);
+    match silk_encoded {
+        encoded => { return encoded; }
+        error.EncoderApiUnsupported => {}
+        error.EncoderApiError => { return error.EncoderApiError; }
+    };
+    return encoder_encode_celt_i16(encoder, pcm, frame_size_48k, packet_out);
+}
+
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {
     if !encoder_storage_fits_state() {
         return error.EncoderApiError;
@@ -153,7 +183,7 @@ export fn encoder_encode_i16(encoder: &OpusEncoder, pcm: &[const i16], frame_siz
     }
     const state: &OpusEncoderState = encoder_state(encoder);
     const frame_size_48k: i32 = try encoder_validate_encode_request(state, pcm, frame_size, packet_out);
-    return encoder_encode_celt_i16(state, pcm, frame_size_48k, packet_out);
+    return encoder_encode_basic_i16(state, pcm, frame_size_48k, packet_out);
 }
 
 export fn encoder_is_initialized(encoder: &const OpusEncoder) bool {
@@ -174,4 +204,8 @@ export fn encoder_application(encoder: &const OpusEncoder) OpusApplication {
 
 export fn encoder_celt_is_initialized(encoder: &const OpusEncoder) bool {
     return celt_encoder_is_initialized(&encoder_state_const(encoder).celt);
+}
+
+export fn encoder_silk_is_initialized(encoder: &const OpusEncoder) bool {
+    return silk_encoder_is_initialized(&encoder_state_const(encoder).silk);
 }

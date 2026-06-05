@@ -11,6 +11,7 @@ use src.opus.api.encoder.encoder_celt_is_initialized;
 use src.opus.api.encoder.encoder_init;
 use src.opus.api.encoder.encoder_is_initialized;
 use src.opus.api.encoder.encoder_sample_rate_hz;
+use src.opus.api.encoder.encoder_silk_is_initialized;
 use src.opus.api.encoder.encoder_validate_config;
 use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.core.types.OpusApplication;
@@ -207,4 +208,28 @@ test "encoder range encode output is parseable as a CELT packet" {
     try assert_eq_i32(info.duration_samples_48k as i32, 960);
     try assert_eq_i32(info.payload_offset as i32, 1);
     try assert_eq_i32(info.payload_len as i32, encoded - 1);
+}
+
+test "encoder routes basic silk only profile to explicit placeholder" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 320] = [0: 320];
+    var packet: [byte: 1275] = [0: 1275];
+    try assert(!encoder_celt_is_initialized(&encoder), "fresh SILK profile must not pre-mark CELT state");
+    try assert(!encoder_silk_is_initialized(&encoder), "fresh SILK profile must not pre-mark SILK state");
+
+    const encoded: !i32 = encoder_encode_i16(&encoder, &pcm[0:320], 320, &packet[0:1275]);
+    match encoded {
+        error.EncoderApiUnsupported => {}
+        else => { try assert(false, "basic SILK WB/20ms/mono must route to the explicit placeholder until legal packets are implemented"); }
+    };
+    try assert(!encoder_celt_is_initialized(&encoder), "SILK-only requests must not fall through into CELT state");
+    try assert(encoder_silk_is_initialized(&encoder), "recognized SILK-only requests must reach the SILK placeholder state");
 }
