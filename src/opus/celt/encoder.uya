@@ -1,0 +1,60 @@
+use src.opus.core.errors.validate_channels;
+use src.opus.core.errors.validate_frame_size_48k;
+use src.opus.core.errors.validate_sample_rate;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+
+export error CeltEncoderError;
+export error CeltEncoderUnsupported;
+
+export struct CeltBasicEncoderProfile {
+    sample_rate_hz: u32,
+    channels: u8,
+    frame_size_48k: i32,
+    bandwidth: OpusBandwidth,
+}
+
+export struct CeltEncoderState {
+    profile: CeltBasicEncoderProfile,
+    initialized: bool,
+}
+
+export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !CeltBasicEncoderProfile {
+    validate_sample_rate(config.sample_rate_hz) catch {
+        return error.CeltEncoderError;
+    };
+    validate_channels(config.channels) catch {
+        return error.CeltEncoderError;
+    };
+    if frame_size_48k <= 0 {
+        return error.CeltEncoderError;
+    }
+    validate_frame_size_48k(frame_size_48k as u32) catch {
+        return error.CeltEncoderError;
+    };
+    if config.max_bandwidth != OpusBandwidth.FULLBAND {
+        return error.CeltEncoderUnsupported;
+    }
+
+    return CeltBasicEncoderProfile{
+        sample_rate_hz: config.sample_rate_hz,
+        channels: config.channels,
+        frame_size_48k: frame_size_48k,
+        bandwidth: config.max_bandwidth,
+    };
+}
+
+export fn celt_encoder_state_init(state: &CeltEncoderState, profile: &const CeltBasicEncoderProfile) !void {
+    if profile.channels < 1 || profile.channels > 2 {
+        return error.CeltEncoderError;
+    }
+    if profile.frame_size_48k <= 0 {
+        return error.CeltEncoderError;
+    }
+    state.profile = *profile;
+    state.initialized = true;
+}
+
+export fn celt_encoder_is_initialized(state: &const CeltEncoderState) bool {
+    return state.initialized;
+}

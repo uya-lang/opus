@@ -1,0 +1,63 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.celt.encoder.CeltBasicEncoderProfile;
+use src.opus.celt.encoder.CeltEncoderState;
+use src.opus.celt.encoder.celt_basic_encoder_profile_init;
+use src.opus.celt.encoder.celt_encoder_is_initialized;
+use src.opus.celt.encoder.celt_encoder_state_init;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.opus_encoder_config_default;
+
+test "celt basic encoder profile records fullband frame layout" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+    try assert_eq_i32(profile.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(profile.channels as i32, 2);
+    try assert_eq_i32(profile.frame_size_48k, 960);
+    try assert_eq_i32(profile.bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+}
+
+test "celt basic encoder profile separates invalid and unsupported configs" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const unsupported_bandwidth: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 960);
+    match unsupported_bandwidth {
+        error.CeltEncoderUnsupported => {}
+        else => { try assert(false, "non-fullband CELT basic profiles are not wired yet"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.channels = 3;
+    const invalid_channels: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 960);
+    match invalid_channels {
+        error.CeltEncoderError => {}
+        else => { try assert(false, "CELT encoder profile must reject invalid channel counts"); }
+    };
+
+    config = opus_encoder_config_default();
+    const invalid_frame: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 123);
+    match invalid_frame {
+        error.CeltEncoderError => {}
+        else => { try assert(false, "CELT encoder profile must reject invalid frame durations"); }
+    };
+}
+
+test "celt encoder state initializes from a validated profile" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var state: CeltEncoderState = CeltEncoderState{};
+    try assert(!celt_encoder_is_initialized(&state), "fresh CELT encoder state must start inactive");
+    try celt_encoder_state_init(&state, &profile);
+
+    try assert(celt_encoder_is_initialized(&state), "state init must mark CELT encoder active");
+    try assert_eq_i32(state.profile.channels as i32, 2);
+    try assert_eq_i32(state.profile.frame_size_48k, 960);
+}
