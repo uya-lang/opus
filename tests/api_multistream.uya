@@ -217,6 +217,47 @@ test "multistream decoder storage decodes through caller-provided slots" {
     }
 }
 
+test "multistream decoder storage decodes family0 mono" {
+    var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
+    const multistream_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 1);
+    try multistream_decoder_init(&multistream_decoder, &multistream_config);
+
+    var slots: [OpusDecoder: 1] = [OpusDecoder{}];
+    var scratch: [i16: OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES] = [0: OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES];
+    var storage: MultistreamDecoderStorage = MultistreamDecoderStorage{
+        pool: MultistreamDecoderPool{ stream_count: 0 as u8, slots: &slots[0:1] },
+        split: MultistreamPacketSplit{},
+        scratch_i16: &scratch[0:OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES],
+    };
+    try multistream_decoder_storage_init(&multistream_decoder, &storage, &slots[0:1], &scratch[0:OPUS_MULTISTREAM_DECODER_SCRATCH_SAMPLES]);
+
+    var reference_decoder: OpusDecoder = OpusDecoder{};
+    const opus_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 1 };
+    try decoder_init(&reference_decoder, &opus_config);
+
+    var packet: [byte: 65] = [0: 65];
+    fill_multistream_mono_celt_packet(&packet[0:65]);
+
+    var multistream_pcm: [i16: 120] = [777: 120];
+    var reference_pcm: [i16: 120] = [555: 120];
+    const multistream_decoded: i32 = try multistream_decode_i16(
+        &multistream_decoder,
+        &storage,
+        &packet[0:65],
+        &multistream_pcm[0:120],
+        120,
+        false,
+    );
+    const reference_decoded: i32 = try decoder_decode_i16(&reference_decoder, &packet[0:65], &reference_pcm[0:120], 120, false);
+    try assert_eq_i32(multistream_decoded, reference_decoded);
+
+    var i: usize = 0;
+    while i < 120 {
+        try assert_eq_i32(multistream_pcm[i] as i32, reference_pcm[i] as i32);
+        i = i + 1;
+    }
+}
+
 test "mapping family 0 config derives mono and stereo layouts" {
     const mono: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 1);
     try assert_eq_i32(mono.channel_count as i32, 1);
