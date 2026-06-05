@@ -7,12 +7,15 @@ use src.opus.celt.mode.CeltMode;
 use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_DIM;
 use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_DECODE_DIM;
 use src.opus.celt.bands.CELT_BAND_SHAPE_MAX_PULSES;
-use src.opus.celt.bands.celt_encode_band_shapes;
+use src.opus.celt.bands.celt_encode_band_shapes_with_pulse_counts;
 use src.opus.celt.quant_bands.CeltEnergyQuantState;
 use src.opus.celt.quant_bands.celt_encode_coarse_energy;
 use src.opus.celt.quant_bands.celt_encode_fine_energy;
 use src.opus.celt.quant_bands.celt_energy_quant_state_init;
-use src.opus.celt.rate.celt_rate_compute_frame_allocation;
+use src.opus.celt.rate.CeltRateFrameAllocation;
+use src.opus.celt.rate.celt_rate_bits2pulses_pseudo;
+use src.opus.celt.rate.celt_rate_encode_allocation;
+use src.opus.celt.rate.celt_rate_get_pulses;
 use src.opus.core.errors.validate_bitrate;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
@@ -44,9 +47,11 @@ const CELT_BASIC_ENCODER_TRANSIENT_BLOCKS: i32 = 8;
 const CELT_BASIC_ENCODER_TRANSIENT_MIN_ENERGY: u32 = 2048;
 const CELT_BASIC_ENCODER_TRANSIENT_MIN_DELTA: u32 = 512;
 const CELT_BASIC_ENCODER_TRANSIENT_RATIO_NUM: u32 = 4;
+const CELT_BASIC_ENCODER_INTENSITY_BAND: i32 = 17;
+const CELT_BASIC_ENCODER_STEREO_MIN_MID_ABS: u64 = 1024;
+const CELT_BASIC_ENCODER_STEREO_SIDE_RATIO_DEN: u64 = 8;
 const CELT_ENCODER_SPREAD_NORMAL_SYMBOL: i32 = 2;
 const CELT_ENCODER_SPREAD_ICDF_FTB: u32 = 5;
-const CELT_ENCODER_MAX_PVQ_BITS_PER_BAND: i32 = 8;
 
 export struct CeltBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -73,6 +78,13 @@ export struct CeltEncoderTransientAnalysis {
     peak_block: i32,
     peak_energy: u32,
     previous_energy: u32,
+}
+
+export struct CeltEncoderStereoDecision {
+    intensity_band: i32,
+    dual_stereo: i32,
+    mid_abs_sum: u64,
+    side_abs_sum: u64,
 }
 
 export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !CeltBasicEncoderProfile {
@@ -165,6 +177,16 @@ fn celt_encoder_abs_i16(value: i16) u32 {
     return wide as u32;
 }
 
+fn celt_encoder_abs_i32(value: i32) u32 {
+    if value < 0 {
+        if value == -2147483647 - 1 {
+            return 2147483647 as u32;
+        }
+        return (-value) as u32;
+    }
+    return value as u32;
+}
+
 fn celt_encoder_block_avg_abs_i16(pcm: &[const i16], start_frame: usize, block_frames: usize, channels: usize) !u32 {
     if block_frames == 0 || channels == 0 || channels > 2 {
         return error.CeltEncoderError;
@@ -237,6 +259,42 @@ export fn celt_encoder_detect_transient_i16(pcm: &[const i16], frame_size_48k: i
     return analysis;
 }
 
+export fn celt_encoder_decide_stereo_i16(pcm: &[const i16], frame_size_48k: i32, channels: u8) !CeltEncoderStereoDecision {
+    if frame_size_48k <= 0 || channels != 2 {
+        return error.CeltEncoderError;
+    }
+    const frame_count: usize = frame_size_48k as usize;
+    if frame_count * 2 > pcm.len {
+        return error.CeltEncoderError;
+    }
+
+    var mid_abs_sum: u64 = 0;
+    var side_abs_sum: u64 = 0;
+    var frame: usize = 0;
+    while frame < frame_count {
+        const left: i32 = pcm.ptr[frame * 2] as i32;
+        const right: i32 = pcm.ptr[(frame * 2) + 1] as i32;
+        mid_abs_sum = mid_abs_sum + (celt_encoder_abs_i32(left + right) as u64);
+        side_abs_sum = side_abs_sum + (celt_encoder_abs_i32(left - right) as u64);
+        frame = frame + 1;
+    }
+
+    var intensity_band: i32 = 0;
+    var dual_stereo: i32 = 0;
+    const min_mid_sum: u64 = (frame_count as u64) * CELT_BASIC_ENCODER_STEREO_MIN_MID_ABS;
+    if mid_abs_sum >= min_mid_sum && side_abs_sum * CELT_BASIC_ENCODER_STEREO_SIDE_RATIO_DEN <= mid_abs_sum {
+        intensity_band = CELT_BASIC_ENCODER_INTENSITY_BAND;
+        dual_stereo = 1;
+    }
+
+    return CeltEncoderStereoDecision{
+        intensity_band: intensity_band,
+        dual_stereo: dual_stereo,
+        mid_abs_sum: mid_abs_sum,
+        side_abs_sum: side_abs_sum,
+    };
+}
+
 fn celt_encoder_nominal_payload_bytes(profile: &const CeltBasicEncoderProfile) usize {
     if profile.bitrate_bps == 0 {
         return CELT_BASIC_ENCODER_TARGET_PAYLOAD_BYTES;
@@ -307,21 +365,6 @@ fn celt_encoder_clear_i32(values: &[i32]) void {
         values.ptr[i] = 0;
         i = i + 1;
     }
-}
-
-fn celt_encoder_pulses_from_bits(bits: i32) i32 {
-    if bits <= 0 {
-        return 0;
-    }
-
-    var pulses: i32 = (bits + 1) / 2;
-    if pulses < 1 {
-        pulses = 1;
-    }
-    if pulses > CELT_BAND_SHAPE_MAX_PULSES {
-        pulses = CELT_BAND_SHAPE_MAX_PULSES;
-    }
-    return pulses;
 }
 
 fn celt_encoder_build_band_dims(profile: &const CeltBasicEncoderProfile, band_dims: &[i32]) !usize {
@@ -432,103 +475,227 @@ fn celt_encoder_encode_spread_normal(enc: &EcEnc) void {
     }
 }
 
-fn celt_encoder_prepare_channel_pulse_bits(total_pulse_bits: &[i32], end_band: i32, channels: i32, channel: i32, channel_pulse_bits: &[i32]) !void {
-    if end_band < 0 || total_pulse_bits.len < (end_band as usize) || channel_pulse_bits.len < (end_band as usize) {
+fn celt_encoder_channel_pulse_count_from_q3(
+    mode: &const CeltMode,
+    profile: &const CeltBasicEncoderProfile,
+    total_pulse_bits_q3: &[i32],
+    channel: i32,
+    band: i32,
+    intensity_band: i32,
+    split_remainder: bool,
+) !i32 {
+    if profile.channels < 1 || profile.channels > 2 || channel < 0 || channel >= (profile.channels as i32) {
         return error.CeltEncoderError;
     }
-    if channels < 1 || channels > 2 || channel < 0 || channel >= channels {
+    if band < 0 || band >= profile.end_band || band >= (CELT_MAX_BANDS as i32) || total_pulse_bits_q3.len < ((band + 1) as usize) {
         return error.CeltEncoderError;
     }
 
-    celt_encoder_clear_i32(channel_pulse_bits);
-    var band: i32 = 0;
-    while band < end_band {
-        const total_bits: i32 = total_pulse_bits.ptr[band as usize];
-        if total_bits < 0 {
-            return error.CeltEncoderError;
-        }
-        var channel_bits: i32 = total_bits;
-        if channels > 1 {
-            channel_bits = total_bits / channels;
-            const extra: i32 = total_bits - (channel_bits * channels);
+    const total_bits_q3: i32 = total_pulse_bits_q3.ptr[band as usize];
+    if total_bits_q3 < 0 {
+        return error.CeltEncoderError;
+    }
+
+    var channel_bits_q3: i32 = total_bits_q3;
+    var split_stereo: bool = profile.channels > 1;
+    if profile.channels == 2 && channel == 0 && intensity_band > 0 && band >= intensity_band {
+        split_stereo = false;
+    }
+    if split_stereo {
+        channel_bits_q3 = total_bits_q3 / (profile.channels as i32);
+        if split_remainder {
+            const extra: i32 = total_bits_q3 - (channel_bits_q3 * (profile.channels as i32));
             if channel < extra {
-                channel_bits = channel_bits + 1;
+                channel_bits_q3 = channel_bits_q3 + 1;
             }
         }
-        if channel_bits > CELT_ENCODER_MAX_PVQ_BITS_PER_BAND {
-            channel_bits = CELT_ENCODER_MAX_PVQ_BITS_PER_BAND;
-        }
-        channel_pulse_bits.ptr[band as usize] = channel_bits;
+    }
+
+    const pseudo: i32 = celt_rate_bits2pulses_pseudo(mode, band, profile.lm, channel_bits_q3) catch {
+        return error.CeltEncoderError;
+    };
+    var pulse_count: i32 = celt_rate_get_pulses(pseudo);
+    if pulse_count > CELT_BAND_SHAPE_MAX_PULSES {
+        pulse_count = CELT_BAND_SHAPE_MAX_PULSES;
+    }
+    return pulse_count;
+}
+
+fn celt_encoder_prepare_channel_pulse_counts_from_q3(
+    mode: &const CeltMode,
+    profile: &const CeltBasicEncoderProfile,
+    total_pulse_bits_q3: &[i32],
+    coded_bands: i32,
+    intensity_band: i32,
+    split_remainder: bool,
+    channel: i32,
+    channel_pulse_counts: &[i32],
+) !void {
+    if coded_bands < 0 || coded_bands > profile.end_band || channel_pulse_counts.len < (profile.end_band as usize) {
+        return error.CeltEncoderError;
+    }
+
+    celt_encoder_clear_i32(channel_pulse_counts);
+    var band: i32 = 0;
+    while band < coded_bands {
+        channel_pulse_counts.ptr[band as usize] = try celt_encoder_channel_pulse_count_from_q3(
+            mode,
+            profile,
+            total_pulse_bits_q3,
+            channel,
+            band,
+            intensity_band,
+            split_remainder,
+        );
         band = band + 1;
     }
 }
 
-fn celt_encoder_fill_band_pulses(dim: i32, pulse_bits: i32, pulses: &[i32]) !void {
-    if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DECODE_DIM || pulses.len < (dim as usize) {
+fn celt_encoder_fill_band_pulse_count(dim: i32, pulse_count: i32, pulses: &[i32]) !void {
+    if dim <= 0 || dim > CELT_BAND_SHAPE_MAX_DECODE_DIM || pulse_count < 0 || pulse_count > CELT_BAND_SHAPE_MAX_PULSES || pulses.len < (dim as usize) {
         return error.CeltEncoderError;
     }
 
     const dim_usize: usize = dim as usize;
     celt_encoder_clear_i32(&pulses[0:dim_usize]);
+    if pulse_count == 0 {
+        return;
+    }
     if dim <= CELT_BAND_SHAPE_MAX_DIM {
-        const pulse_count: i32 = celt_encoder_pulses_from_bits(pulse_bits);
-        if pulse_count > 0 {
-            pulses.ptr[0] = pulse_count;
-        }
+        pulses.ptr[0] = pulse_count;
         return;
     }
 
     var offset: usize = 0;
     var remaining_dim: i32 = dim;
-    var remaining_bits: i32 = pulse_bits;
+    var remaining_pulses: i32 = pulse_count;
     while remaining_dim > 0 {
         var chunk_dim: i32 = CELT_BAND_SHAPE_MAX_DIM;
         if remaining_dim < chunk_dim {
             chunk_dim = remaining_dim;
         }
 
-        var chunk_bits: i32 = remaining_bits;
+        var chunk_pulses: i32 = remaining_pulses;
         if remaining_dim != chunk_dim {
-            chunk_bits = (remaining_bits * chunk_dim + (remaining_dim / 2)) / remaining_dim;
+            chunk_pulses = (remaining_pulses * chunk_dim + (remaining_dim / 2)) / remaining_dim;
         }
-        if chunk_bits < 0 {
-            chunk_bits = 0;
+        if chunk_pulses > CELT_BAND_SHAPE_MAX_PULSES {
+            chunk_pulses = CELT_BAND_SHAPE_MAX_PULSES;
         }
-
-        const chunk_pulses: i32 = celt_encoder_pulses_from_bits(chunk_bits);
         if chunk_pulses > 0 {
             pulses.ptr[offset] = chunk_pulses;
         }
-        const chunk_len: usize = chunk_dim as usize;
-        offset = offset + chunk_len;
+        offset = offset + (chunk_dim as usize);
         remaining_dim = remaining_dim - chunk_dim;
-        remaining_bits = remaining_bits - chunk_bits;
-        if remaining_bits < 0 {
-            remaining_bits = 0;
+        remaining_pulses = remaining_pulses - chunk_pulses;
+        if remaining_pulses < 0 {
+            remaining_pulses = 0;
         }
     }
 }
 
-fn celt_encoder_fill_channel_pulses(profile: &const CeltBasicEncoderProfile, band_dims: &[i32], channel_pulse_bits: &[i32], pulses: &[i32], total_dim: usize) !void {
-    if band_dims.len < (profile.end_band as usize) || channel_pulse_bits.len < (profile.end_band as usize) || pulses.len < total_dim {
+fn celt_encoder_fill_channel_pulses_from_counts(profile: &const CeltBasicEncoderProfile, band_dims: &[i32], channel_pulse_counts: &[i32], pulses: &[i32], total_dim: usize, coded_bands: i32) !void {
+    if coded_bands < 0 || coded_bands > profile.end_band || band_dims.len < (profile.end_band as usize) || channel_pulse_counts.len < (profile.end_band as usize) || pulses.len < total_dim {
         return error.CeltEncoderError;
     }
 
     celt_encoder_clear_i32(&pulses[0:total_dim]);
     var offset: usize = 0;
     var band: i32 = 0;
-    while band < profile.end_band {
+    while band < coded_bands {
         const dim: i32 = band_dims.ptr[band as usize];
         if dim <= 0 || offset + (dim as usize) > total_dim {
             return error.CeltEncoderError;
         }
         const dim_usize: usize = dim as usize;
-        try celt_encoder_fill_band_pulses(
+        try celt_encoder_fill_band_pulse_count(
             dim,
-            channel_pulse_bits.ptr[band as usize],
+            channel_pulse_counts.ptr[band as usize],
             &pulses[offset:dim_usize],
         );
         offset = offset + dim_usize;
+        band = band + 1;
+    }
+}
+
+fn celt_encoder_encode_opus_intensity_shapes(
+    profile: &const CeltBasicEncoderProfile,
+    mode: &const CeltMode,
+    enc: &EcEnc,
+    allocation: &const CeltRateFrameAllocation,
+    band_dims: &[i32],
+    pulse_bits_q3: &[i32],
+    pulses: &[i32],
+    shape_q15: &[i16],
+    total_dim: usize,
+) !void {
+    if allocation.coded_bands < 0 || allocation.coded_bands > profile.end_band || allocation.intensity <= 0 || allocation.intensity >= allocation.coded_bands {
+        return error.CeltEncoderError;
+    }
+
+    var channel_pulse_counts: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
+    var band_offset: usize = 0;
+    var band: i32 = 0;
+    while band < allocation.coded_bands {
+        const dim: i32 = band_dims.ptr[band as usize];
+        if dim <= 0 || band_offset + (dim as usize) > total_dim {
+            return error.CeltEncoderError;
+        }
+        const dim_usize: usize = dim as usize;
+        if band < allocation.intensity {
+            var channel: i32 = 0;
+            while channel < (profile.channels as i32) {
+                celt_encoder_clear_i32(&channel_pulse_counts[0:CELT_MAX_BANDS]);
+                channel_pulse_counts[band as usize] = try celt_encoder_channel_pulse_count_from_q3(
+                    mode,
+                    profile,
+                    pulse_bits_q3,
+                    channel,
+                    band,
+                    allocation.intensity,
+                    false,
+                );
+                try celt_encoder_fill_band_pulse_count(dim, channel_pulse_counts[band as usize], &pulses[band_offset:dim_usize]);
+                celt_encoder_clear_i16(&shape_q15[band_offset:dim_usize]);
+                _ = celt_encode_band_shapes_with_pulse_counts(
+                    enc,
+                    band,
+                    band + 1,
+                    band_dims,
+                    &channel_pulse_counts[0:CELT_MAX_BANDS],
+                    &pulses[band_offset:dim_usize],
+                    &shape_q15[band_offset:dim_usize],
+                ) catch {
+                    return error.CeltEncoderError;
+                };
+                channel = channel + 1;
+            }
+        } else {
+            celt_encoder_clear_i32(&channel_pulse_counts[0:CELT_MAX_BANDS]);
+            channel_pulse_counts[band as usize] = try celt_encoder_channel_pulse_count_from_q3(
+                mode,
+                profile,
+                pulse_bits_q3,
+                0,
+                band,
+                allocation.intensity,
+                false,
+            );
+            try celt_encoder_fill_band_pulse_count(dim, channel_pulse_counts[band as usize], &pulses[band_offset:dim_usize]);
+            celt_encoder_clear_i16(&shape_q15[band_offset:dim_usize]);
+            _ = celt_encode_band_shapes_with_pulse_counts(
+                enc,
+                band,
+                band + 1,
+                band_dims,
+                &channel_pulse_counts[0:CELT_MAX_BANDS],
+                &pulses[band_offset:dim_usize],
+                &shape_q15[band_offset:dim_usize],
+            ) catch {
+                return error.CeltEncoderError;
+            };
+        }
+        band_offset = band_offset + dim_usize;
         band = band + 1;
     }
 }
@@ -554,6 +721,7 @@ export fn celt_encoder_encode_i16(state: &CeltEncoderState, pcm: &[const i16], p
     packet_out.ptr[0] = profile.toc_byte_code0;
 
     const transient: CeltEncoderTransientAnalysis = try celt_encoder_detect_transient_i16(pcm, profile.frame_size_48k, profile.channels);
+    const stereo_decision: CeltEncoderStereoDecision = try celt_encoder_decide_stereo_i16(pcm, profile.frame_size_48k, profile.channels);
 
     var enc: EcEnc = EcEnc{};
     ec_enc_init(&enc, &packet_out[1:payload_len]);
@@ -568,17 +736,19 @@ export fn celt_encoder_encode_i16(state: &CeltEncoderState, pcm: &[const i16], p
     const total_dim: usize = try celt_encoder_build_band_dims(profile, &band_dims[0:CELT_MAX_BANDS]);
     var pulse_bits: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
     var fine_quant: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
-    const remaining_bits: i32 = ((payload_len * 8) as i32) - (ec_tell_enc(&enc) as i32);
     const mode: CeltMode = celt_mode_for_sample_rate(profile.sample_rate_hz) catch {
         return error.CeltEncoderError;
     };
-    _ = celt_rate_compute_frame_allocation(
+    const allocation: CeltRateFrameAllocation = celt_rate_encode_allocation(
         &mode,
         profile.channels as i32,
         profile.lm,
         0,
         profile.end_band,
-        remaining_bits,
+        (payload_len * 8) as i32,
+        stereo_decision.intensity_band,
+        stereo_decision.dual_stereo,
+        &enc,
         &pulse_bits[0:CELT_MAX_BANDS],
         &fine_quant[0:CELT_MAX_BANDS],
     ) catch {
@@ -590,35 +760,53 @@ export fn celt_encoder_encode_i16(state: &CeltEncoderState, pcm: &[const i16], p
     var channel_pulse_bits: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
     var pulses: [i32: CELT_BASIC_ENCODER_MAX_SPECTRAL] = [0: CELT_BASIC_ENCODER_MAX_SPECTRAL];
     var shape_q15: [i16: CELT_BASIC_ENCODER_MAX_SPECTRAL] = [0: CELT_BASIC_ENCODER_MAX_SPECTRAL];
-    var channel: i32 = 0;
-    while channel < (profile.channels as i32) {
-        try celt_encoder_prepare_channel_pulse_bits(
-            &pulse_bits[0:CELT_MAX_BANDS],
-            profile.end_band,
-            profile.channels as i32,
-            channel,
-            &channel_pulse_bits[0:CELT_MAX_BANDS],
-        );
-        try celt_encoder_fill_channel_pulses(
+    if profile.channels == 2 && allocation.dual_stereo != 0 && allocation.intensity > 0 && allocation.intensity < allocation.coded_bands {
+        try celt_encoder_encode_opus_intensity_shapes(
             profile,
-            &band_dims[0:CELT_MAX_BANDS],
-            &channel_pulse_bits[0:CELT_MAX_BANDS],
-            &pulses[0:total_dim],
-            total_dim,
-        );
-        celt_encoder_clear_i16(&shape_q15[0:total_dim]);
-        _ = celt_encode_band_shapes(
+            &mode,
             &enc,
-            0,
-            profile.end_band,
+            &allocation,
             &band_dims[0:CELT_MAX_BANDS],
-            &channel_pulse_bits[0:CELT_MAX_BANDS],
+            &pulse_bits[0:CELT_MAX_BANDS],
             &pulses[0:total_dim],
             &shape_q15[0:total_dim],
-        ) catch {
-            return error.CeltEncoderError;
-        };
-        channel = channel + 1;
+            total_dim,
+        );
+    } else {
+        var channel: i32 = 0;
+        while channel < (profile.channels as i32) {
+            try celt_encoder_prepare_channel_pulse_counts_from_q3(
+                &mode,
+                profile,
+                &pulse_bits[0:CELT_MAX_BANDS],
+                allocation.coded_bands,
+                0,
+                true,
+                channel,
+                &channel_pulse_bits[0:CELT_MAX_BANDS],
+            );
+            try celt_encoder_fill_channel_pulses_from_counts(
+                profile,
+                &band_dims[0:CELT_MAX_BANDS],
+                &channel_pulse_bits[0:CELT_MAX_BANDS],
+                &pulses[0:total_dim],
+                total_dim,
+                allocation.coded_bands,
+            );
+            celt_encoder_clear_i16(&shape_q15[0:total_dim]);
+            _ = celt_encode_band_shapes_with_pulse_counts(
+                &enc,
+                0,
+                allocation.coded_bands,
+                &band_dims[0:CELT_MAX_BANDS],
+                &channel_pulse_bits[0:CELT_MAX_BANDS],
+                &pulses[0:total_dim],
+                &shape_q15[0:total_dim],
+            ) catch {
+                return error.CeltEncoderError;
+            };
+            channel = channel + 1;
+        }
     }
 
     try ec_enc_check(&enc);

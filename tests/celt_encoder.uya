@@ -2,12 +2,23 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.encoder.CeltBasicEncoderProfile;
 use src.opus.celt.encoder.CeltEncoderState;
+use src.opus.celt.encoder.CeltEncoderStereoDecision;
 use src.opus.celt.encoder.CeltEncoderTransientAnalysis;
 use src.opus.celt.encoder.celt_basic_encoder_profile_init;
+use src.opus.celt.encoder.celt_encoder_decide_stereo_i16;
 use src.opus.celt.encoder.celt_encoder_detect_transient_i16;
 use src.opus.celt.encoder.celt_encoder_encode_i16;
 use src.opus.celt.encoder.celt_encoder_is_initialized;
 use src.opus.celt.encoder.celt_encoder_state_init;
+use src.opus.celt.quant_bands.celt_decode_coarse_energy;
+use src.opus.celt.rate.CeltRateFrameAllocation;
+use src.opus.celt.rate.celt_rate_decode_allocation;
+use src.opus.celt.spread.celt_decode_spread_decision;
+use src.opus.celt.state.CELT_MAX_BANDS;
+use src.opus.celt.state.CeltDecoderState;
+use src.opus.celt.state.celt_state_configure_frame;
+use src.opus.celt.state.celt_state_init;
+use src.opus.celt.tf.celt_decode_tf_changes;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
@@ -40,12 +51,55 @@ fn fill_attack_stereo(pcm: &[i16]) void {
     }
 }
 
+fn fill_opposed_stereo(pcm: &[i16]) void {
+    var frame: usize = 0;
+    while frame < (pcm.len / 2) {
+        var sample: i16 = 6000;
+        if (frame % (2 as usize)) != 0 {
+            sample = -6000;
+        }
+        pcm.ptr[frame * 2] = sample;
+        pcm.ptr[(frame * 2) + 1] = -sample;
+        frame = frame + 1;
+    }
+}
+
 fn decode_celt_encoder_packet_transient_flag(packet: &[byte], encoded: i32) !bool {
     var dec: EcDec = EcDec{};
     try assert(encoded > 2, "CELT packet must include enough payload for global flags");
     ec_dec_init(&dec, &packet[1:((encoded as usize) - 1)]);
     try assert_eq_i32(ec_dec_bit_logp(&dec, 1), 0);
     return ec_dec_bit_logp(&dec, 3) != 0;
+}
+
+fn decode_celt_encoder_packet_allocation(packet: &[byte], encoded: i32) !CeltRateFrameAllocation {
+    var dec: EcDec = EcDec{};
+    try assert(encoded > 2, "CELT packet must include enough payload for allocation metadata");
+    const payload_len: usize = (encoded as usize) - 1;
+    ec_dec_init(&dec, &packet[1:payload_len]);
+
+    var decode_state: CeltDecoderState = CeltDecoderState{};
+    try celt_state_init(&decode_state, 2);
+    try celt_state_configure_frame(&decode_state, 960, 0, 21);
+
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 1), 0);
+    const transient: bool = ec_dec_bit_logp(&dec, 3) != 0;
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 3), 0);
+    try celt_decode_coarse_energy(&decode_state, &dec, false);
+
+    var tf_res: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
+    try celt_decode_tf_changes(0, 21, transient, &tf_res[0:CELT_MAX_BANDS], 3, &dec);
+    _ = try celt_decode_spread_decision(&dec, payload_len as i32 * 8);
+
+    var pulse_bits: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
+    var fine_quant: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];
+    return celt_rate_decode_allocation(
+        &decode_state,
+        &dec,
+        payload_len as i32 * 8,
+        &pulse_bits[0:CELT_MAX_BANDS],
+        &fine_quant[0:CELT_MAX_BANDS],
+    );
 }
 
 test "celt basic encoder profile records fullband frame layout" {
@@ -223,6 +277,47 @@ test "celt encoder transient detection flags sudden attacks" {
     try assert(attack_analysis.is_transient, "sudden high-energy attack must be marked transient");
     try assert_eq_i32(attack_analysis.peak_block, 4);
     try assert(attack_analysis.peak_energy > steady_analysis.peak_energy, "attack peak energy must exceed steady analysis peak");
+}
+
+test "celt encoder stereo decision enables intensity for linked high channels" {
+    var linked: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&linked[0:1920], 5000);
+    const linked_decision: CeltEncoderStereoDecision = try celt_encoder_decide_stereo_i16(&linked[0:1920], 960, 2);
+    try assert_eq_i32(linked_decision.intensity_band, 17);
+    try assert_eq_i32(linked_decision.dual_stereo, 1);
+
+    var opposed: [i16: 1920] = [0: 1920];
+    fill_opposed_stereo(&opposed[0:1920]);
+    const opposed_decision: CeltEncoderStereoDecision = try celt_encoder_decide_stereo_i16(&opposed[0:1920], 960, 2);
+    try assert_eq_i32(opposed_decision.intensity_band, 0);
+    try assert_eq_i32(opposed_decision.dual_stereo, 0);
+}
+
+test "celt encoder writes stereo intensity allocation decision" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var linked_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&linked_state, &profile);
+    var linked: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&linked[0:1920], 5000);
+    var linked_packet: [byte: 1275] = [0: 1275];
+    const linked_encoded: i32 = try celt_encoder_encode_i16(&linked_state, &linked[0:1920], &linked_packet[0:1275]);
+    const linked_alloc: CeltRateFrameAllocation = try decode_celt_encoder_packet_allocation(&linked_packet[0:(linked_encoded as usize)], linked_encoded);
+    try assert_eq_i32(linked_alloc.intensity, 17);
+    try assert_eq_i32(linked_alloc.dual_stereo, 1);
+
+    var opposed_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&opposed_state, &profile);
+    var opposed: [i16: 1920] = [0: 1920];
+    fill_opposed_stereo(&opposed[0:1920]);
+    var opposed_packet: [byte: 1275] = [0: 1275];
+    const opposed_encoded: i32 = try celt_encoder_encode_i16(&opposed_state, &opposed[0:1920], &opposed_packet[0:1275]);
+    const opposed_alloc: CeltRateFrameAllocation = try decode_celt_encoder_packet_allocation(&opposed_packet[0:(opposed_encoded as usize)], opposed_encoded);
+    try assert_eq_i32(opposed_alloc.intensity, 0);
+    try assert_eq_i32(opposed_alloc.dual_stereo, 0);
 }
 
 test "celt encoder writes detected transient global flag" {

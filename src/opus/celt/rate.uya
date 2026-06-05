@@ -17,6 +17,12 @@ use src.opus.entropy.range_dec.ec_dec_icdf;
 use src.opus.entropy.range_dec.ec_dec_uint;
 use src.opus.entropy.range_dec.ec_tell;
 use src.opus.entropy.range_dec.ec_tell_frac;
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_uint;
+use src.opus.entropy.range_enc.ec_tell_enc;
+use src.opus.entropy.range_enc.ec_tell_frac_enc;
 
 export error CeltRateError;
 
@@ -643,6 +649,298 @@ fn celt_rate_interp_bits2pulses_decode(
     return coded_bands;
 }
 
+fn celt_rate_interp_bits2pulses_encode(
+    mode: &const CeltMode,
+    start_band: i32,
+    end_band: i32,
+    skip_start: i32,
+    bits1: &[i32],
+    bits2: &[i32],
+    thresh: &[i32],
+    cap: &[i32],
+    total_q3: i32,
+    balance_out: &i32,
+    skip_rsv: i32,
+    desired_intensity: i32,
+    intensity_out: &i32,
+    intensity_rsv_in: i32,
+    desired_dual_stereo: i32,
+    dual_stereo_out: &i32,
+    dual_stereo_rsv_in: i32,
+    bits: &[i32],
+    fine_quant: &[i32],
+    fine_priority: &[i32],
+    channels: i32,
+    lm: i32,
+    enc: &EcEnc,
+) !i32 {
+    if bits1.len < (mode.nb_ebands as usize) || bits2.len < (mode.nb_ebands as usize) || thresh.len < (mode.nb_ebands as usize) || cap.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+    if bits.len < (mode.nb_ebands as usize) || fine_quant.len < (mode.nb_ebands as usize) || fine_priority.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+
+    const alloc_floor: i32 = channels << CELT_RATE_BITRES_SHIFT;
+    var stereo: i32 = 0;
+    if channels > 1 {
+        stereo = 1;
+    }
+    const log_m: i32 = lm << CELT_RATE_BITRES_SHIFT;
+
+    var lo: i32 = 0;
+    var hi: i32 = 1 << CELT_RATE_ALLOC_STEPS;
+    var step: i32 = 0;
+    while step < CELT_RATE_ALLOC_STEPS {
+        const mid: i32 = (lo + hi) >> 1;
+        var psum: i32 = 0;
+        var done: bool = false;
+        var band: i32 = end_band - 1;
+        while band >= start_band {
+            if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+                return error.CeltRateError;
+            }
+            const band_index: usize = band as usize;
+            var tmp: i32 = bits1.ptr[band_index] + ((mid * bits2.ptr[band_index]) >> CELT_RATE_ALLOC_STEPS);
+            if tmp >= thresh.ptr[band_index] || done {
+                done = true;
+                tmp = celt_rate_min_i32(tmp, cap.ptr[band_index]);
+                psum = psum + tmp;
+            } else if tmp >= alloc_floor {
+                psum = psum + alloc_floor;
+            }
+            if band == start_band {
+                break;
+            }
+            band = band - 1;
+        }
+        if psum > total_q3 {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+        step = step + 1;
+    }
+
+    var psum: i32 = 0;
+    var done_final: bool = false;
+    var band_final: i32 = end_band - 1;
+    while band_final >= start_band {
+        if band_final < 0 || band_final >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_final_index: usize = band_final as usize;
+        var tmp_final: i32 = bits1.ptr[band_final_index] + ((lo * bits2.ptr[band_final_index]) >> CELT_RATE_ALLOC_STEPS);
+        if tmp_final < thresh.ptr[band_final_index] && !done_final {
+            if tmp_final >= alloc_floor {
+                tmp_final = alloc_floor;
+            } else {
+                tmp_final = 0;
+            }
+        } else {
+            done_final = true;
+        }
+        tmp_final = celt_rate_min_i32(tmp_final, cap.ptr[band_final_index]);
+        bits.ptr[band_final_index] = tmp_final;
+        psum = psum + tmp_final;
+        if band_final == start_band {
+            break;
+        }
+        band_final = band_final - 1;
+    }
+
+    var coded_bands: i32 = end_band;
+    var available_q3: i32 = total_q3;
+    var intensity_rsv: i32 = intensity_rsv_in;
+    var dual_stereo_rsv: i32 = dual_stereo_rsv_in;
+    while true {
+        const band: i32 = coded_bands - 1;
+        if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_index: usize = band as usize;
+        if band <= skip_start {
+            available_q3 = available_q3 + skip_rsv;
+            break;
+        }
+
+        var left: i32 = available_q3 - psum;
+        const coeffs: i32 = ((try celt_mode_eband_boundary_5ms(mode, coded_bands)) as i32) - ((try celt_mode_eband_boundary_5ms(mode, start_band)) as i32);
+        if coeffs <= 0 {
+            return error.CeltRateError;
+        }
+        const per_coeff: i32 = left / coeffs;
+        left = left - coeffs * per_coeff;
+        const rem_base: i32 = ((try celt_mode_eband_boundary_5ms(mode, band)) as i32) - ((try celt_mode_eband_boundary_5ms(mode, start_band)) as i32);
+        const rem: i32 = celt_rate_max_i32(left - rem_base, 0);
+        const band_width: i32 = ((try celt_mode_eband_boundary_5ms(mode, coded_bands)) as i32) - ((try celt_mode_eband_boundary_5ms(mode, band)) as i32);
+        var band_bits: i32 = bits.ptr[band_index] + per_coeff * band_width + rem;
+        const skip_threshold: i32 = celt_rate_max_i32(thresh.ptr[band_index], alloc_floor + CELT_RATE_BITRES_UNIT);
+
+        if band_bits >= skip_threshold {
+            ec_enc_bit_logp(enc, 1, 1);
+            break;
+        }
+
+        psum = psum - bits.ptr[band_index] - intensity_rsv;
+        if intensity_rsv > 0 {
+            intensity_rsv = celt_rate_log2_frac_value(band - start_band);
+        }
+        psum = psum + intensity_rsv;
+        if band_bits >= alloc_floor {
+            psum = psum + alloc_floor;
+            bits.ptr[band_index] = alloc_floor;
+        } else {
+            bits.ptr[band_index] = 0;
+        }
+        coded_bands = coded_bands - 1;
+    }
+
+    if coded_bands <= start_band {
+        return error.CeltRateError;
+    }
+
+    if intensity_rsv > 0 {
+        var selected_intensity: i32 = start_band;
+        if desired_intensity > start_band && desired_intensity < coded_bands {
+            selected_intensity = desired_intensity;
+        }
+        *intensity_out = selected_intensity;
+        ec_enc_uint(enc, (selected_intensity - start_band) as u32, (coded_bands + 1 - start_band) as u32);
+    } else {
+        *intensity_out = 0;
+    }
+    if *intensity_out <= start_band {
+        available_q3 = available_q3 + dual_stereo_rsv;
+        dual_stereo_rsv = 0;
+    }
+    if dual_stereo_rsv > 0 {
+        var selected_dual: i32 = 0;
+        if desired_dual_stereo != 0 && *intensity_out > start_band {
+            selected_dual = 1;
+        }
+        *dual_stereo_out = selected_dual;
+        ec_enc_bit_logp(enc, selected_dual, 1);
+    } else {
+        *dual_stereo_out = 0;
+    }
+
+    var left_after: i32 = available_q3 - psum;
+    const coded_coeffs: i32 = ((try celt_mode_eband_boundary_5ms(mode, coded_bands)) as i32) - ((try celt_mode_eband_boundary_5ms(mode, start_band)) as i32);
+    if coded_coeffs <= 0 {
+        return error.CeltRateError;
+    }
+    const per_coeff_after: i32 = left_after / coded_coeffs;
+    left_after = left_after - coded_coeffs * per_coeff_after;
+    var band_add: i32 = start_band;
+    while band_add < coded_bands {
+        if band_add < 0 || band_add >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_add_index: usize = band_add as usize;
+        const width: i32 = (try celt_mode_eband_width_5ms(mode, band_add)) as i32;
+        bits.ptr[band_add_index] = bits.ptr[band_add_index] + per_coeff_after * width;
+        band_add = band_add + 1;
+    }
+    band_add = start_band;
+    while band_add < coded_bands {
+        if band_add < 0 || band_add >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_add_index: usize = band_add as usize;
+        const width_add: i32 = (try celt_mode_eband_width_5ms(mode, band_add)) as i32;
+        const tmp_add: i32 = celt_rate_min_i32(left_after, width_add);
+        bits.ptr[band_add_index] = bits.ptr[band_add_index] + tmp_add;
+        left_after = left_after - tmp_add;
+        band_add = band_add + 1;
+    }
+
+    var balance: i32 = 0;
+    var band_fine: i32 = start_band;
+    while band_fine < coded_bands {
+        if band_fine < 0 || band_fine >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_fine_index: usize = band_fine as usize;
+        const n0: i32 = (try celt_mode_eband_width_5ms(mode, band_fine)) as i32;
+        const n: i32 = n0 << lm;
+        const bit: i32 = bits.ptr[band_fine_index] + balance;
+        var excess: i32 = 0;
+        if n > 1 {
+            excess = celt_rate_max_i32(bit - cap.ptr[band_fine_index], 0);
+            bits.ptr[band_fine_index] = bit - excess;
+            var den: i32 = channels * n;
+            const dual_stereo_value: i32 = *dual_stereo_out;
+            const intensity_value: i32 = *intensity_out;
+            if channels == 2 && n > 2 && dual_stereo_value == 0 && band_fine < intensity_value {
+                den = den + 1;
+            }
+            const nclogn: i32 = den * ((celt_logn400_value(band_fine as usize) as i32) + log_m);
+            var offset: i32 = (nclogn >> 1) - den * CELT_RATE_FINE_OFFSET;
+            if n == 2 {
+                offset = offset + ((den << CELT_RATE_BITRES_SHIFT) >> 2);
+            }
+            if bits.ptr[band_fine_index] + offset < (den * 2 << CELT_RATE_BITRES_SHIFT) {
+                offset = offset + (nclogn >> 2);
+            } else if bits.ptr[band_fine_index] + offset < (den * 3 << CELT_RATE_BITRES_SHIFT) {
+                offset = offset + (nclogn >> 3);
+            }
+            var ebits: i32 = celt_rate_max_i32(0, bits.ptr[band_fine_index] + offset + (den << (CELT_RATE_BITRES_SHIFT - 1)));
+            ebits = (ebits / den) >> CELT_RATE_BITRES_SHIFT;
+            if channels * ebits > (bits.ptr[band_fine_index] >> CELT_RATE_BITRES_SHIFT) {
+                ebits = bits.ptr[band_fine_index] >> stereo >> CELT_RATE_BITRES_SHIFT;
+            }
+            ebits = celt_rate_min_i32(ebits, CELT_RATE_MAX_FINE_BITS);
+            fine_quant.ptr[band_fine_index] = ebits;
+            if ebits * (den << CELT_RATE_BITRES_SHIFT) >= bits.ptr[band_fine_index] + offset {
+                fine_priority.ptr[band_fine_index] = 1;
+            } else {
+                fine_priority.ptr[band_fine_index] = 0;
+            }
+            bits.ptr[band_fine_index] = bits.ptr[band_fine_index] - (channels * ebits << CELT_RATE_BITRES_SHIFT);
+        } else {
+            excess = celt_rate_max_i32(0, bit - (channels << CELT_RATE_BITRES_SHIFT));
+            bits.ptr[band_fine_index] = bit - excess;
+            fine_quant.ptr[band_fine_index] = 0;
+            fine_priority.ptr[band_fine_index] = 1;
+        }
+
+        if excess > 0 {
+            var extra_fine: i32 = excess >> (stereo + CELT_RATE_BITRES_SHIFT);
+            extra_fine = celt_rate_min_i32(extra_fine, CELT_RATE_MAX_FINE_BITS - fine_quant.ptr[band_fine_index]);
+            fine_quant.ptr[band_fine_index] = fine_quant.ptr[band_fine_index] + extra_fine;
+            const extra_bits: i32 = extra_fine * channels << CELT_RATE_BITRES_SHIFT;
+            if extra_bits >= excess - balance {
+                fine_priority.ptr[band_fine_index] = 1;
+            } else {
+                fine_priority.ptr[band_fine_index] = 0;
+            }
+            excess = excess - extra_bits;
+        }
+        balance = excess;
+        band_fine = band_fine + 1;
+    }
+
+    *balance_out = balance;
+    var band_skip: i32 = coded_bands;
+    while band_skip < end_band {
+        if band_skip < 0 || band_skip >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_skip_index: usize = band_skip as usize;
+        fine_quant.ptr[band_skip_index] = bits.ptr[band_skip_index] >> stereo >> CELT_RATE_BITRES_SHIFT;
+        bits.ptr[band_skip_index] = 0;
+        if fine_quant.ptr[band_skip_index] < 1 {
+            fine_priority.ptr[band_skip_index] = 1;
+        } else {
+            fine_priority.ptr[band_skip_index] = 0;
+        }
+        band_skip = band_skip + 1;
+    }
+
+    return coded_bands;
+}
+
 fn celt_rate_compute_opus_frame_allocation(
     mode: &const CeltMode,
     channels: i32,
@@ -848,6 +1146,301 @@ fn celt_rate_compute_opus_frame_allocation(
         remaining_bits: (total_q3 - allocation_bits) >> CELT_RATE_BITRES_SHIFT,
         balance_q3: balance_q3,
     };
+}
+
+fn celt_rate_compute_opus_frame_allocation_encode(
+    mode: &const CeltMode,
+    channels: i32,
+    lm: i32,
+    start_band: i32,
+    end_band: i32,
+    total_q3: i32,
+    offsets: &[i32],
+    cap: &[i32],
+    alloc_trim: i32,
+    desired_intensity: i32,
+    desired_dual_stereo: i32,
+    pulse_bits_q3: &[i32],
+    fine_quant: &[i32],
+    fine_priority: &[i32],
+    enc: &EcEnc,
+) !CeltRateFrameAllocation {
+    try celt_mode_frame_size_from_lm(mode, lm);
+    if channels < 1 || channels > 2 || total_q3 < 0 {
+        return error.CeltRateError;
+    }
+    if start_band < 0 || end_band <= start_band || end_band > mode.nb_ebands {
+        return error.CeltRateError;
+    }
+    if offsets.len < (mode.nb_ebands as usize) || cap.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+    if pulse_bits_q3.len < (mode.nb_ebands as usize) || fine_quant.len < (mode.nb_ebands as usize) || fine_priority.len < (mode.nb_ebands as usize) {
+        return error.CeltRateError;
+    }
+
+    var bits1: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    var bits2: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    var thresh: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    var trim_offset: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    const bits1_slice: &[i32] = &bits1[0:CELT_BAND_ALLOCATION_COLS];
+    const bits2_slice: &[i32] = &bits2[0:CELT_BAND_ALLOCATION_COLS];
+    const thresh_slice: &[i32] = &thresh[0:CELT_BAND_ALLOCATION_COLS];
+    const trim_offset_slice: &[i32] = &trim_offset[0:CELT_BAND_ALLOCATION_COLS];
+    try celt_rate_clear_i32(pulse_bits_q3, mode.nb_ebands);
+    try celt_rate_clear_i32(fine_quant, mode.nb_ebands);
+    try celt_rate_clear_i32(fine_priority, mode.nb_ebands);
+
+    var skip_rsv: i32 = 0;
+    var remaining_total: i32 = total_q3;
+    if remaining_total >= CELT_RATE_BITRES_UNIT {
+        skip_rsv = CELT_RATE_BITRES_UNIT;
+    }
+    remaining_total = remaining_total - skip_rsv;
+
+    var intensity_rsv: i32 = 0;
+    var dual_stereo_rsv: i32 = 0;
+    if channels == 2 {
+        intensity_rsv = celt_rate_log2_frac_value(end_band - start_band);
+        if intensity_rsv > remaining_total {
+            intensity_rsv = 0;
+        } else {
+            remaining_total = remaining_total - intensity_rsv;
+            if remaining_total >= CELT_RATE_BITRES_UNIT {
+                dual_stereo_rsv = CELT_RATE_BITRES_UNIT;
+            }
+            remaining_total = remaining_total - dual_stereo_rsv;
+        }
+    }
+
+    var band: i32 = start_band;
+    while band < end_band {
+        if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_index: usize = band as usize;
+        const width: i32 = (try celt_mode_eband_width_5ms(mode, band)) as i32;
+        thresh_slice.ptr[band_index] = celt_rate_max_i32(channels << CELT_RATE_BITRES_SHIFT, (3 * width << lm << CELT_RATE_BITRES_SHIFT) >> 4);
+        trim_offset_slice.ptr[band_index] = channels * width * (alloc_trim - 5 - lm) * (end_band - band - 1) * (1 << (lm + CELT_RATE_BITRES_SHIFT)) >> 6;
+        if (width << lm) == 1 {
+            trim_offset_slice.ptr[band_index] = trim_offset_slice.ptr[band_index] - (channels << CELT_RATE_BITRES_SHIFT);
+        }
+        band = band + 1;
+    }
+
+    var lo: i32 = 1;
+    var hi: i32 = mode.nb_alloc_vectors - 1;
+    while lo <= hi {
+        const mid: i32 = (lo + hi) >> 1;
+        var psum: i32 = 0;
+        var done: bool = false;
+        band = end_band - 1;
+        while band >= start_band {
+            if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+                return error.CeltRateError;
+            }
+            const band_index: usize = band as usize;
+            var bitsj: i32 = try celt_rate_band_bits_q3(mode, channels, lm, mid, band);
+            if bitsj > 0 {
+                bitsj = celt_rate_max_i32(0, bitsj + trim_offset_slice.ptr[band_index]);
+            }
+            bitsj = bitsj + offsets.ptr[band_index];
+            if bitsj >= thresh_slice.ptr[band_index] || done {
+                done = true;
+                psum = psum + celt_rate_min_i32(bitsj, cap.ptr[band_index]);
+            } else if bitsj >= (channels << CELT_RATE_BITRES_SHIFT) {
+                psum = psum + (channels << CELT_RATE_BITRES_SHIFT);
+            }
+            if band == start_band {
+                break;
+            }
+            band = band - 1;
+        }
+        if psum > remaining_total {
+            hi = mid - 1;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    hi = lo;
+    lo = lo - 1;
+
+    var skip_start: i32 = start_band;
+    band = start_band;
+    while band < end_band {
+        if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_index: usize = band as usize;
+        var bits1j: i32 = try celt_rate_band_bits_q3(mode, channels, lm, lo, band);
+        var bits2j: i32 = 0;
+        if hi >= mode.nb_alloc_vectors {
+            bits2j = cap.ptr[band_index];
+        } else {
+            bits2j = try celt_rate_band_bits_q3(mode, channels, lm, hi, band);
+        }
+        if bits1j > 0 {
+            bits1j = celt_rate_max_i32(0, bits1j + trim_offset_slice.ptr[band_index]);
+        }
+        if bits2j > 0 {
+            bits2j = celt_rate_max_i32(0, bits2j + trim_offset_slice.ptr[band_index]);
+        }
+        if lo > 0 {
+            bits1j = bits1j + offsets.ptr[band_index];
+        }
+        bits2j = bits2j + offsets.ptr[band_index];
+        if offsets.ptr[band_index] > 0 {
+            skip_start = band;
+        }
+        bits2j = celt_rate_max_i32(0, bits2j - bits1j);
+        bits1_slice.ptr[band_index] = bits1j;
+        bits2_slice.ptr[band_index] = bits2j;
+        band = band + 1;
+    }
+
+    var intensity: i32 = 0;
+    var dual_stereo: i32 = 0;
+    var balance_q3: i32 = 0;
+    const coded_bands: i32 = try celt_rate_interp_bits2pulses_encode(
+        mode,
+        start_band,
+        end_band,
+        skip_start,
+        bits1_slice,
+        bits2_slice,
+        thresh_slice,
+        cap,
+        remaining_total,
+        &balance_q3,
+        skip_rsv,
+        desired_intensity,
+        &intensity,
+        intensity_rsv,
+        desired_dual_stereo,
+        &dual_stereo,
+        dual_stereo_rsv,
+        pulse_bits_q3,
+        fine_quant,
+        fine_priority,
+        channels,
+        lm,
+        enc,
+    );
+
+    var allocation_bits: i32 = 0;
+    var fine_bits: i32 = 0;
+    var pulse_bits: i32 = 0;
+    band = start_band;
+    while band < end_band {
+        if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_index: usize = band as usize;
+        allocation_bits = allocation_bits + pulse_bits_q3.ptr[band_index] + (fine_quant.ptr[band_index] * channels << CELT_RATE_BITRES_SHIFT);
+        fine_bits = fine_bits + (fine_quant.ptr[band_index] * channels);
+        pulse_bits = pulse_bits + pulse_bits_q3.ptr[band_index];
+        band = band + 1;
+    }
+
+    return CeltRateFrameAllocation{
+        row: lo,
+        start_band: start_band,
+        end_band: end_band,
+        band_count: end_band - start_band,
+        coded_bands: coded_bands,
+        intensity: intensity,
+        dual_stereo: dual_stereo,
+        consumed_bits: 0,
+        allocation_bits: allocation_bits >> CELT_RATE_BITRES_SHIFT,
+        fine_bits: fine_bits,
+        pulse_bits: pulse_bits,
+        remaining_bits: (total_q3 - allocation_bits) >> CELT_RATE_BITRES_SHIFT,
+        balance_q3: balance_q3,
+    };
+}
+
+export fn celt_rate_encode_allocation(
+    mode: &const CeltMode,
+    channels: i32,
+    lm: i32,
+    start_band: i32,
+    end_band: i32,
+    total_bits: i32,
+    desired_intensity: i32,
+    desired_dual_stereo: i32,
+    enc: &EcEnc,
+    pulse_bits: &[i32],
+    fine_quant: &[i32],
+) !CeltRateFrameAllocation {
+    if total_bits < 0 {
+        return error.CeltRateError;
+    }
+    const consumed: i32 = ec_tell_enc(enc) as i32;
+    if consumed > total_bits {
+        return error.CeltRateError;
+    }
+
+    var offsets: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    var cap: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    var fine_priority: [i32: CELT_BAND_ALLOCATION_COLS] = [0: CELT_BAND_ALLOCATION_COLS];
+    const offsets_slice: &[i32] = &offsets[0:CELT_BAND_ALLOCATION_COLS];
+    const cap_slice: &[i32] = &cap[0:CELT_BAND_ALLOCATION_COLS];
+    const fine_priority_slice: &[i32] = &fine_priority[0:CELT_BAND_ALLOCATION_COLS];
+    try celt_rate_init_caps_q3(mode, channels, lm, cap_slice);
+
+    const frame_bits_q3: i32 = total_bits << CELT_RATE_BITRES_SHIFT;
+    var dyn_total_q3: i32 = frame_bits_q3;
+    var tell_q3: i32 = ec_tell_frac_enc(enc) as i32;
+    var dynalloc_logp: i32 = 6;
+    var band: i32 = start_band;
+    while band < end_band {
+        if band < 0 || band >= (CELT_BAND_ALLOCATION_COLS as i32) {
+            return error.CeltRateError;
+        }
+        const band_index: usize = band as usize;
+        const width: i32 = channels * ((try celt_mode_eband_width_5ms(mode, band)) as i32) << lm;
+        var quanta: i32 = celt_rate_max_i32(6 << CELT_RATE_BITRES_SHIFT, width);
+        quanta = celt_rate_min_i32(width << CELT_RATE_BITRES_SHIFT, quanta);
+        const dynalloc_loop_logp: i32 = dynalloc_logp;
+        const boost: i32 = 0;
+        if tell_q3 + (dynalloc_loop_logp << CELT_RATE_BITRES_SHIFT) < dyn_total_q3 && boost < cap_slice.ptr[band_index] {
+            ec_enc_bit_logp(enc, 0, dynalloc_loop_logp as u32);
+            tell_q3 = ec_tell_frac_enc(enc) as i32;
+        }
+        offsets_slice.ptr[band_index] = boost;
+        band = band + 1;
+    }
+
+    var alloc_trim: i32 = 5;
+    if tell_q3 + (6 << CELT_RATE_BITRES_SHIFT) <= dyn_total_q3 {
+        var trim_icdf: [byte: 11] = CELT_RATE_TRIM_ICDF;
+        ec_enc_icdf(enc, alloc_trim, &trim_icdf[0:11], 7);
+    }
+
+    var available_q3: i32 = frame_bits_q3 - (ec_tell_frac_enc(enc) as i32) - 1;
+    if available_q3 < 0 {
+        available_q3 = 0;
+    }
+
+    var alloc: CeltRateFrameAllocation = try celt_rate_compute_opus_frame_allocation_encode(
+        mode,
+        channels,
+        lm,
+        start_band,
+        end_band,
+        available_q3,
+        offsets_slice,
+        cap_slice,
+        alloc_trim,
+        desired_intensity,
+        desired_dual_stereo,
+        pulse_bits,
+        fine_quant,
+        fine_priority_slice,
+        enc,
+    );
+    alloc.consumed_bits = consumed;
+    return alloc;
 }
 
 export fn celt_rate_decode_allocation(
