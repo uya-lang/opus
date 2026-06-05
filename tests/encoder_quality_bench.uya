@@ -162,3 +162,52 @@ test "practical speech encoder improves objective MSE over baseline" {
     try assert(practical.mse_q8 <= required_mse_q8, "practical speech encoder must clear the 1% objective MSE gate");
     try assert(practical.snr_q8 >= baseline.snr_q8, "practical speech encoder must not reduce objective SNR");
 }
+
+test "practical music encoder improves objective MSE over baseline" {
+    var baseline_config: OpusEncoderConfig = opus_encoder_config_default();
+    baseline_config.sample_rate_hz = 48000;
+    baseline_config.channels = 2;
+    baseline_config.application = OpusApplication.AUDIO;
+    baseline_config.signal_hint = OpusSignalHint.MUSIC;
+    baseline_config.max_bandwidth = OpusBandwidth.FULLBAND;
+    baseline_config.bitrate_bps = 64000;
+    baseline_config.complexity = 0;
+    baseline_config.vbr = true;
+
+    var practical_config: OpusEncoderConfig = opus_encoder_config_default();
+    practical_config.sample_rate_hz = 48000;
+    practical_config.channels = 2;
+    practical_config.application = OpusApplication.AUDIO;
+    practical_config.signal_hint = OpusSignalHint.MUSIC;
+    practical_config.max_bandwidth = OpusBandwidth.FULLBAND;
+    practical_config.bitrate_bps = 64000;
+    practical_config.complexity = 10;
+    practical_config.vbr = true;
+
+    var pcm: [i16: QUALITY_TEST_CELT_PCM_SAMPLES] = [0: QUALITY_TEST_CELT_PCM_SAMPLES];
+    objective_quality_fill_music_48k_stereo(&pcm[0:QUALITY_TEST_CELT_PCM_SAMPLES]);
+
+    var baseline_packet: [byte: QUALITY_TEST_PACKET_BYTES] = [0: QUALITY_TEST_PACKET_BYTES];
+    var baseline_decoded: [i16: QUALITY_TEST_CELT_PCM_SAMPLES] = [0: QUALITY_TEST_CELT_PCM_SAMPLES];
+    const baseline: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &baseline_config,
+        &pcm[0:QUALITY_TEST_CELT_PCM_SAMPLES],
+        QUALITY_TEST_CELT_FRAME_SAMPLES as i32,
+        &baseline_packet[0:QUALITY_TEST_PACKET_BYTES],
+        &baseline_decoded[0:QUALITY_TEST_CELT_PCM_SAMPLES],
+    );
+
+    var practical_packet: [byte: QUALITY_TEST_PACKET_BYTES] = [0: QUALITY_TEST_PACKET_BYTES];
+    var practical_decoded: [i16: QUALITY_TEST_CELT_PCM_SAMPLES] = [0: QUALITY_TEST_CELT_PCM_SAMPLES];
+    const practical: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &practical_config,
+        &pcm[0:QUALITY_TEST_CELT_PCM_SAMPLES],
+        QUALITY_TEST_CELT_FRAME_SAMPLES as i32,
+        &practical_packet[0:QUALITY_TEST_PACKET_BYTES],
+        &practical_decoded[0:QUALITY_TEST_CELT_PCM_SAMPLES],
+    );
+
+    const required_mse_q8: u64 = (baseline.mse_q8 * 99) / 100;
+    try assert(practical.mse_q8 <= required_mse_q8, "practical music encoder must clear the 1% objective MSE gate");
+    try assert(practical.snr_q8 >= baseline.snr_q8, "practical music encoder must not reduce objective SNR");
+}
