@@ -1,0 +1,62 @@
+use libc.fprintf;
+use libc.fflush;
+use libc.fwrite;
+use libc.stderr;
+use libc.stdout;
+use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_encode_i16;
+use src.opus.api.encoder.encoder_init;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusSignalHint;
+use src.opus.core.types.opus_encoder_config_default;
+
+const SILK_BASIC_PACKET_FRAME_SAMPLES: i32 = 320;
+const SILK_BASIC_PACKET_MAX_BYTES: usize = 1275;
+
+var encoder_storage: OpusEncoder = OpusEncoder{};
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+
+    encoder_init(&encoder_storage, &config) catch {
+        _ = fprintf(stderr, "encode-silk-basic-packet: encoder init failed\n" as *byte);
+        return 1;
+    };
+
+    var pcm: [i16: SILK_BASIC_PACKET_FRAME_SAMPLES] = [0: SILK_BASIC_PACKET_FRAME_SAMPLES];
+    var packet: [byte: SILK_BASIC_PACKET_MAX_BYTES] = [0: SILK_BASIC_PACKET_MAX_BYTES];
+    const encoded: i32 = encoder_encode_i16(
+        &encoder_storage,
+        &pcm[0:SILK_BASIC_PACKET_FRAME_SAMPLES],
+        SILK_BASIC_PACKET_FRAME_SAMPLES,
+        &packet[0:SILK_BASIC_PACKET_MAX_BYTES],
+    ) catch {
+        _ = fprintf(stderr, "encode-silk-basic-packet: encode failed\n" as *byte);
+        return 1;
+    };
+    if encoded <= 0 || encoded > (SILK_BASIC_PACKET_MAX_BYTES as i32) {
+        _ = fprintf(stderr, "encode-silk-basic-packet: encoded packet length is invalid\n" as *byte);
+        return 1;
+    }
+
+    const written: usize = fwrite(&packet[0] as &const byte, 1, encoded as usize, stdout);
+    if written != (encoded as usize) {
+        _ = fprintf(stderr, "encode-silk-basic-packet: packet write failed\n" as *byte);
+        return 1;
+    }
+    if fflush(stdout) != 0 {
+        _ = fprintf(stderr, "encode-silk-basic-packet: stdout flush failed\n" as *byte);
+        return 1;
+    }
+    return 0;
+}
