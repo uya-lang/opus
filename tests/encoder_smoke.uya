@@ -1,5 +1,8 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.api.decoder.OpusDecoder;
+use src.opus.api.decoder.decoder_decode_i16;
+use src.opus.api.decoder.decoder_init;
 use src.opus.api.encoder.OpusEncoder;
 use src.opus.api.encoder.encoder_celt_is_initialized;
 use src.opus.api.encoder.encoder_encode_i16;
@@ -7,6 +10,7 @@ use src.opus.api.encoder.encoder_init;
 use src.opus.api.encoder.encoder_silk_is_initialized;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusDecoderConfig;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.OpusMode;
 use src.opus.core.types.OpusSignalHint;
@@ -89,6 +93,38 @@ fn assert_packet_shape(packet: &[byte], encoded: i32, mode: OpusMode, bandwidth:
     try assert_eq_i32(info.payload_len as i32, encoded - 1);
 }
 
+fn assert_celt_packet_decodes_with_api(packet: &[byte], encoded: i32) !void {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 48000, channels: 2 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: ENCODER_SMOKE_CELT_PCM_SAMPLES] = [777: ENCODER_SMOKE_CELT_PCM_SAMPLES];
+    const decoded: i32 = try decoder_decode_i16(
+        &decoder,
+        &packet[0:(encoded as usize)],
+        &pcm[0:ENCODER_SMOKE_CELT_PCM_SAMPLES],
+        ENCODER_SMOKE_CELT_FRAME_SAMPLES,
+        false,
+    );
+    try assert_eq_i32(decoded, ENCODER_SMOKE_CELT_FRAME_SAMPLES);
+}
+
+fn assert_silk_packet_decodes_with_api(packet: &[byte], encoded: i32) !void {
+    var decoder: OpusDecoder = OpusDecoder{};
+    const config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: 16000, channels: 1 };
+    try decoder_init(&decoder, &config);
+
+    var pcm: [i16: ENCODER_SMOKE_SILK_FRAME_SAMPLES] = [777: ENCODER_SMOKE_SILK_FRAME_SAMPLES];
+    const decoded: i32 = try decoder_decode_i16(
+        &decoder,
+        &packet[0:(encoded as usize)],
+        &pcm[0:ENCODER_SMOKE_SILK_FRAME_SAMPLES],
+        ENCODER_SMOKE_SILK_FRAME_SAMPLES,
+        false,
+    );
+    try assert_eq_i32(decoded, ENCODER_SMOKE_SILK_FRAME_SAMPLES);
+}
+
 test "encoder smoke encodes sine-like fullband stereo input" {
     var encoder: OpusEncoder = OpusEncoder{};
     var config: OpusEncoderConfig = opus_encoder_config_default();
@@ -107,6 +143,7 @@ test "encoder smoke encodes sine-like fullband stereo input" {
     try assert(encoder_celt_is_initialized(&encoder), "sine smoke must use the CELT basic profile");
     try assert(!encoder_silk_is_initialized(&encoder), "sine smoke must not use SILK");
     try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.CELT, OpusBandwidth.FULLBAND, 2);
+    try assert_celt_packet_decodes_with_api(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded);
 }
 
 test "encoder smoke encodes music-like fullband stereo input" {
@@ -127,6 +164,7 @@ test "encoder smoke encodes music-like fullband stereo input" {
     try assert(encoder_celt_is_initialized(&encoder), "music smoke must use the CELT basic profile");
     try assert(!encoder_silk_is_initialized(&encoder), "music smoke must not use SILK");
     try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.CELT, OpusBandwidth.FULLBAND, 2);
+    try assert_celt_packet_decodes_with_api(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded);
 }
 
 test "encoder smoke encodes voice-like wideband mono input" {
@@ -147,6 +185,7 @@ test "encoder smoke encodes voice-like wideband mono input" {
     try assert(!encoder_celt_is_initialized(&encoder), "voice smoke must not use CELT");
     try assert(encoder_silk_is_initialized(&encoder), "voice smoke must use the SILK basic profile");
     try assert_packet_shape(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded, OpusMode.SILK, OpusBandwidth.WIDEBAND, 1);
+    try assert_silk_packet_decodes_with_api(&packet[0:ENCODER_SMOKE_PACKET_BYTES], encoded);
 
     var decoder: SilkDecoderState = SilkDecoderState{};
     var out_q14: [i32: ENCODER_SMOKE_SILK_FRAME_SAMPLES] = [0: ENCODER_SMOKE_SILK_FRAME_SAMPLES];
