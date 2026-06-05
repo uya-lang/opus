@@ -50,6 +50,13 @@ struct EncoderFrameDurationDecision {
     frame_count: u8,
 }
 
+struct EncoderSignalFeatures {
+    average_abs: u32,
+    average_delta: u32,
+    zero_cross_q15: u32,
+    stereo_side_q8: u32,
+}
+
 export struct OpusEncoder {
     storage: [usize: OPUS_ENCODER_STORAGE_WORDS],
 }
@@ -125,6 +132,34 @@ fn encoder_effective_encode_config(config: &const OpusEncoderConfig) OpusEncoder
     return effective;
 }
 
+fn encoder_abs_i16(value: i16) u32 {
+    const wide: i32 = value as i32;
+    if wide < 0 {
+        return (-wide) as u32;
+    }
+    return wide as u32;
+}
+
+fn encoder_abs_i32(value: i32) u32 {
+    if value < 0 {
+        return (-value) as u32;
+    }
+    return value as u32;
+}
+
+fn encoder_sign_changed(left: i16, right: i16) bool {
+    if left == 0 || right == 0 {
+        return false;
+    }
+    if left < 0 && right > 0 {
+        return true;
+    }
+    if left > 0 && right < 0 {
+        return true;
+    }
+    return false;
+}
+
 fn encoder_mode_decision_make(primary: OpusMode, allow_fallback: bool) EncoderModeDecision {
     var fallback: OpusMode = OpusMode.SILK;
     if primary == OpusMode.SILK {
@@ -177,6 +212,93 @@ fn encoder_input_samples_for_48k(config: &const OpusEncoderConfig, frame_size_48
     return (numerator / denominator) as usize;
 }
 
+fn encoder_signal_features_i16(config: &const OpusEncoderConfig, pcm: &[const i16], frame_size: i32) !EncoderSignalFeatures {
+    if frame_size <= 1 {
+        return error.EncoderApiError;
+    }
+
+    const frame_samples: usize = frame_size as usize;
+    const channels: usize = config.channels as usize;
+    const required_pcm: usize = frame_samples * channels;
+    if channels == 0 || channels > 2 || pcm.len < required_pcm {
+        return error.EncoderApiError;
+    }
+
+    var sum_abs: u64 = 0;
+    var sum_delta: u64 = 0;
+    var zero_crossings: u64 = 0;
+
+    var channel: usize = 0;
+    while channel < channels {
+        var prev: i16 = pcm.ptr[channel];
+        sum_abs = sum_abs + (encoder_abs_i16(prev) as u64);
+
+        var frame: usize = 1;
+        while frame < frame_samples {
+            const current: i16 = pcm.ptr[(frame * channels) + channel];
+            sum_abs = sum_abs + (encoder_abs_i16(current) as u64);
+            sum_delta = sum_delta + (encoder_abs_i32((current as i32) - (prev as i32)) as u64);
+            if encoder_sign_changed(prev, current) {
+                zero_crossings = zero_crossings + 1;
+            }
+            prev = current;
+            frame = frame + 1;
+        }
+        channel = channel + 1;
+    }
+
+    var side_abs: u64 = 0;
+    var mid_abs: u64 = 0;
+    if channels == 2 {
+        var frame2: usize = 0;
+        while frame2 < frame_samples {
+            const left: i32 = pcm.ptr[frame2 * 2] as i32;
+            const right: i32 = pcm.ptr[(frame2 * 2) + 1] as i32;
+            mid_abs = mid_abs + (encoder_abs_i32(left + right) as u64);
+            side_abs = side_abs + (encoder_abs_i32(left - right) as u64);
+            frame2 = frame2 + 1;
+        }
+    }
+
+    const sample_count: u64 = required_pcm as u64;
+    const delta_count: u64 = ((frame_samples - 1) * channels) as u64;
+    var stereo_side_q8: u32 = 0;
+    if channels == 2 && side_abs > 0 {
+        if mid_abs == 0 {
+            stereo_side_q8 = 1024;
+        } else {
+            var ratio: u64 = (side_abs * 256) / mid_abs;
+            if ratio > 1024 {
+                ratio = 1024;
+            }
+            stereo_side_q8 = ratio as u32;
+        }
+    }
+
+    return EncoderSignalFeatures{
+        average_abs: (sum_abs / sample_count) as u32,
+        average_delta: (sum_delta / delta_count) as u32,
+        zero_cross_q15: ((zero_crossings * 32768) / delta_count) as u32,
+        stereo_side_q8: stereo_side_q8,
+    };
+}
+
+fn encoder_classify_signal_features(config: &const OpusEncoderConfig, features: &const EncoderSignalFeatures) OpusSignalHint {
+    if features.average_abs < 32 {
+        return OpusSignalHint.VOICE;
+    }
+    if config.channels == 2 && features.stereo_side_q8 >= 96 {
+        return OpusSignalHint.MUSIC;
+    }
+    if features.zero_cross_q15 >= 6000 && features.average_delta >= features.average_abs {
+        return OpusSignalHint.MUSIC;
+    }
+    if config.application == OpusApplication.AUDIO && config.sample_rate_hz >= 24000 && features.average_delta >= features.average_abs * 2 {
+        return OpusSignalHint.MUSIC;
+    }
+    return OpusSignalHint.VOICE;
+}
+
 export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
     validate_encoder_config(config) catch {
         return error.EncoderApiError;
@@ -190,6 +312,19 @@ export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
     if !encoder_bandwidth_is_valid(config.max_bandwidth) {
         return error.EncoderApiError;
     }
+}
+
+export fn encoder_classify_signal_i16(config: &const OpusEncoderConfig, pcm: &[const i16], frame_size: i32) !OpusSignalHint {
+    try encoder_validate_config(config);
+    const features: EncoderSignalFeatures = try encoder_signal_features_i16(config, pcm, frame_size);
+    return encoder_classify_signal_features(config, &features);
+}
+
+fn encoder_effective_signal_hint_i16(config: &const OpusEncoderConfig, pcm: &[const i16], frame_size: i32) !OpusSignalHint {
+    if config.signal_hint != OpusSignalHint.AUTO {
+        return config.signal_hint;
+    }
+    return encoder_classify_signal_i16(config, pcm, frame_size);
 }
 
 fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConfig) !void {
@@ -310,9 +445,11 @@ fn encoder_encode_decided_duration_i16(encoder: &OpusEncoderState, mode: OpusMod
 }
 
 fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
-    const effective_config: OpusEncoderConfig = encoder_effective_encode_config(&encoder.config);
-    const decision: EncoderModeDecision = encoder_decide_mode(&effective_config);
+    var effective_config: OpusEncoderConfig = encoder_effective_encode_config(&encoder.config);
     const frame_decision: EncoderFrameDurationDecision = try encoder_decide_frame_duration(frame_size_48k);
+    const input_frame_samples: usize = try encoder_input_samples_for_48k(&effective_config, frame_size_48k);
+    effective_config.signal_hint = try encoder_effective_signal_hint_i16(&effective_config, pcm, input_frame_samples as i32);
+    const decision: EncoderModeDecision = encoder_decide_mode(&effective_config);
     const primary_encoded: !i32 = encoder_encode_decided_duration_i16(encoder, decision.primary, &effective_config, pcm, &frame_decision, packet_out);
     match primary_encoded {
         encoded => { return encoded; }

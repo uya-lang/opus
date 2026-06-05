@@ -4,6 +4,7 @@ use src.opus.api.encoder.EncoderApiError;
 use src.opus.api.encoder.EncoderApiUnsupported;
 use src.opus.api.encoder.OPUS_ENCODER_STORAGE_WORDS;
 use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_classify_signal_i16;
 use src.opus.api.encoder.encoder_encode_i16;
 use src.opus.api.encoder.encoder_application;
 use src.opus.api.encoder.encoder_channel_count;
@@ -27,6 +28,42 @@ fn fill_constant_i16(values: &[i16], sample: i16) void {
     while i < values.len {
         values.ptr[i] = sample;
         i = i + 1;
+    }
+}
+
+fn fill_voice_like_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        const phase: usize = i % (80 as usize);
+        var sample: i32 = 0;
+        if phase < 20 {
+            sample = 10000 - ((phase as i32) * 350);
+        } else if phase < 40 {
+            sample = 2500 - (((phase - 20) as i32) * 120);
+        } else if phase < 60 {
+            sample = -1800;
+        } else {
+            sample = 900;
+        }
+        values.ptr[i] = sample as i16;
+        i = i + 1;
+    }
+}
+
+fn fill_music_like_stereo_i16(values: &[i16]) void {
+    const wave: [i16: 32] = [
+        0, 1951, 3827, 5556, 7071, 8315, 9239, 9808,
+        10000, 9808, 9239, 8315, 7071, 5556, 3827, 1951,
+        0, -1951, -3827, -5556, -7071, -8315, -9239, -9808,
+        -10000, -9808, -9239, -8315, -7071, -5556, -3827, -1951,
+    ];
+    var frame: usize = 0;
+    while (frame * 2) + 1 < values.len {
+        const bass: i32 = (wave[frame % (32 as usize)] as i32) / 2;
+        const lead: i32 = (wave[(frame * 3) % (32 as usize)] as i32) / 3;
+        values.ptr[frame * 2] = (bass + lead) as i16;
+        values.ptr[(frame * 2) + 1] = (bass - lead) as i16;
+        frame = frame + 1;
     }
 }
 
@@ -390,6 +427,28 @@ test "encoder mode decision keeps restricted lowdelay on CELT path" {
     };
     try assert(!encoder_silk_is_initialized(&encoder), "restricted lowdelay must leave SILK state untouched");
     try assert(!encoder_celt_is_initialized(&encoder), "unsupported CELT profile must not mark CELT state initialized");
+}
+
+test "encoder signal classifier distinguishes coarse voice and music input" {
+    var voice_config: OpusEncoderConfig = opus_encoder_config_default();
+    voice_config.sample_rate_hz = 16000;
+    voice_config.channels = 1;
+    voice_config.signal_hint = OpusSignalHint.AUTO;
+    voice_config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_voice_like_i16(&voice_pcm[0:320]);
+    const voice_class: OpusSignalHint = try encoder_classify_signal_i16(&voice_config, &voice_pcm[0:320], 320);
+    try assert_eq_i32(voice_class as i32, OpusSignalHint.VOICE as i32);
+
+    var music_config: OpusEncoderConfig = opus_encoder_config_default();
+    music_config.sample_rate_hz = 48000;
+    music_config.channels = 2;
+    music_config.signal_hint = OpusSignalHint.AUTO;
+    music_config.max_bandwidth = OpusBandwidth.FULLBAND;
+    var music_pcm: [i16: 1920] = [0: 1920];
+    fill_music_like_stereo_i16(&music_pcm[0:1920]);
+    const music_class: OpusSignalHint = try encoder_classify_signal_i16(&music_config, &music_pcm[0:1920], 960);
+    try assert_eq_i32(music_class as i32, OpusSignalHint.MUSIC as i32);
 }
 
 test "encoder frame duration decision packetizes 40ms voice as two SILK frames" {

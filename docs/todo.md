@@ -483,7 +483,7 @@
 - [x] 实现 bandwidth decision。
 - [x] 实现 mode decision。
 - [x] 实现 frame duration decision。
-- [ ] 实现语音/音乐粗分类。
+- [x] 实现语音/音乐粗分类。
 - [ ] 实现 SILK VAD。
 - [ ] 实现 SILK pitch analysis。
 - [ ] 实现 SILK gain control。
