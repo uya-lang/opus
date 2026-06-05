@@ -20,6 +20,11 @@ test "celt basic encoder profile records fullband frame layout" {
     try assert_eq_i32(profile.channels as i32, 2);
     try assert_eq_i32(profile.frame_size_48k, 960);
     try assert_eq_i32(profile.bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+    try assert_eq_i32(profile.frame_duration_us as i32, 20000);
+    try assert_eq_i32(profile.lm, 3);
+    try assert_eq_i32(profile.end_band, 21);
+    try assert_eq_i32(profile.toc_config_index as i32, 31);
+    try assert_eq_i32(profile.toc_byte_code0 as i32, 252);
 }
 
 test "celt basic encoder profile separates invalid and unsupported configs" {
@@ -44,6 +49,32 @@ test "celt basic encoder profile separates invalid and unsupported configs" {
     match invalid_frame {
         error.CeltEncoderError => {}
         else => { try assert(false, "CELT encoder profile must reject invalid frame durations"); }
+    };
+}
+
+test "celt basic encoder profile only supports fullband 20ms stereo shape" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const mono_fullband: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 960);
+    match mono_fullband {
+        error.CeltEncoderUnsupported => {}
+        else => { try assert(false, "Basic CELT encoder should start with stereo only"); }
+    };
+
+    config.channels = 2;
+    const ten_ms: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 480);
+    match ten_ms {
+        error.CeltEncoderUnsupported => {}
+        else => { try assert(false, "Basic CELT encoder should start with 20ms frames only"); }
+    };
+
+    config.sample_rate_hz = 24000;
+    const non_48k_fullband: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 960);
+    match non_48k_fullband {
+        error.CeltEncoderUnsupported => {}
+        else => { try assert(false, "Basic CELT fullband profile requires 48k input for now"); }
     };
 }
 

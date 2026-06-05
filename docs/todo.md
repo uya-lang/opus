@@ -461,7 +461,7 @@
 - [x] 实现 `encoder_encode_i16` 框架。
 - [x] 建立 CELT-only Basic encoder 状态与 profile 选择。
 - [x] 将 CELT-only Basic encoder 分派接入 `encoder_encode_i16`。
-- [ ] 支持 FB/20ms/stereo。
+- [x] 支持 FB/20ms/stereo。
 - [ ] 实现基本 energy quantization。
 - [ ] 实现合法 PVQ 输出。
 - [ ] 实现 range encode 集成。

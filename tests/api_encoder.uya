@@ -134,6 +134,7 @@ test "encoder encode i16 framework validates requests before unsupported modes" 
         error.EncoderApiUnsupported => {}
         else => { try assert(false, "encoder encode framework must leave actual encoding to later tasks"); }
     };
+    try assert(!encoder_celt_is_initialized(&encoder), "mono fullband requests are outside the Basic CELT stereo profile");
 
     const bad_frame: !i32 = encoder_encode_i16(&encoder, &pcm[0:960], 123, &packet[0:1275]);
     match bad_frame {

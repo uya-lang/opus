@@ -1,3 +1,8 @@
+use src.opus.celt.mode.CELT_BANDWIDTH_FB_END_BAND;
+use src.opus.celt.mode.celt_mode_end_band_for_bandwidth;
+use src.opus.celt.mode.celt_mode_for_sample_rate;
+use src.opus.celt.mode.celt_mode_lm_from_frame_size;
+use src.opus.celt.mode.CeltMode;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.errors.validate_sample_rate;
@@ -7,11 +12,22 @@ use src.opus.core.types.OpusEncoderConfig;
 export error CeltEncoderError;
 export error CeltEncoderUnsupported;
 
+export const CELT_BASIC_ENCODER_FB_20MS_FRAME_SIZE_48K: i32 = 960;
+export const CELT_BASIC_ENCODER_FB_20MS_DURATION_US: u32 = 20000;
+export const CELT_BASIC_ENCODER_FB_20MS_LM: i32 = 3;
+export const CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_CONFIG_INDEX: u8 = 31;
+export const CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_BYTE_CODE0: byte = 252;
+
 export struct CeltBasicEncoderProfile {
     sample_rate_hz: u32,
     channels: u8,
     frame_size_48k: i32,
     bandwidth: OpusBandwidth,
+    frame_duration_us: u32,
+    lm: i32,
+    end_band: i32,
+    toc_config_index: u8,
+    toc_byte_code0: byte,
 }
 
 export struct CeltEncoderState {
@@ -35,12 +51,39 @@ export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
     if config.max_bandwidth != OpusBandwidth.FULLBAND {
         return error.CeltEncoderUnsupported;
     }
+    if config.channels != 2 {
+        return error.CeltEncoderUnsupported;
+    }
+    if frame_size_48k != CELT_BASIC_ENCODER_FB_20MS_FRAME_SIZE_48K {
+        return error.CeltEncoderUnsupported;
+    }
+
+    const mode: CeltMode = celt_mode_for_sample_rate(config.sample_rate_hz) catch {
+        return error.CeltEncoderUnsupported;
+    };
+    const lm: i32 = celt_mode_lm_from_frame_size(&mode, frame_size_48k) catch {
+        return error.CeltEncoderUnsupported;
+    };
+    if lm != CELT_BASIC_ENCODER_FB_20MS_LM {
+        return error.CeltEncoderUnsupported;
+    }
+    const end_band: i32 = celt_mode_end_band_for_bandwidth(&mode, config.max_bandwidth) catch {
+        return error.CeltEncoderUnsupported;
+    };
+    if end_band != CELT_BANDWIDTH_FB_END_BAND {
+        return error.CeltEncoderUnsupported;
+    }
 
     return CeltBasicEncoderProfile{
         sample_rate_hz: config.sample_rate_hz,
         channels: config.channels,
         frame_size_48k: frame_size_48k,
         bandwidth: config.max_bandwidth,
+        frame_duration_us: CELT_BASIC_ENCODER_FB_20MS_DURATION_US,
+        lm: lm,
+        end_band: end_band,
+        toc_config_index: CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_CONFIG_INDEX,
+        toc_byte_code0: CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_BYTE_CODE0,
     };
 }
 
