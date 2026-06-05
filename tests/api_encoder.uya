@@ -370,3 +370,24 @@ test "encoder bandwidth decision caps fullband request to wideband for 16k mono"
     try assert_eq_i32(info.channels as i32, 1);
     try assert(encoder_silk_is_initialized(&encoder), "bandwidth decision must route 16k mono requests into SILK");
 }
+
+test "encoder mode decision keeps restricted lowdelay on CELT path" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.RESTRICTED_LOWDELAY;
+    config.signal_hint = OpusSignalHint.AUTO;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 320] = [0: 320];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: !i32 = encoder_encode_i16(&encoder, &pcm[0:320], 320, &packet[0:1275]);
+    match encoded {
+        error.EncoderApiUnsupported => {}
+        else => { try assert(false, "restricted lowdelay mode decision must not fall back to SILK"); }
+    };
+    try assert(!encoder_silk_is_initialized(&encoder), "restricted lowdelay must leave SILK state untouched");
+    try assert(!encoder_celt_is_initialized(&encoder), "unsupported CELT profile must not mark CELT state initialized");
+}

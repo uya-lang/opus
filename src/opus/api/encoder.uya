@@ -11,6 +11,7 @@ use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusMode;
 use src.opus.core.types.OpusSignalHint;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderState;
@@ -30,6 +31,12 @@ struct OpusEncoderState {
     celt: CeltEncoderState,
     silk: SilkEncoderState,
     initialized: bool,
+}
+
+struct EncoderModeDecision {
+    primary: OpusMode,
+    fallback: OpusMode,
+    allow_fallback: bool,
 }
 
 export struct OpusEncoder {
@@ -105,6 +112,33 @@ fn encoder_effective_encode_config(config: &const OpusEncoderConfig) OpusEncoder
     var effective: OpusEncoderConfig = *config;
     effective.max_bandwidth = encoder_bandwidth_min(config.max_bandwidth, encoder_sample_rate_bandwidth_cap(config.sample_rate_hz));
     return effective;
+}
+
+fn encoder_mode_decision_make(primary: OpusMode, allow_fallback: bool) EncoderModeDecision {
+    var fallback: OpusMode = OpusMode.SILK;
+    if primary == OpusMode.SILK {
+        fallback = OpusMode.CELT;
+    }
+    return EncoderModeDecision{ primary: primary, fallback: fallback, allow_fallback: allow_fallback };
+}
+
+fn encoder_decide_mode(config: &const OpusEncoderConfig) EncoderModeDecision {
+    if config.application == OpusApplication.RESTRICTED_LOWDELAY {
+        return encoder_mode_decision_make(OpusMode.CELT, false);
+    }
+    if config.signal_hint == OpusSignalHint.MUSIC {
+        return encoder_mode_decision_make(OpusMode.CELT, true);
+    }
+    if config.max_bandwidth >= OpusBandwidth.SUPERWIDEBAND {
+        return encoder_mode_decision_make(OpusMode.CELT, true);
+    }
+    if config.channels == 1 {
+        return encoder_mode_decision_make(OpusMode.SILK, true);
+    }
+    if config.application == OpusApplication.VOIP || config.signal_hint == OpusSignalHint.VOICE {
+        return encoder_mode_decision_make(OpusMode.SILK, true);
+    }
+    return encoder_mode_decision_make(OpusMode.CELT, true);
 }
 
 export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
@@ -189,15 +223,29 @@ fn encoder_encode_silk_i16(encoder: &OpusEncoderState, config: &const OpusEncode
     };
 }
 
+fn encoder_encode_mode_i16(encoder: &OpusEncoderState, mode: OpusMode, config: &const OpusEncoderConfig, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
+    if mode == OpusMode.SILK {
+        return encoder_encode_silk_i16(encoder, config, pcm, frame_size_48k, packet_out);
+    }
+    if mode == OpusMode.CELT {
+        return encoder_encode_celt_i16(encoder, config, pcm, frame_size_48k, packet_out);
+    }
+    return error.EncoderApiUnsupported;
+}
+
 fn encoder_encode_basic_i16(encoder: &OpusEncoderState, pcm: &[const i16], frame_size_48k: i32, packet_out: &[byte]) !i32 {
     const effective_config: OpusEncoderConfig = encoder_effective_encode_config(&encoder.config);
-    const silk_encoded: !i32 = encoder_encode_silk_i16(encoder, &effective_config, pcm, frame_size_48k, packet_out);
-    match silk_encoded {
+    const decision: EncoderModeDecision = encoder_decide_mode(&effective_config);
+    const primary_encoded: !i32 = encoder_encode_mode_i16(encoder, decision.primary, &effective_config, pcm, frame_size_48k, packet_out);
+    match primary_encoded {
         encoded => { return encoded; }
         error.EncoderApiUnsupported => {}
         error.EncoderApiError => { return error.EncoderApiError; }
     };
-    return encoder_encode_celt_i16(encoder, &effective_config, pcm, frame_size_48k, packet_out);
+    if !decision.allow_fallback {
+        return error.EncoderApiUnsupported;
+    }
+    return encoder_encode_mode_i16(encoder, decision.fallback, &effective_config, pcm, frame_size_48k, packet_out);
 }
 
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {
