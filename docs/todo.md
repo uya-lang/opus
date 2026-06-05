@@ -463,7 +463,7 @@
 - [x] 将 CELT-only Basic encoder 分派接入 `encoder_encode_i16`。
 - [x] 支持 FB/20ms/stereo。
 - [x] 实现基本 energy quantization。
-- [ ] 实现合法 PVQ 输出。
+- [x] 实现合法 PVQ 输出。
 - [ ] 实现 range encode 集成。
 - [ ] 实现 SILK-only Basic encoder 占位或最小合法路径。
 - [ ] 支持 WB/20ms/mono。

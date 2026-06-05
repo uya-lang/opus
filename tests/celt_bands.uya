@@ -10,6 +10,8 @@ use src.opus.celt.bands.celt_decode_intensity_start_band;
 use src.opus.celt.bands.celt_intensity_stereo_weights_q14;
 use src.opus.celt.bands.celt_decode_band_shape;
 use src.opus.celt.bands.celt_decode_band_shapes;
+use src.opus.celt.bands.celt_encode_band_shape;
+use src.opus.celt.bands.celt_encode_band_shapes;
 use src.opus.celt.cwrs.celt_encode_pulses;
 use src.opus.entropy.range_dec.EcDec;
 use src.opus.entropy.range_dec.ec_dec_check;
@@ -55,6 +57,31 @@ test "celt band shape decode reads cwrs rank from range coder" {
     try assert_eq_i32(pulses[1], -1);
     try assert_eq_i32(shape_q15[0] as i32, -23171);
     try assert_eq_i32(shape_q15[1] as i32, -23171);
+}
+
+test "celt band shape encode writes cwrs rank readable by decoder" {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+    var expected: [i32: 2] = [-1, -1];
+    var encoded_shape: [i16: 2] = [0: 2];
+    const encoded: i32 = try celt_encode_band_shape(&enc, 2, 4, &expected[0:2], &encoded_shape[0:2]);
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var pulses: [i32: 2] = [0: 2];
+    var decoded_shape: [i16: 2] = [0: 2];
+    const decoded: i32 = try celt_decode_band_shape(&dec, 2, 4, &pulses[0:2], &decoded_shape[0:2]);
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(encoded, 2);
+    try assert_eq_i32(decoded, 2);
+    try assert_eq_i32(pulses[0], expected[0]);
+    try assert_eq_i32(pulses[1], expected[1]);
+    try assert_eq_i32(encoded_shape[0] as i32, decoded_shape[0] as i32);
+    try assert_eq_i32(encoded_shape[1] as i32, decoded_shape[1] as i32);
 }
 
 test "celt band shape decode clears zero budget bands" {
@@ -103,6 +130,64 @@ test "celt band shapes decode consecutive band slices" {
     try assert_eq_i32(shape_q15[0] as i32, 32767);
     try assert_eq_i32(shape_q15[1] as i32, 0);
     try assert_eq_i32(shape_q15[2] as i32, 0);
+}
+
+test "celt band shapes encode consecutive legal PVQ bands" {
+    var packet: [byte: 16] = [0: 16];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:16]);
+    var dims: [i32: 2] = [2, 1];
+    var bits: [i32: 2] = [2, 0];
+    var expected: [i32: 3] = [1, 0, 0];
+    var encoded_shape: [i16: 3] = [9: 3];
+    const encoded: i32 = try celt_encode_band_shapes(
+        &enc,
+        0,
+        2,
+        &dims[0:2],
+        &bits[0:2],
+        &expected[0:3],
+        &encoded_shape[0:3],
+    );
+    try ec_enc_check(&enc);
+    _ = try ec_enc_done(&enc);
+
+    var dec: EcDec = EcDec{};
+    ec_dec_init(&dec, &packet[0:16]);
+    var pulses: [i32: 3] = [9: 3];
+    var decoded_shape: [i16: 3] = [9: 3];
+    const decoded: i32 = try celt_decode_band_shapes(
+        &dec,
+        0,
+        2,
+        &dims[0:2],
+        &bits[0:2],
+        &pulses[0:3],
+        &decoded_shape[0:3],
+    );
+    try ec_dec_check(&dec);
+
+    try assert_eq_i32(encoded, 1);
+    try assert_eq_i32(decoded, 1);
+    try assert_eq_i32(pulses[0], expected[0]);
+    try assert_eq_i32(pulses[1], expected[1]);
+    try assert_eq_i32(pulses[2], expected[2]);
+    try assert_eq_i32(encoded_shape[0] as i32, decoded_shape[0] as i32);
+    try assert_eq_i32(encoded_shape[1] as i32, decoded_shape[1] as i32);
+    try assert_eq_i32(encoded_shape[2] as i32, decoded_shape[2] as i32);
+}
+
+test "celt band shape encode rejects illegal pulse sums" {
+    var packet: [byte: 8] = [0: 8];
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, &packet[0:8]);
+    var pulses: [i32: 2] = [2, 0];
+    var shape_q15: [i16: 2] = [0: 2];
+    const bad_sum: !i32 = celt_encode_band_shape(&enc, 2, 2, &pulses[0:2], &shape_q15[0:2]);
+    match bad_sum {
+        error.CeltBandsError => {}
+        else => { try assert(false, "PVQ encode must reject vectors whose pulse sum does not match the budget"); }
+    }
 }
 
 test "celt intensity start band decodes bounded threshold" {
