@@ -40,6 +40,10 @@ export const CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_BYTE_CODE0: byte = 252;
 const CELT_BASIC_ENCODER_TARGET_PAYLOAD_BYTES: usize = 256;
 const CELT_BASIC_ENCODER_MAX_SPECTRAL: usize = 1600;
 const CELT_BASIC_ENCODER_ACTIVITY_FULL_SCALE: u64 = 16384;
+const CELT_BASIC_ENCODER_TRANSIENT_BLOCKS: i32 = 8;
+const CELT_BASIC_ENCODER_TRANSIENT_MIN_ENERGY: u32 = 2048;
+const CELT_BASIC_ENCODER_TRANSIENT_MIN_DELTA: u32 = 512;
+const CELT_BASIC_ENCODER_TRANSIENT_RATIO_NUM: u32 = 4;
 const CELT_ENCODER_SPREAD_NORMAL_SYMBOL: i32 = 2;
 const CELT_ENCODER_SPREAD_ICDF_FTB: u32 = 5;
 const CELT_ENCODER_MAX_PVQ_BITS_PER_BAND: i32 = 8;
@@ -62,6 +66,13 @@ export struct CeltEncoderState {
     profile: CeltBasicEncoderProfile,
     energy: CeltEnergyQuantState,
     initialized: bool,
+}
+
+export struct CeltEncoderTransientAnalysis {
+    is_transient: bool,
+    peak_block: i32,
+    peak_energy: u32,
+    previous_energy: u32,
 }
 
 export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !CeltBasicEncoderProfile {
@@ -152,6 +163,78 @@ fn celt_encoder_abs_i16(value: i16) u32 {
         return (-wide) as u32;
     }
     return wide as u32;
+}
+
+fn celt_encoder_block_avg_abs_i16(pcm: &[const i16], start_frame: usize, block_frames: usize, channels: usize) !u32 {
+    if block_frames == 0 || channels == 0 || channels > 2 {
+        return error.CeltEncoderError;
+    }
+    const start: usize = start_frame * channels;
+    const count: usize = block_frames * channels;
+    if pcm.len < start + count {
+        return error.CeltEncoderError;
+    }
+
+    var sum_abs: u64 = 0;
+    var i: usize = 0;
+    while i < count {
+        sum_abs = sum_abs + (celt_encoder_abs_i16(pcm.ptr[start + i]) as u64);
+        i = i + 1;
+    }
+    return (sum_abs / (count as u64)) as u32;
+}
+
+export fn celt_encoder_detect_transient_i16(pcm: &[const i16], frame_size_48k: i32, channels: u8) !CeltEncoderTransientAnalysis {
+    if frame_size_48k <= 0 || channels == 0 || channels > 2 {
+        return error.CeltEncoderError;
+    }
+    if (frame_size_48k % CELT_BASIC_ENCODER_TRANSIENT_BLOCKS) != 0 {
+        return error.CeltEncoderError;
+    }
+    const frame_count: usize = frame_size_48k as usize;
+    const channel_count: usize = channels as usize;
+    if frame_count * channel_count > pcm.len {
+        return error.CeltEncoderError;
+    }
+
+    const block_frames: usize = (frame_size_48k / CELT_BASIC_ENCODER_TRANSIENT_BLOCKS) as usize;
+    var first_energy: u32 = try celt_encoder_block_avg_abs_i16(pcm, 0, block_frames, channel_count);
+    var analysis: CeltEncoderTransientAnalysis = CeltEncoderTransientAnalysis{
+        is_transient: false,
+        peak_block: 0,
+        peak_energy: first_energy,
+        previous_energy: first_energy,
+    };
+
+    var smoothed_energy: u32 = first_energy;
+    var block: i32 = 1;
+    while block < CELT_BASIC_ENCODER_TRANSIENT_BLOCKS {
+        const energy: u32 = try celt_encoder_block_avg_abs_i16(pcm, (block as usize) * block_frames, block_frames, channel_count);
+        const previous: u32 = smoothed_energy;
+        if energy > analysis.peak_energy {
+            analysis.peak_energy = energy;
+            analysis.peak_block = block;
+        }
+        const ratio_threshold: u64 = (previous as u64) * (CELT_BASIC_ENCODER_TRANSIENT_RATIO_NUM as u64) + (CELT_BASIC_ENCODER_TRANSIENT_MIN_DELTA as u64);
+        if !analysis.is_transient && energy >= CELT_BASIC_ENCODER_TRANSIENT_MIN_ENERGY && (energy as u64) > ratio_threshold {
+            analysis.is_transient = true;
+            analysis.peak_block = block;
+            analysis.peak_energy = energy;
+            analysis.previous_energy = previous;
+        }
+
+        if energy > smoothed_energy {
+            smoothed_energy = (((smoothed_energy as u64) * 3 + (energy as u64)) / 4) as u32;
+        } else {
+            smoothed_energy = (((smoothed_energy as u64) * 7 + (energy as u64)) / 8) as u32;
+        }
+        block = block + 1;
+    }
+
+    if !analysis.is_transient {
+        analysis.previous_energy = smoothed_energy;
+    }
+    return analysis;
 }
 
 fn celt_encoder_nominal_payload_bytes(profile: &const CeltBasicEncoderProfile) usize {
@@ -271,7 +354,29 @@ fn celt_encoder_build_band_dims(profile: &const CeltBasicEncoderProfile, band_di
     return total;
 }
 
-fn celt_encoder_encode_tf_unchanged(profile: &const CeltBasicEncoderProfile, enc: &EcEnc) !void {
+fn celt_encoder_encode_global_flags(profile: &const CeltBasicEncoderProfile, enc: &EcEnc, is_transient: bool) !void {
+    const total_bits: u32 = (enc.storage as u32) * 8;
+    var tell: u32 = ec_tell_enc(enc);
+    if tell + 16 <= total_bits {
+        ec_enc_bit_logp(enc, 0, 1);
+        tell = ec_tell_enc(enc);
+    }
+    if profile.lm > 0 && tell + 3 <= total_bits {
+        var transient_symbol: i32 = 0;
+        if is_transient {
+            transient_symbol = 1;
+        }
+        ec_enc_bit_logp(enc, transient_symbol, 3);
+        tell = ec_tell_enc(enc);
+    } else if is_transient {
+        return error.CeltEncoderError;
+    }
+    if tell + 3 <= total_bits {
+        ec_enc_bit_logp(enc, 0, 3);
+    }
+}
+
+fn celt_encoder_encode_tf_unchanged(profile: &const CeltBasicEncoderProfile, enc: &EcEnc, is_transient: bool) !void {
     if profile.end_band < 0 || profile.end_band > (CELT_MAX_BANDS as i32) || profile.lm < 0 || profile.lm > 3 {
         return error.CeltEncoderError;
     }
@@ -279,7 +384,9 @@ fn celt_encoder_encode_tf_unchanged(profile: &const CeltBasicEncoderProfile, enc
     const budget: u32 = (enc.storage as u32) * 8;
     var tell: u32 = ec_tell_enc(enc);
     var logp: u32 = 4;
-    const is_transient: bool = false;
+    if is_transient {
+        logp = 2;
+    }
 
     var tf_select_rsv: bool = false;
     if profile.lm > 0 && tell + logp + 1 <= budget {
@@ -305,8 +412,12 @@ fn celt_encoder_encode_tf_unchanged(profile: &const CeltBasicEncoderProfile, enc
     }
 
     if tf_select_rsv {
-        const index0: usize = 0;
-        const index1: usize = 2;
+        var transient_offset: usize = 0;
+        if is_transient {
+            transient_offset = 4;
+        }
+        const index0: usize = transient_offset;
+        const index1: usize = transient_offset + 2;
         if celt_tf_select_value(profile.lm as usize, index0) != celt_tf_select_value(profile.lm as usize, index1) {
             ec_enc_bit_logp(enc, 0, 1);
         }
@@ -442,12 +553,15 @@ export fn celt_encoder_encode_i16(state: &CeltEncoderState, pcm: &[const i16], p
 
     packet_out.ptr[0] = profile.toc_byte_code0;
 
+    const transient: CeltEncoderTransientAnalysis = try celt_encoder_detect_transient_i16(pcm, profile.frame_size_48k, profile.channels);
+
     var enc: EcEnc = EcEnc{};
     ec_enc_init(&enc, &packet_out[1:payload_len]);
 
     var target_energy_q10: [i16: CELT_MAX_BANDS * 2] = [0: CELT_MAX_BANDS * 2];
+    try celt_encoder_encode_global_flags(profile, &enc, transient.is_transient);
     try celt_encode_coarse_energy(&state.energy, &enc, false, &target_energy_q10[0:CELT_MAX_BANDS * 2]);
-    try celt_encoder_encode_tf_unchanged(profile, &enc);
+    try celt_encoder_encode_tf_unchanged(profile, &enc, transient.is_transient);
     celt_encoder_encode_spread_normal(&enc);
 
     var band_dims: [i32: CELT_MAX_BANDS] = [0: CELT_MAX_BANDS];

@@ -2,13 +2,18 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.celt.encoder.CeltBasicEncoderProfile;
 use src.opus.celt.encoder.CeltEncoderState;
+use src.opus.celt.encoder.CeltEncoderTransientAnalysis;
 use src.opus.celt.encoder.celt_basic_encoder_profile_init;
+use src.opus.celt.encoder.celt_encoder_detect_transient_i16;
 use src.opus.celt.encoder.celt_encoder_encode_i16;
 use src.opus.celt.encoder.celt_encoder_is_initialized;
 use src.opus.celt.encoder.celt_encoder_state_init;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
+use src.opus.entropy.range_dec.EcDec;
+use src.opus.entropy.range_dec.ec_dec_bit_logp;
+use src.opus.entropy.range_dec.ec_dec_init;
 
 fn fill_constant_stereo(pcm: &[i16], sample: i16) void {
     var i: usize = 0;
@@ -16,6 +21,31 @@ fn fill_constant_stereo(pcm: &[i16], sample: i16) void {
         pcm.ptr[i] = sample;
         i = i + 1;
     }
+}
+
+fn fill_attack_stereo(pcm: &[i16]) void {
+    var frame: usize = 0;
+    while frame < (pcm.len / 2) {
+        var sample: i16 = 320;
+        if frame >= 480 && frame < 600 {
+            if (frame % (2 as usize)) == 0 {
+                sample = 28000;
+            } else {
+                sample = -28000;
+            }
+        }
+        pcm.ptr[frame * 2] = sample;
+        pcm.ptr[(frame * 2) + 1] = sample;
+        frame = frame + 1;
+    }
+}
+
+fn decode_celt_encoder_packet_transient_flag(packet: &[byte], encoded: i32) !bool {
+    var dec: EcDec = EcDec{};
+    try assert(encoded > 2, "CELT packet must include enough payload for global flags");
+    ec_dec_init(&dec, &packet[1:((encoded as usize) - 1)]);
+    try assert_eq_i32(ec_dec_bit_logp(&dec, 1), 0);
+    return ec_dec_bit_logp(&dec, 3) != 0;
 }
 
 test "celt basic encoder profile records fullband frame layout" {
@@ -179,4 +209,41 @@ test "celt encoder vbr allocation varies packet length with input activity" {
     try assert(active_encoded > silence_encoded, "VBR allocation must spend more bytes on active CELT input");
     try assert_eq_i32(silence_packet[0] as i32, 252);
     try assert_eq_i32(active_packet[0] as i32, 252);
+}
+
+test "celt encoder transient detection flags sudden attacks" {
+    var steady: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&steady[0:1920], 4000);
+    const steady_analysis: CeltEncoderTransientAnalysis = try celt_encoder_detect_transient_i16(&steady[0:1920], 960, 2);
+    try assert(!steady_analysis.is_transient, "steady high-energy input must not be marked transient");
+
+    var attack: [i16: 1920] = [0: 1920];
+    fill_attack_stereo(&attack[0:1920]);
+    const attack_analysis: CeltEncoderTransientAnalysis = try celt_encoder_detect_transient_i16(&attack[0:1920], 960, 2);
+    try assert(attack_analysis.is_transient, "sudden high-energy attack must be marked transient");
+    try assert_eq_i32(attack_analysis.peak_block, 4);
+    try assert(attack_analysis.peak_energy > steady_analysis.peak_energy, "attack peak energy must exceed steady analysis peak");
+}
+
+test "celt encoder writes detected transient global flag" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var steady_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&steady_state, &profile);
+    var steady: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&steady[0:1920], 4000);
+    var steady_packet: [byte: 1275] = [0: 1275];
+    const steady_encoded: i32 = try celt_encoder_encode_i16(&steady_state, &steady[0:1920], &steady_packet[0:1275]);
+    try assert(!try decode_celt_encoder_packet_transient_flag(&steady_packet[0:(steady_encoded as usize)], steady_encoded), "steady packet must clear the transient flag");
+
+    var attack_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&attack_state, &profile);
+    var attack: [i16: 1920] = [0: 1920];
+    fill_attack_stereo(&attack[0:1920]);
+    var attack_packet: [byte: 1275] = [0: 1275];
+    const attack_encoded: i32 = try celt_encoder_encode_i16(&attack_state, &attack[0:1920], &attack_packet[0:1275]);
+    try assert(try decode_celt_encoder_packet_transient_flag(&attack_packet[0:(attack_encoded as usize)], attack_encoded), "attack packet must set the transient flag");
 }

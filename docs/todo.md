@@ -489,7 +489,7 @@
 - [x] 实现 SILK gain control。
 - [x] 实现 SILK NLSF quantization。
 - [x] 实现 SILK NSQ。
-- [ ] 实现 CELT transient detection。
+- [x] 实现 CELT transient detection。
 - [ ] 实现 CELT stereo intensity decision。
 - [ ] 实现 in-band FEC encoder。
 - [ ] 实现 DTX。
