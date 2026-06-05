@@ -1,0 +1,22 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.api.encoder.OPUS_ENCODER_STORAGE_WORDS;
+use src.opus.api.encoder.OpusEncoder;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.opus_encoder_config_default;
+
+test "encoder api exposes opaque storage backed handle" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    _ = &encoder;
+
+    try assert(OPUS_ENCODER_STORAGE_WORDS > 0, "encoder storage must reserve opaque state space");
+    try assert(@size_of(OpusEncoder) >= OPUS_ENCODER_STORAGE_WORDS * @size_of(usize), "encoder handle must contain the advertised storage");
+
+    const config: OpusEncoderConfig = opus_encoder_config_default();
+    try assert_eq_i32(config.sample_rate_hz as i32, 48000);
+    try assert_eq_i32(config.channels as i32, 1);
+    try assert_eq_i32(config.application as i32, OpusApplication.AUDIO as i32);
+    try assert_eq_i32(config.max_bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+}

@@ -455,7 +455,7 @@
 
 ## 16. Basic Encoder
 
-- [ ] 实现 `api/encoder.uya`。
+- [x] 实现 `api/encoder.uya`。
 - [ ] 实现 `encoder_init`。
 - [ ] 实现 encoder config 校验。
 - [ ] 实现 `encoder_encode_i16` 框架。

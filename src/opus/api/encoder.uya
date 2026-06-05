@@ -1,0 +1,8 @@
+export error EncoderApiError;
+export error EncoderApiUnsupported;
+
+export const OPUS_ENCODER_STORAGE_WORDS: usize = 1024;
+
+export struct OpusEncoder {
+    storage: [usize: OPUS_ENCODER_STORAGE_WORDS],
+}
