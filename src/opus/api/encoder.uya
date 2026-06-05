@@ -1,3 +1,8 @@
+use src.opus.celt.encoder.CeltBasicEncoderProfile;
+use src.opus.celt.encoder.CeltEncoderState;
+use src.opus.celt.encoder.celt_basic_encoder_profile_init;
+use src.opus.celt.encoder.celt_encoder_is_initialized;
+use src.opus.celt.encoder.celt_encoder_state_init;
 use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
 use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.errors.validate_encoder_config;
@@ -15,6 +20,7 @@ const OPUS_ENCODER_STORAGE_BYTES: usize = OPUS_ENCODER_STORAGE_WORDS * @size_of(
 
 struct OpusEncoderState {
     config: OpusEncoderConfig,
+    celt: CeltEncoderState,
     initialized: bool,
 }
 
@@ -82,6 +88,7 @@ export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
 fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConfig) !void {
     try encoder_validate_config(config);
     encoder.config = *config;
+    encoder.celt = CeltEncoderState{};
     encoder.initialized = true;
 }
 
@@ -104,12 +111,12 @@ fn encoder_frame_size_48k_for_input(encoder: &const OpusEncoderState, frame_size
     return frame_size_48k as i32;
 }
 
-fn encoder_validate_encode_request(encoder: &const OpusEncoderState, pcm: &[const i16], frame_size: i32, packet_out: &[byte]) !void {
+fn encoder_validate_encode_request(encoder: &const OpusEncoderState, pcm: &[const i16], frame_size: i32, packet_out: &[byte]) !i32 {
     if !encoder.initialized {
         return error.EncoderApiError;
     }
     try encoder_validate_config(&encoder.config);
-    _ = try encoder_frame_size_48k_for_input(encoder, frame_size);
+    const frame_size_48k: i32 = try encoder_frame_size_48k_for_input(encoder, frame_size);
     const required_pcm: usize = (frame_size as usize) * (encoder.config.channels as usize);
     if required_pcm > pcm.len {
         return error.EncoderApiError;
@@ -117,6 +124,17 @@ fn encoder_validate_encode_request(encoder: &const OpusEncoderState, pcm: &[cons
     if packet_out.len == 0 {
         return error.EncoderApiError;
     }
+    return frame_size_48k;
+}
+
+fn encoder_encode_celt_i16(encoder: &OpusEncoderState, frame_size_48k: i32) !i32 {
+    const profile: CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&encoder.config, frame_size_48k) catch {
+        return error.EncoderApiUnsupported;
+    };
+    celt_encoder_state_init(&encoder.celt, &profile) catch {
+        return error.EncoderApiError;
+    };
+    return error.EncoderApiUnsupported;
 }
 
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {
@@ -130,8 +148,9 @@ export fn encoder_encode_i16(encoder: &OpusEncoder, pcm: &[const i16], frame_siz
     if !encoder_storage_fits_state() {
         return error.EncoderApiError;
     }
-    try encoder_validate_encode_request(encoder_state_const(encoder), pcm, frame_size, packet_out);
-    return error.EncoderApiUnsupported;
+    const state: &OpusEncoderState = encoder_state(encoder);
+    const frame_size_48k: i32 = try encoder_validate_encode_request(state, pcm, frame_size, packet_out);
+    return encoder_encode_celt_i16(state, frame_size_48k);
 }
 
 export fn encoder_is_initialized(encoder: &const OpusEncoder) bool {
@@ -148,4 +167,8 @@ export fn encoder_channel_count(encoder: &const OpusEncoder) u8 {
 
 export fn encoder_application(encoder: &const OpusEncoder) OpusApplication {
     return encoder_state_const(encoder).config.application;
+}
+
+export fn encoder_celt_is_initialized(encoder: &const OpusEncoder) bool {
+    return celt_encoder_is_initialized(&encoder_state_const(encoder).celt);
 }

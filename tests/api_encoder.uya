@@ -7,6 +7,7 @@ use src.opus.api.encoder.OpusEncoder;
 use src.opus.api.encoder.encoder_encode_i16;
 use src.opus.api.encoder.encoder_application;
 use src.opus.api.encoder.encoder_channel_count;
+use src.opus.api.encoder.encoder_celt_is_initialized;
 use src.opus.api.encoder.encoder_init;
 use src.opus.api.encoder.encoder_is_initialized;
 use src.opus.api.encoder.encoder_sample_rate_hz;
@@ -151,4 +152,33 @@ test "encoder encode i16 framework validates requests before unsupported modes" 
         error.EncoderApiError => {}
         else => { try assert(false, "encoder encode must reject empty packet output buffers"); }
     };
+}
+
+test "encoder encode dispatches valid fullband frames into celt state" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 1920] = [0: 1920];
+    var packet: [byte: 1275] = [0: 1275];
+    try assert(!encoder_celt_is_initialized(&encoder), "freshly initialized encoder must not pre-mark CELT state");
+    const celt_dispatch: !i32 = encoder_encode_i16(&encoder, &pcm[0:1920], 960, &packet[0:1275]);
+    match celt_dispatch {
+        error.EncoderApiUnsupported => {}
+        else => { try assert(false, "CELT dispatch must leave packet production to later tasks"); }
+    };
+    try assert(encoder_celt_is_initialized(&encoder), "fullband encode requests must reach CELT state dispatch");
+
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    try encoder_init(&encoder, &config);
+    try assert(!encoder_celt_is_initialized(&encoder), "encoder init must reset CELT dispatch state");
+    const unsupported_bandwidth: !i32 = encoder_encode_i16(&encoder, &pcm[0:1920], 960, &packet[0:1275]);
+    match unsupported_bandwidth {
+        error.EncoderApiUnsupported => {}
+        else => { try assert(false, "non-fullband CELT profile should stay unsupported for now"); }
+    };
+    try assert(!encoder_celt_is_initialized(&encoder), "unsupported CELT profiles must not mark state initialized");
 }
