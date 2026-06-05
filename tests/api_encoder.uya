@@ -125,6 +125,14 @@ test "encoder api config validation maps invalid configs to api error" {
         error.EncoderApiError => {}
         else => { try assert(false, "encoder config validation must reject out-of-range packet loss"); }
     };
+
+    config = opus_encoder_config_default();
+    config.bitrate_bps = 499;
+    const bad_bitrate: !void = encoder_validate_config(&config);
+    match bad_bitrate {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder config validation must reject out-of-range bitrate"); }
+    };
 }
 
 test "encoder encode i16 framework validates requests before unsupported modes" {
@@ -230,6 +238,32 @@ test "encoder api applies CELT VBR allocation to packet length" {
     try decoder_get_packet_info(&active_packet[0:(active_encoded as usize)], &info);
     try assert_eq_i32(info.mode as i32, OpusMode.CELT as i32);
     try assert_eq_i32(info.payload_len as i32, active_encoded - 1);
+}
+
+test "encoder api applies CELT CBR bitrate target independent of activity" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 64000;
+    config.vbr = false;
+
+    var silence_encoder: OpusEncoder = OpusEncoder{};
+    try encoder_init(&silence_encoder, &config);
+    var silence_pcm: [i16: 1920] = [0: 1920];
+    var silence_packet: [byte: 1275] = [0: 1275];
+    const silence_encoded: i32 = try encoder_encode_i16(&silence_encoder, &silence_pcm[0:1920], 960, &silence_packet[0:1275]);
+
+    var active_encoder: OpusEncoder = OpusEncoder{};
+    try encoder_init(&active_encoder, &config);
+    var active_pcm: [i16: 1920] = [0: 1920];
+    fill_constant_i16(&active_pcm[0:1920], 30000);
+    var active_packet: [byte: 1275] = [0: 1275];
+    const active_encoded: i32 = try encoder_encode_i16(&active_encoder, &active_pcm[0:1920], 960, &active_packet[0:1275]);
+
+    try assert_eq_i32(silence_encoded, 160);
+    try assert_eq_i32(active_encoded, 160);
+    try assert_eq_i32(active_packet[0] as i32, 252);
 }
 
 test "encoder encode dispatches valid fullband frames into celt state" {

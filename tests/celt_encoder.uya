@@ -63,6 +63,16 @@ test "celt basic encoder profile separates invalid and unsupported configs" {
         error.CeltEncoderError => {}
         else => { try assert(false, "CELT encoder profile must reject invalid frame durations"); }
     };
+
+    config = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 512001;
+    const invalid_bitrate: !CeltBasicEncoderProfile = celt_basic_encoder_profile_init(&config, 960);
+    match invalid_bitrate {
+        error.CeltEncoderError => {}
+        else => { try assert(false, "CELT encoder profile must reject invalid bitrate targets"); }
+    };
 }
 
 test "celt basic encoder profile only supports fullband 20ms stereo shape" {

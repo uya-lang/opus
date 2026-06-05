@@ -13,6 +13,7 @@ use src.opus.celt.quant_bands.celt_encode_coarse_energy;
 use src.opus.celt.quant_bands.celt_encode_fine_energy;
 use src.opus.celt.quant_bands.celt_energy_quant_state_init;
 use src.opus.celt.rate.celt_rate_compute_frame_allocation;
+use src.opus.core.errors.validate_bitrate;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.errors.validate_sample_rate;
@@ -68,6 +69,9 @@ export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
         return error.CeltEncoderError;
     };
     validate_channels(config.channels) catch {
+        return error.CeltEncoderError;
+    };
+    validate_bitrate(config.bitrate_bps) catch {
         return error.CeltEncoderError;
     };
     if frame_size_48k <= 0 {

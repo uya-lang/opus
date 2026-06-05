@@ -6,8 +6,13 @@ use src.opus.core.types.OpusEncoderConfig;
 export error InvalidSampleRate;
 export error InvalidChannelCount;
 export error InvalidFrameSize;
+export error InvalidBitrate;
 export error InvalidComplexity;
 export error InvalidPacketLossPercent;
+
+const ENCODER_AUTO_BITRATE_BPS: u32 = 0;
+const ENCODER_MIN_BITRATE_BPS: u32 = 500;
+const ENCODER_MAX_BITRATE_BPS: u32 = 512000;
 
 export fn validate_sample_rate(sample_rate_hz: u32) !void {
     if sample_rate_hz == 8000 {
@@ -60,6 +65,16 @@ export fn validate_frame_size_48k(frame_size: u32) !void {
     return error.InvalidFrameSize;
 }
 
+export fn validate_bitrate(bitrate_bps: u32) !void {
+    if bitrate_bps == ENCODER_AUTO_BITRATE_BPS {
+        return;
+    }
+    if bitrate_bps >= ENCODER_MIN_BITRATE_BPS && bitrate_bps <= ENCODER_MAX_BITRATE_BPS {
+        return;
+    }
+    return error.InvalidBitrate;
+}
+
 export fn validate_decoder_config(config: &const OpusDecoderConfig) !void {
     try validate_sample_rate(config.sample_rate_hz);
     try validate_channels(config.channels);
@@ -68,6 +83,7 @@ export fn validate_decoder_config(config: &const OpusDecoderConfig) !void {
 export fn validate_encoder_config(config: &const OpusEncoderConfig) !void {
     try validate_sample_rate(config.sample_rate_hz);
     try validate_channels(config.channels);
+    try validate_bitrate(config.bitrate_bps);
     if config.complexity > 10 {
         return error.InvalidComplexity;
     }

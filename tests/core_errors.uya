@@ -137,4 +137,40 @@ test "encoder config validation checks bounded tuning fields" {
         error.InvalidPacketLossPercent => {}
         else => { try assert(false, "encoder invalid packet loss"); }
     }
+
+    const bad_low_bitrate: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 499,
+        complexity: 5,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 0,
+    };
+    const low_bitrate_result: !void = validate_encoder_config(&bad_low_bitrate);
+    match low_bitrate_result {
+        error.InvalidBitrate => {}
+        else => { try assert(false, "encoder bitrate below Opus range"); }
+    }
+
+    const bad_high_bitrate: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 48000,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 512001,
+        complexity: 5,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 0,
+    };
+    const high_bitrate_result: !void = validate_encoder_config(&bad_high_bitrate);
+    match high_bitrate_result {
+        error.InvalidBitrate => {}
+        else => { try assert(false, "encoder bitrate above Opus range"); }
+    }
 }
