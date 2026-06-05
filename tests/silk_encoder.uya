@@ -83,3 +83,23 @@ test "silk encoder writes wideband mono packet decodable by silk decoder" {
     const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
     try assert_eq_i32(decoded as i32, 320);
 }
+
+test "silk encoder rejects short packet buffers before writing past them" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+    var pcm: [i16: 320] = [0: 320];
+    var packet: [byte: 384] = [55: 384];
+    packet[383] = 99;
+    const encoded: !i32 = silk_encoder_encode_i16(&state, &pcm[0:320], &packet[0:383]);
+    match encoded {
+        error.SilkEncoderError => {}
+        else => { try assert(false, "SILK encoder must reject buffers smaller than its packet size"); }
+    };
+    try assert_eq_i32(packet[383] as i32, 99);
+}

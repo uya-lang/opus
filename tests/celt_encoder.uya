@@ -113,3 +113,20 @@ test "celt encoder writes range encoded fullband stereo packet" {
     try assert(encoded > 1, "CELT encoder must return TOC plus range payload");
     try assert_eq_i32(packet[0] as i32, 252);
 }
+
+test "celt encoder never reports more bytes than caller packet buffer" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&state, &profile);
+    var pcm: [i16: 1920] = [0: 1920];
+    var packet: [byte: 3] = [77, 78, 99];
+    const encoded: i32 = try celt_encoder_encode_i16(&state, &pcm[0:1920], &packet[0:2]);
+    try assert_eq_i32(encoded, 2);
+    try assert(encoded <= 2, "CELT encoder must not report more bytes than the provided slice");
+    try assert_eq_i32(packet[0] as i32, 252);
+    try assert_eq_i32(packet[2] as i32, 99);
+}

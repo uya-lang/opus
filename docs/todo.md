@@ -474,7 +474,7 @@
 验收标准：
 
 - [x] Basic encoder 目标是合法互操作，不以音质作为首要验收。
-- [ ] Encoder 输出永远不超过调用者 packet buffer。
+- [x] Encoder 输出永远不超过调用者 packet buffer。
 
 ## 17. Practical Encoder
 
