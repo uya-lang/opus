@@ -1,0 +1,196 @@
+use src.opus.api.decoder.OpusDecoder;
+use src.opus.api.decoder.decoder_decode_i16;
+use src.opus.api.decoder.decoder_init;
+use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_encode_i16;
+use src.opus.api.encoder.encoder_init;
+use src.opus.core.types.OpusDecoderConfig;
+use src.opus.core.types.OpusEncoderConfig;
+
+export error ObjectiveQualityBenchError;
+
+export const OBJECTIVE_QUALITY_SNR_Q8_LOSSLESS: u64 = 4294967295;
+
+export struct ObjectiveQualityResult {
+    encoded_bytes: i32,
+    decoded_samples: i32,
+    sample_count: usize,
+    signal_energy: u64,
+    noise_energy: u64,
+    mse_q8: u64,
+    snr_q8: u64,
+}
+
+// OpusDecoder storage is large enough to overflow small executable stacks.
+var objective_quality_encoder_storage: OpusEncoder = OpusEncoder{};
+var objective_quality_decoder_storage: OpusDecoder = OpusDecoder{};
+
+fn objective_quality_abs_i32(value: i32) i32 {
+    if value < 0 {
+        return -value;
+    }
+    return value;
+}
+
+fn objective_quality_required_samples(config: &const OpusEncoderConfig, frame_size: i32) !usize {
+    if frame_size <= 0 || config.channels == 0 {
+        return error.ObjectiveQualityBenchError;
+    }
+    return (frame_size as usize) * (config.channels as usize);
+}
+
+export fn objective_quality_energy_i16(samples: &[const i16]) !u64 {
+    var energy: u64 = 0;
+    var i: usize = 0;
+    while i < samples.len {
+        const value: i64 = samples.ptr[i] as i64;
+        energy = energy + ((value * value) as u64);
+        i = i + 1;
+    }
+    return energy;
+}
+
+export fn objective_quality_noise_i16(reference: &[const i16], decoded: &[const i16]) !u64 {
+    if reference.len != decoded.len {
+        return error.ObjectiveQualityBenchError;
+    }
+
+    var noise: u64 = 0;
+    var i: usize = 0;
+    while i < reference.len {
+        const delta: i64 = (reference.ptr[i] as i64) - (decoded.ptr[i] as i64);
+        noise = noise + ((delta * delta) as u64);
+        i = i + 1;
+    }
+    return noise;
+}
+
+export fn objective_quality_mse_q8_i16(reference: &[const i16], decoded: &[const i16]) !u64 {
+    if reference.len == 0 || reference.len != decoded.len {
+        return error.ObjectiveQualityBenchError;
+    }
+    const noise: u64 = try objective_quality_noise_i16(reference, decoded);
+    return (noise << 8) / (reference.len as u64);
+}
+
+export fn objective_quality_snr_q8_i16(reference: &[const i16], decoded: &[const i16]) !u64 {
+    if reference.len == 0 || reference.len != decoded.len {
+        return error.ObjectiveQualityBenchError;
+    }
+    const noise: u64 = try objective_quality_noise_i16(reference, decoded);
+    if noise == 0 {
+        return OBJECTIVE_QUALITY_SNR_Q8_LOSSLESS;
+    }
+    const signal: u64 = try objective_quality_energy_i16(reference);
+    return (signal << 8) / noise;
+}
+
+export fn objective_quality_measure_i16(
+    config: &const OpusEncoderConfig,
+    pcm: &[const i16],
+    frame_size: i32,
+    packet_out: &[byte],
+    decoded_out: &[i16],
+) !ObjectiveQualityResult {
+    const required_samples: usize = try objective_quality_required_samples(config, frame_size);
+    if pcm.len < required_samples || decoded_out.len < required_samples || packet_out.len == 0 {
+        return error.ObjectiveQualityBenchError;
+    }
+
+    try encoder_init(&objective_quality_encoder_storage, config);
+    const encoded: i32 = try encoder_encode_i16(&objective_quality_encoder_storage, &pcm[0:required_samples], frame_size, packet_out);
+    if encoded <= 0 || (encoded as usize) > packet_out.len {
+        return error.ObjectiveQualityBenchError;
+    }
+
+    const decoder_config: OpusDecoderConfig = OpusDecoderConfig{ sample_rate_hz: config.sample_rate_hz, channels: config.channels };
+    try decoder_init(&objective_quality_decoder_storage, &decoder_config);
+    const decoded: i32 = try decoder_decode_i16(
+        &objective_quality_decoder_storage,
+        &packet_out[0:(encoded as usize)],
+        decoded_out,
+        frame_size,
+        false,
+    );
+    if decoded <= 0 {
+        return error.ObjectiveQualityBenchError;
+    }
+
+    const decoded_samples: usize = (decoded as usize) * (config.channels as usize);
+    if decoded_samples > required_samples {
+        return error.ObjectiveQualityBenchError;
+    }
+
+    const signal: u64 = try objective_quality_energy_i16(&pcm[0:decoded_samples]);
+    const noise: u64 = try objective_quality_noise_i16(&pcm[0:decoded_samples], &decoded_out[0:decoded_samples]);
+    const mse_q8: u64 = try objective_quality_mse_q8_i16(&pcm[0:decoded_samples], &decoded_out[0:decoded_samples]);
+    const snr_q8: u64 = try objective_quality_snr_q8_i16(&pcm[0:decoded_samples], &decoded_out[0:decoded_samples]);
+
+    return ObjectiveQualityResult{
+        encoded_bytes: encoded,
+        decoded_samples: decoded,
+        sample_count: decoded_samples,
+        signal_energy: signal,
+        noise_energy: noise,
+        mse_q8: mse_q8,
+        snr_q8: snr_q8,
+    };
+}
+
+export fn objective_quality_fill_silence_i16(pcm: &[i16]) void {
+    var i: usize = 0;
+    while i < pcm.len {
+        pcm.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+export fn objective_quality_fill_music_48k_stereo(pcm: &[i16]) void {
+    const wave: [i16: 32] = [
+        0, 1951, 3827, 5556, 7071, 8315, 9239, 9808,
+        10000, 9808, 9239, 8315, 7071, 5556, 3827, 1951,
+        0, -1951, -3827, -5556, -7071, -8315, -9239, -9808,
+        -10000, -9808, -9239, -8315, -7071, -5556, -3827, -1951,
+    ];
+
+    var frame: usize = 0;
+    while (frame * 2) + 1 < pcm.len {
+        const bass: i32 = (wave[frame % (32 as usize)] as i32) / 2;
+        const lead: i32 = (wave[(frame * 3) % (32 as usize)] as i32) / 3;
+        pcm.ptr[frame * 2] = (bass + lead) as i16;
+        pcm.ptr[(frame * 2) + 1] = (bass - lead) as i16;
+        frame = frame + 1;
+    }
+}
+
+export fn objective_quality_fill_voice_16k_mono(pcm: &[i16]) void {
+    var i: usize = 0;
+    while i < pcm.len {
+        const phase: usize = i % (80 as usize);
+        var sample: i32 = 0;
+        if phase < 20 {
+            sample = 10000 - ((phase as i32) * 350);
+        } else if phase < 40 {
+            sample = 2500 - (((phase - 20) as i32) * 120);
+        } else if phase < 60 {
+            sample = -1800;
+        } else {
+            sample = 900;
+        }
+        pcm.ptr[i] = sample as i16;
+        i = i + 1;
+    }
+}
+
+export fn objective_quality_peak_abs_i16(pcm: &[const i16]) i32 {
+    var peak: i32 = 0;
+    var i: usize = 0;
+    while i < pcm.len {
+        const value: i32 = objective_quality_abs_i32(pcm.ptr[i] as i32);
+        if value > peak {
+            peak = value;
+        }
+        i = i + 1;
+    }
+    return peak;
+}

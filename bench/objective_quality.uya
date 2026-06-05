@@ -1,0 +1,167 @@
+use libc.printf;
+use bench.objective_quality_metrics.ObjectiveQualityResult;
+use bench.objective_quality_metrics.objective_quality_fill_music_48k_stereo;
+use bench.objective_quality_metrics.objective_quality_fill_voice_16k_mono;
+use bench.objective_quality_metrics.objective_quality_measure_i16;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusSignalHint;
+use src.opus.core.types.opus_encoder_config_default;
+
+const OBJECTIVE_QUALITY_PACKET_BYTES: usize = 1275;
+const OBJECTIVE_QUALITY_CELT_FRAME_SAMPLES: i32 = 960;
+const OBJECTIVE_QUALITY_CELT_PCM_SAMPLES: usize = 1920;
+const OBJECTIVE_QUALITY_SILK_FRAME_SAMPLES: i32 = 320;
+const OBJECTIVE_QUALITY_SILK_PCM_SAMPLES: usize = 320;
+
+fn print_result_named(case_name: u8, variant: u8, config: &const OpusEncoderConfig, result: &const ObjectiveQualityResult) void {
+    if case_name == 0 && variant == 0 {
+        _ = printf(
+            "objective_quality, case=%s, variant=%s, sample_rate_hz=%u, channels=%u, bitrate_bps=%u, complexity=%u, encoded_bytes=%d, decoded_samples=%d, samples=%lu, signal_energy=%lu, noise_energy=%lu, mse_q8=%lu, snr_q8=%lu\n" as *byte,
+            "voice_16k_mono_24kbps" as *byte,
+            "baseline_complexity0" as *byte,
+            config.sample_rate_hz,
+            config.channels as u32,
+            config.bitrate_bps,
+            config.complexity as u32,
+            result.encoded_bytes,
+            result.decoded_samples,
+            result.sample_count as u64,
+            result.signal_energy,
+            result.noise_energy,
+            result.mse_q8,
+            result.snr_q8,
+        );
+        return;
+    }
+    if case_name == 0 && variant == 1 {
+        _ = printf(
+            "objective_quality, case=%s, variant=%s, sample_rate_hz=%u, channels=%u, bitrate_bps=%u, complexity=%u, encoded_bytes=%d, decoded_samples=%d, samples=%lu, signal_energy=%lu, noise_energy=%lu, mse_q8=%lu, snr_q8=%lu\n" as *byte,
+            "voice_16k_mono_24kbps" as *byte,
+            "practical_complexity10" as *byte,
+            config.sample_rate_hz,
+            config.channels as u32,
+            config.bitrate_bps,
+            config.complexity as u32,
+            result.encoded_bytes,
+            result.decoded_samples,
+            result.sample_count as u64,
+            result.signal_energy,
+            result.noise_energy,
+            result.mse_q8,
+            result.snr_q8,
+        );
+        return;
+    }
+    if case_name == 1 && variant == 0 {
+        _ = printf(
+            "objective_quality, case=%s, variant=%s, sample_rate_hz=%u, channels=%u, bitrate_bps=%u, complexity=%u, encoded_bytes=%d, decoded_samples=%d, samples=%lu, signal_energy=%lu, noise_energy=%lu, mse_q8=%lu, snr_q8=%lu\n" as *byte,
+            "music_48k_stereo_64kbps" as *byte,
+            "baseline_complexity0" as *byte,
+            config.sample_rate_hz,
+            config.channels as u32,
+            config.bitrate_bps,
+            config.complexity as u32,
+            result.encoded_bytes,
+            result.decoded_samples,
+            result.sample_count as u64,
+            result.signal_energy,
+            result.noise_energy,
+            result.mse_q8,
+            result.snr_q8,
+        );
+        return;
+    }
+    _ = printf(
+        "objective_quality, case=%s, variant=%s, sample_rate_hz=%u, channels=%u, bitrate_bps=%u, complexity=%u, encoded_bytes=%d, decoded_samples=%d, samples=%lu, signal_energy=%lu, noise_energy=%lu, mse_q8=%lu, snr_q8=%lu\n" as *byte,
+        "music_48k_stereo_64kbps" as *byte,
+        "practical_complexity10" as *byte,
+        config.sample_rate_hz,
+        config.channels as u32,
+        config.bitrate_bps,
+        config.complexity as u32,
+        result.encoded_bytes,
+        result.decoded_samples,
+        result.sample_count as u64,
+        result.signal_energy,
+        result.noise_energy,
+        result.mse_q8,
+        result.snr_q8,
+    );
+}
+
+fn run_music_case(variant: u8, complexity: u8) !void {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.application = OpusApplication.AUDIO;
+    config.signal_hint = OpusSignalHint.MUSIC;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 64000;
+    config.complexity = complexity;
+    config.vbr = true;
+
+    var pcm: [i16: OBJECTIVE_QUALITY_CELT_PCM_SAMPLES] = [0: OBJECTIVE_QUALITY_CELT_PCM_SAMPLES];
+    objective_quality_fill_music_48k_stereo(&pcm[0:OBJECTIVE_QUALITY_CELT_PCM_SAMPLES]);
+    var packet: [byte: OBJECTIVE_QUALITY_PACKET_BYTES] = [0: OBJECTIVE_QUALITY_PACKET_BYTES];
+    var decoded: [i16: OBJECTIVE_QUALITY_CELT_PCM_SAMPLES] = [0: OBJECTIVE_QUALITY_CELT_PCM_SAMPLES];
+
+    const result: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &config,
+        &pcm[0:OBJECTIVE_QUALITY_CELT_PCM_SAMPLES],
+        OBJECTIVE_QUALITY_CELT_FRAME_SAMPLES,
+        &packet[0:OBJECTIVE_QUALITY_PACKET_BYTES],
+        &decoded[0:OBJECTIVE_QUALITY_CELT_PCM_SAMPLES],
+    );
+    print_result_named(1, variant, &config, &result);
+}
+
+fn run_voice_case(variant: u8, complexity: u8) !void {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.bitrate_bps = 24000;
+    config.complexity = complexity;
+    config.vbr = true;
+
+    var pcm: [i16: OBJECTIVE_QUALITY_SILK_PCM_SAMPLES] = [0: OBJECTIVE_QUALITY_SILK_PCM_SAMPLES];
+    objective_quality_fill_voice_16k_mono(&pcm[0:OBJECTIVE_QUALITY_SILK_PCM_SAMPLES]);
+    var packet: [byte: OBJECTIVE_QUALITY_PACKET_BYTES] = [0: OBJECTIVE_QUALITY_PACKET_BYTES];
+    var decoded: [i16: OBJECTIVE_QUALITY_SILK_PCM_SAMPLES] = [0: OBJECTIVE_QUALITY_SILK_PCM_SAMPLES];
+
+    const result: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &config,
+        &pcm[0:OBJECTIVE_QUALITY_SILK_PCM_SAMPLES],
+        OBJECTIVE_QUALITY_SILK_FRAME_SAMPLES,
+        &packet[0:OBJECTIVE_QUALITY_PACKET_BYTES],
+        &decoded[0:OBJECTIVE_QUALITY_SILK_PCM_SAMPLES],
+    );
+    print_result_named(0, variant, &config, &result);
+}
+
+export extern fn main(argc: i32, argv: & &byte) i32 {
+    _ = argc;
+    _ = argv;
+
+    run_voice_case(0, 0) catch {
+        _ = printf("objective_quality_bench: voice baseline failed\n" as *byte);
+        return 1;
+    };
+    run_voice_case(1, 10) catch {
+        _ = printf("objective_quality_bench: voice practical failed\n" as *byte);
+        return 1;
+    };
+    run_music_case(0, 0) catch {
+        _ = printf("objective_quality_bench: music baseline failed\n" as *byte);
+        return 1;
+    };
+    run_music_case(1, 10) catch {
+        _ = printf("objective_quality_bench: music practical failed\n" as *byte);
+        return 1;
+    };
+    return 0;
+}
