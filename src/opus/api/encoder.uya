@@ -1,6 +1,8 @@
 use src.opus.core.errors.validate_encoder_config;
 use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusSignalHint;
 
 export error EncoderApiError;
 export error EncoderApiUnsupported;
@@ -29,10 +31,53 @@ fn encoder_state_const(encoder: &const OpusEncoder) &const OpusEncoderState {
     return ((&encoder.storage as &const usize) as &const OpusEncoderState);
 }
 
-fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConfig) !void {
+fn encoder_application_is_valid(application: OpusApplication) bool {
+    if application == OpusApplication.VOIP {
+        return true;
+    }
+    if application == OpusApplication.AUDIO {
+        return true;
+    }
+    if application == OpusApplication.RESTRICTED_LOWDELAY {
+        return true;
+    }
+    return false;
+}
+
+fn encoder_signal_hint_is_valid(signal_hint: OpusSignalHint) bool {
+    if signal_hint == OpusSignalHint.AUTO {
+        return true;
+    }
+    if signal_hint == OpusSignalHint.VOICE {
+        return true;
+    }
+    if signal_hint == OpusSignalHint.MUSIC {
+        return true;
+    }
+    return false;
+}
+
+fn encoder_bandwidth_is_valid(bandwidth: OpusBandwidth) bool {
+    return bandwidth >= OpusBandwidth.NARROWBAND && bandwidth <= OpusBandwidth.FULLBAND;
+}
+
+export fn encoder_validate_config(config: &const OpusEncoderConfig) !void {
     validate_encoder_config(config) catch {
         return error.EncoderApiError;
     };
+    if !encoder_application_is_valid(config.application) {
+        return error.EncoderApiError;
+    }
+    if !encoder_signal_hint_is_valid(config.signal_hint) {
+        return error.EncoderApiError;
+    }
+    if !encoder_bandwidth_is_valid(config.max_bandwidth) {
+        return error.EncoderApiError;
+    }
+}
+
+fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConfig) !void {
+    try encoder_validate_config(config);
     encoder.config = *config;
     encoder.initialized = true;
 }

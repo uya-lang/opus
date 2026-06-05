@@ -8,6 +8,7 @@ use src.opus.api.encoder.encoder_channel_count;
 use src.opus.api.encoder.encoder_init;
 use src.opus.api.encoder.encoder_is_initialized;
 use src.opus.api.encoder.encoder_sample_rate_hz;
+use src.opus.api.encoder.encoder_validate_config;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
@@ -70,4 +71,43 @@ test "encoder init validates config and records state" {
         else => { try assert(false, "encoder init must map invalid config to API error"); }
     };
     try assert(!encoder_is_initialized(&bad_encoder), "failed init must not mark encoder initialized");
+}
+
+test "encoder api config validation maps invalid configs to api error" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.complexity = 10;
+    config.packet_loss_percent = 100;
+    try encoder_validate_config(&config);
+
+    config.sample_rate_hz = 44100;
+    const bad_rate: !void = encoder_validate_config(&config);
+    match bad_rate {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder config validation must reject unsupported sample rates"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.channels = 3;
+    const bad_channels: !void = encoder_validate_config(&config);
+    match bad_channels {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder config validation must reject invalid channel counts"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.complexity = 11;
+    const bad_complexity: !void = encoder_validate_config(&config);
+    match bad_complexity {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder config validation must reject out-of-range complexity"); }
+    };
+
+    config = opus_encoder_config_default();
+    config.packet_loss_percent = 101;
+    const bad_loss: !void = encoder_validate_config(&config);
+    match bad_loss {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder config validation must reject out-of-range packet loss"); }
+    };
 }
