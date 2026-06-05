@@ -478,7 +478,7 @@
 
 ## 17. Practical Encoder
 
-- [ ] 实现 VBR bit allocation。
+- [x] 实现 VBR bit allocation。
 - [ ] 实现 bitrate 控制。
 - [ ] 实现 bandwidth decision。
 - [ ] 实现 mode decision。

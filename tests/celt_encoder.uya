@@ -10,11 +10,21 @@ use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
 
+fn fill_constant_stereo(pcm: &[i16], sample: i16) void {
+    var i: usize = 0;
+    while i < pcm.len {
+        pcm.ptr[i] = sample;
+        i = i + 1;
+    }
+}
+
 test "celt basic encoder profile records fullband frame layout" {
     var config: OpusEncoderConfig = opus_encoder_config_default();
     config.sample_rate_hz = 48000;
     config.channels = 2;
     config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 64000;
+    config.vbr = true;
 
     const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
     try assert_eq_i32(profile.sample_rate_hz as i32, 48000);
@@ -26,6 +36,8 @@ test "celt basic encoder profile records fullband frame layout" {
     try assert_eq_i32(profile.end_band, 21);
     try assert_eq_i32(profile.toc_config_index as i32, 31);
     try assert_eq_i32(profile.toc_byte_code0 as i32, 252);
+    try assert_eq_i32(profile.bitrate_bps as i32, 64000);
+    try assert(profile.vbr == true, "profile must retain VBR mode");
 }
 
 test "celt basic encoder profile separates invalid and unsupported configs" {
@@ -129,4 +141,32 @@ test "celt encoder never reports more bytes than caller packet buffer" {
     try assert(encoded <= 2, "CELT encoder must not report more bytes than the provided slice");
     try assert_eq_i32(packet[0] as i32, 252);
     try assert_eq_i32(packet[2] as i32, 99);
+}
+
+test "celt encoder vbr allocation varies packet length with input activity" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 64000;
+    config.vbr = true;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var silence_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&silence_state, &profile);
+    var silence_pcm: [i16: 1920] = [0: 1920];
+    var silence_packet: [byte: 1275] = [0: 1275];
+    const silence_encoded: i32 = try celt_encoder_encode_i16(&silence_state, &silence_pcm[0:1920], &silence_packet[0:1275]);
+
+    var active_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&active_state, &profile);
+    var active_pcm: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&active_pcm[0:1920], 30000);
+    var active_packet: [byte: 1275] = [0: 1275];
+    const active_encoded: i32 = try celt_encoder_encode_i16(&active_state, &active_pcm[0:1920], &active_packet[0:1275]);
+
+    try assert_eq_i32(silence_encoded, 81);
+    try assert_eq_i32(active_encoded, 239);
+    try assert(active_encoded > silence_encoded, "VBR allocation must spend more bytes on active CELT input");
+    try assert_eq_i32(silence_packet[0] as i32, 252);
+    try assert_eq_i32(active_packet[0] as i32, 252);
 }

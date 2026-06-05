@@ -38,6 +38,7 @@ export const CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_CONFIG_INDEX: u8 = 31;
 export const CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_BYTE_CODE0: byte = 252;
 const CELT_BASIC_ENCODER_TARGET_PAYLOAD_BYTES: usize = 256;
 const CELT_BASIC_ENCODER_MAX_SPECTRAL: usize = 1600;
+const CELT_BASIC_ENCODER_ACTIVITY_FULL_SCALE: u64 = 16384;
 const CELT_ENCODER_SPREAD_NORMAL_SYMBOL: i32 = 2;
 const CELT_ENCODER_SPREAD_ICDF_FTB: u32 = 5;
 const CELT_ENCODER_MAX_PVQ_BITS_PER_BAND: i32 = 8;
@@ -52,6 +53,8 @@ export struct CeltBasicEncoderProfile {
     end_band: i32,
     toc_config_index: u8,
     toc_byte_code0: byte,
+    bitrate_bps: u32,
+    vbr: bool,
 }
 
 export struct CeltEncoderState {
@@ -109,6 +112,8 @@ export fn celt_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
         end_band: end_band,
         toc_config_index: CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_CONFIG_INDEX,
         toc_byte_code0: CELT_BASIC_ENCODER_FB_20MS_STEREO_TOC_BYTE_CODE0,
+        bitrate_bps: config.bitrate_bps,
+        vbr: config.vbr,
     };
 }
 
@@ -135,6 +140,70 @@ fn celt_encoder_min_usize(a: usize, b: usize) usize {
         return a;
     }
     return b;
+}
+
+fn celt_encoder_abs_i16(value: i16) u32 {
+    const wide: i32 = value as i32;
+    if wide < 0 {
+        return (-wide) as u32;
+    }
+    return wide as u32;
+}
+
+fn celt_encoder_nominal_payload_bytes(profile: &const CeltBasicEncoderProfile) usize {
+    if profile.bitrate_bps == 0 {
+        return CELT_BASIC_ENCODER_TARGET_PAYLOAD_BYTES;
+    }
+
+    const bits_per_frame: u64 = ((profile.bitrate_bps as u64) * (profile.frame_duration_us as u64) + 999999) / 1000000;
+    var packet_bytes: usize = ((bits_per_frame + 7) / 8) as usize;
+    if packet_bytes <= 1 {
+        return 1;
+    }
+    packet_bytes = packet_bytes - 1;
+    if packet_bytes == 0 {
+        return 1;
+    }
+    return packet_bytes;
+}
+
+fn celt_encoder_activity_q8(pcm: &[const i16], required_pcm: usize) !i32 {
+    if required_pcm == 0 || pcm.len < required_pcm {
+        return error.CeltEncoderError;
+    }
+
+    var sum_abs: u64 = 0;
+    var i: usize = 0;
+    while i < required_pcm {
+        sum_abs = sum_abs + (celt_encoder_abs_i16(pcm.ptr[i]) as u64);
+        i = i + 1;
+    }
+
+    const avg_abs: u64 = sum_abs / (required_pcm as u64);
+    if avg_abs >= CELT_BASIC_ENCODER_ACTIVITY_FULL_SCALE {
+        return 256;
+    }
+    return ((avg_abs * 256) / CELT_BASIC_ENCODER_ACTIVITY_FULL_SCALE) as i32;
+}
+
+fn celt_encoder_target_payload_len(profile: &const CeltBasicEncoderProfile, pcm: &[const i16], required_pcm: usize, packet_capacity: usize) !usize {
+    if packet_capacity <= 1 {
+        return error.CeltEncoderError;
+    }
+
+    var target: usize = celt_encoder_nominal_payload_bytes(profile);
+    if profile.vbr && profile.bitrate_bps != 0 {
+        const activity_q8: i32 = try celt_encoder_activity_q8(pcm, required_pcm);
+        const variation: usize = target / 2;
+        const floor: usize = target - variation;
+        const extra: usize = ((variation * 2 * (activity_q8 as usize)) + 128) / 256;
+        target = floor + extra;
+    }
+
+    if target == 0 {
+        target = 1;
+    }
+    return celt_encoder_min_usize(packet_capacity - 1, target);
 }
 
 fn celt_encoder_clear_i16(values: &[i16]) void {
@@ -362,7 +431,7 @@ export fn celt_encoder_encode_i16(state: &CeltEncoderState, pcm: &[const i16], p
         return error.CeltEncoderError;
     }
 
-    const payload_len: usize = celt_encoder_min_usize(packet_out.len - 1, CELT_BASIC_ENCODER_TARGET_PAYLOAD_BYTES);
+    const payload_len: usize = try celt_encoder_target_payload_len(profile, pcm, required_pcm, packet_out.len);
     if payload_len == 0 {
         return error.CeltEncoderError;
     }
