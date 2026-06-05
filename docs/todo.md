@@ -486,7 +486,7 @@
 - [x] 实现语音/音乐粗分类。
 - [x] 实现 SILK VAD。
 - [x] 实现 SILK pitch analysis。
-- [ ] 实现 SILK gain control。
+- [x] 实现 SILK gain control。
 - [ ] 实现 SILK NLSF quantization。
 - [ ] 实现 SILK NSQ。
 - [ ] 实现 CELT transient detection。

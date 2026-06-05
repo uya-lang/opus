@@ -9,10 +9,12 @@ use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_VOICED;
 use src.opus.silk.decoder_control.SilkDecoderControl;
 use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
+use src.opus.silk.encoder.SilkEncoderGainAnalysis;
 use src.opus.silk.encoder.SilkEncoderPitchAnalysis;
 use src.opus.silk.encoder.SilkEncoderState;
 use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
+use src.opus.silk.encoder.silk_encoder_gain_analyze_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_pitch_analyze_i16;
 use src.opus.silk.encoder.silk_encoder_state_init;
@@ -58,6 +60,49 @@ fn fill_silk_encoder_periodic_i16(values: &[i16], period: usize) void {
         values.ptr[i] = (shaped * 220) as i16;
         i = i + 1;
     }
+}
+
+fn fill_silk_encoder_level_i16(values: &[i16], amplitude: i16) void {
+    var i: usize = 0;
+    while i < values.len {
+        if (i % (2 as usize)) == 0 {
+            values.ptr[i] = amplitude;
+        } else {
+            values.ptr[i] = (0 - (amplitude as i32)) as i16;
+        }
+        i = i + 1;
+    }
+}
+
+fn fill_silk_encoder_subframe_level_i16(values: &[i16], subframe: usize, subframe_len: usize, amplitude: i16) void {
+    const start: usize = subframe * subframe_len;
+    var i: usize = 0;
+    while i < subframe_len {
+        const index: usize = start + i;
+        if index < values.len {
+            if (i % (2 as usize)) == 0 {
+                values.ptr[index] = amplitude;
+            } else {
+                values.ptr[index] = (0 - (amplitude as i32)) as i16;
+            }
+        }
+        i = i + 1;
+    }
+}
+
+fn decode_silk_encoder_packet_gains(packet: &[byte], encoded: i32, entropy: &SilkEntropyDecoder, control: &SilkDecoderControl) !void {
+    try silk_entropy_decoder_init(entropy, &packet[1:(encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(entropy);
+    try silk_entropy_decode_lbrr_flags(entropy);
+    _ = try silk_entropy_decode_signal_type(entropy, 0, 0);
+    _ = try silk_entropy_decode_quantization_offset(entropy, 0, 0);
+    control.channels = 1;
+    control.fs_khz = 16;
+    control.frame_length = 320;
+    control.subframe_length = 80;
+    control.nb_subframes = 4;
+    control.lpc_order = 16;
+    try silk_entropy_decode_gains(entropy, control, 0, 0, false);
 }
 
 test "silk basic encoder profile records wideband mono placeholder layout" {
@@ -227,6 +272,68 @@ test "silk encoder writes voiced pitch side info for periodic input" {
     var out_q14: [i32: 320] = [0: 320];
     const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
     try assert_eq_i32(decoded as i32, 320);
+}
+
+test "silk encoder gain analysis tracks subframe levels" {
+    var ramp: [i16: 320] = [0: 320];
+    fill_silk_encoder_subframe_level_i16(&ramp[0:320], 0, 80, 128);
+    fill_silk_encoder_subframe_level_i16(&ramp[0:320], 1, 80, 1024);
+    fill_silk_encoder_subframe_level_i16(&ramp[0:320], 2, 80, 4096);
+    fill_silk_encoder_subframe_level_i16(&ramp[0:320], 3, 80, 12000);
+    const ramp_gains: SilkEncoderGainAnalysis = try silk_encoder_gain_analyze_i16(&ramp[0:320], 320, 1, 4);
+    try assert_eq_i32(ramp_gains.first_msb, ramp_gains.decoded_indices[0] >> 3);
+    try assert_eq_i32(ramp_gains.first_lsb, ramp_gains.decoded_indices[0] - (ramp_gains.first_msb << 3));
+    try assert(ramp_gains.decoded_indices[0] < ramp_gains.decoded_indices[1], "gain analysis must raise the second subframe index");
+    try assert(ramp_gains.decoded_indices[1] < ramp_gains.decoded_indices[2], "gain analysis must raise the third subframe index");
+    try assert(ramp_gains.decoded_indices[2] < ramp_gains.decoded_indices[3], "gain analysis must raise the fourth subframe index");
+
+    var silence: [i16: 320] = [0: 320];
+    const silence_gains: SilkEncoderGainAnalysis = try silk_encoder_gain_analyze_i16(&silence[0:320], 320, 1, 4);
+    try assert_eq_i32(silence_gains.decoded_indices[0], 0);
+    try assert_eq_i32(silence_gains.decoded_indices[1], 0);
+    try assert_eq_i32(silence_gains.delta_symbols[1], 4);
+}
+
+test "silk encoder writes input dependent gain side info" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var soft_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_level_i16(&soft_pcm[0:320], 512);
+    var soft_packet: [byte: 1275] = [0: 1275];
+    const soft_encoded: i32 = try silk_encoder_encode_i16(&state, &soft_pcm[0:320], &soft_packet[0:1275]);
+    var soft_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    var soft_control: SilkDecoderControl = SilkDecoderControl{};
+    try decode_silk_encoder_packet_gains(&soft_packet[0:(soft_encoded as usize)], soft_encoded, &soft_entropy, &soft_control);
+
+    var loud_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_level_i16(&loud_pcm[0:320], 12000);
+    var loud_packet: [byte: 1275] = [0: 1275];
+    const loud_encoded: i32 = try silk_encoder_encode_i16(&state, &loud_pcm[0:320], &loud_packet[0:1275]);
+    var loud_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    var loud_control: SilkDecoderControl = SilkDecoderControl{};
+    try decode_silk_encoder_packet_gains(&loud_packet[0:(loud_encoded as usize)], loud_encoded, &loud_entropy, &loud_control);
+
+    try assert(loud_entropy.gain_indices[0] > soft_entropy.gain_indices[0], "louder input must encode a higher independent gain index");
+    try assert(loud_control.gains_q16[0] > soft_control.gains_q16[0], "louder input must decode to a higher first-subframe gain");
+
+    var ramp_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_subframe_level_i16(&ramp_pcm[0:320], 0, 80, 256);
+    fill_silk_encoder_subframe_level_i16(&ramp_pcm[0:320], 1, 80, 1024);
+    fill_silk_encoder_subframe_level_i16(&ramp_pcm[0:320], 2, 80, 4096);
+    fill_silk_encoder_subframe_level_i16(&ramp_pcm[0:320], 3, 80, 12000);
+    var ramp_packet: [byte: 1275] = [0: 1275];
+    const ramp_encoded: i32 = try silk_encoder_encode_i16(&state, &ramp_pcm[0:320], &ramp_packet[0:1275]);
+    var ramp_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    var ramp_control: SilkDecoderControl = SilkDecoderControl{};
+    try decode_silk_encoder_packet_gains(&ramp_packet[0:(ramp_encoded as usize)], ramp_encoded, &ramp_entropy, &ramp_control);
+    try assert(ramp_control.gains_q16[3] > ramp_control.gains_q16[0], "ramped input must decode to a higher last-subframe gain");
 }
 
 test "silk encoder rejects short packet buffers before writing past them" {

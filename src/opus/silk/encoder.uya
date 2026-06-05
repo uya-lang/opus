@@ -59,6 +59,12 @@ const SILK_BASIC_ENCODER_PITCH_CONTOUR_INDEX: i32 = 0;
 const SILK_BASIC_ENCODER_LTP_PERIODICITY_INDEX: i32 = 0;
 const SILK_BASIC_ENCODER_LTP_CODEBOOK_INDEX: i32 = 1;
 const SILK_BASIC_ENCODER_LTP_SCALE_INDEX: i32 = 0;
+const SILK_BASIC_ENCODER_N_LEVELS_QGAIN: i32 = 64;
+const SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT: i32 = -4;
+const SILK_BASIC_ENCODER_MAX_DELTA_GAIN_QUANT: i32 = 36;
+const SILK_BASIC_ENCODER_GAIN_INDEX_ABS_STEP: u32 = 256;
+const SILK_BASIC_ENCODER_GAIN_INDEX_ROUNDING: u32 = SILK_BASIC_ENCODER_GAIN_INDEX_ABS_STEP / 2;
+const SILK_BASIC_ENCODER_GAIN_INDEX_CAP: i32 = 40;
 
 export struct SilkBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -87,6 +93,13 @@ export struct SilkEncoderPitchAnalysis {
     lag_samples: i32,
     lag_index: i32,
     correlation_q15: u32,
+}
+
+export struct SilkEncoderGainAnalysis {
+    first_msb: i32,
+    first_lsb: i32,
+    delta_symbols: [i32: 4],
+    decoded_indices: [i32: 4],
 }
 
 export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !SilkBasicEncoderProfile {
@@ -178,6 +191,80 @@ fn silk_encoder_abs_i32(value: i32) u32 {
     return value as u32;
 }
 
+fn silk_encoder_clamp_i32(value: i32, low: i32, high: i32) i32 {
+    if value < low {
+        return low;
+    }
+    if value > high {
+        return high;
+    }
+    return value;
+}
+
+fn silk_encoder_gain_index_from_avg_abs(avg_abs: u32) i32 {
+    if avg_abs == 0 {
+        return 0;
+    }
+    var index: i32 = ((avg_abs + SILK_BASIC_ENCODER_GAIN_INDEX_ROUNDING) / SILK_BASIC_ENCODER_GAIN_INDEX_ABS_STEP) as i32;
+    if index < 1 {
+        index = 1;
+    }
+    return silk_encoder_clamp_i32(index, 0, SILK_BASIC_ENCODER_GAIN_INDEX_CAP);
+}
+
+fn silk_encoder_gain_delta_decoded_index(prev_index: i32, symbol: i32) i32 {
+    const ind_tmp: i32 = symbol + SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT;
+    const double_step_size_threshold: i32 = (2 * SILK_BASIC_ENCODER_MAX_DELTA_GAIN_QUANT) - SILK_BASIC_ENCODER_N_LEVELS_QGAIN + prev_index;
+    var next_index: i32 = prev_index;
+    if ind_tmp > double_step_size_threshold {
+        next_index = prev_index + (ind_tmp << 1) - double_step_size_threshold;
+    } else {
+        next_index = prev_index + ind_tmp;
+    }
+    return silk_encoder_clamp_i32(next_index, 0, SILK_BASIC_ENCODER_N_LEVELS_QGAIN - 1);
+}
+
+fn silk_encoder_gain_delta_symbol_for_target(prev_index: i32, target_index: i32) i32 {
+    var best_symbol: i32 = 0;
+    var best_error: u32 = 2147483647;
+    var symbol: i32 = 0;
+    while symbol <= (SILK_BASIC_ENCODER_MAX_DELTA_GAIN_QUANT - SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT) {
+        const decoded_index: i32 = silk_encoder_gain_delta_decoded_index(prev_index, symbol);
+        const distance: u32 = silk_encoder_abs_i32(decoded_index - target_index);
+        const current_hold_distance: u32 = silk_encoder_abs_i32(symbol - (0 - SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT));
+        const best_hold_distance: u32 = silk_encoder_abs_i32(best_symbol - (0 - SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT));
+        if distance < best_error || (distance == best_error && current_hold_distance < best_hold_distance) {
+            best_error = distance;
+            best_symbol = symbol;
+        }
+        symbol = symbol + 1;
+    }
+    return best_symbol;
+}
+
+fn silk_encoder_subframe_avg_abs_i16(pcm: &[const i16], start_frame: usize, subframe_samples: usize, channels: usize) !u32 {
+    if channels == 0 || subframe_samples == 0 {
+        return error.SilkEncoderError;
+    }
+    const sample_count: usize = subframe_samples * channels;
+    if sample_count == 0 || pcm.len < (start_frame * channels) + sample_count {
+        return error.SilkEncoderError;
+    }
+
+    var sum_abs: u64 = 0;
+    var frame: usize = 0;
+    while frame < subframe_samples {
+        var channel: usize = 0;
+        while channel < channels {
+            const index: usize = ((start_frame + frame) * channels) + channel;
+            sum_abs = sum_abs + (silk_encoder_abs_i16(pcm.ptr[index]) as u64);
+            channel = channel + 1;
+        }
+        frame = frame + 1;
+    }
+    return (sum_abs / (sample_count as u64)) as u32;
+}
+
 export fn silk_encoder_vad_features_i16(pcm: &[const i16], frame_samples: i32, channels: u8) !SilkEncoderVadFeatures {
     if frame_samples <= 1 || channels == 0 || channels > 2 {
         return error.SilkEncoderError;
@@ -238,6 +325,50 @@ fn silk_encoder_vad_from_features(features: &const SilkEncoderVadFeatures) bool 
 export fn silk_encoder_vad_i16(pcm: &[const i16], frame_samples: i32, channels: u8) !bool {
     const features: SilkEncoderVadFeatures = try silk_encoder_vad_features_i16(pcm, frame_samples, channels);
     return silk_encoder_vad_from_features(&features);
+}
+
+export fn silk_encoder_gain_analyze_i16(pcm: &[const i16], frame_samples: i32, channels: u8, nb_subframes: i32) !SilkEncoderGainAnalysis {
+    if frame_samples <= 0 || channels == 0 || channels > 2 || nb_subframes <= 0 || nb_subframes > SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR {
+        return error.SilkEncoderError;
+    }
+    if (frame_samples % nb_subframes) != 0 {
+        return error.SilkEncoderError;
+    }
+    const frame_count: usize = frame_samples as usize;
+    const channel_count: usize = channels as usize;
+    const required_pcm: usize = frame_count * channel_count;
+    if pcm.len < required_pcm {
+        return error.SilkEncoderError;
+    }
+
+    var analysis: SilkEncoderGainAnalysis = SilkEncoderGainAnalysis{
+        first_msb: 0,
+        first_lsb: 0,
+        delta_symbols: [0: 4],
+        decoded_indices: [0: 4],
+    };
+    const subframe_samples: usize = (frame_samples / nb_subframes) as usize;
+    var prev_index: i32 = 0;
+    var subframe: i32 = 0;
+    while subframe < nb_subframes {
+        const start_frame: usize = (subframe as usize) * subframe_samples;
+        const avg_abs: u32 = try silk_encoder_subframe_avg_abs_i16(pcm, start_frame, subframe_samples, channel_count);
+        const target_index: i32 = silk_encoder_gain_index_from_avg_abs(avg_abs);
+        const field_index: usize = subframe as usize;
+        if subframe == 0 {
+            prev_index = target_index;
+            analysis.first_msb = target_index >> 3;
+            analysis.first_lsb = target_index - (analysis.first_msb << 3);
+            analysis.decoded_indices[field_index] = target_index;
+        } else {
+            const symbol: i32 = silk_encoder_gain_delta_symbol_for_target(prev_index, target_index);
+            prev_index = silk_encoder_gain_delta_decoded_index(prev_index, symbol);
+            analysis.delta_symbols[field_index] = symbol;
+            analysis.decoded_indices[field_index] = prev_index;
+        }
+        subframe = subframe + 1;
+    }
+    return analysis;
 }
 
 fn silk_encoder_pitch_empty(correlation_q15: u32) SilkEncoderPitchAnalysis {
@@ -612,7 +743,35 @@ fn silk_encoder_encode_wb20_voiced_pitch_info(enc: &EcEnc, pitch: &const SilkEnc
     ec_enc_icdf(enc, SILK_BASIC_ENCODER_LTP_SCALE_INDEX, &scale_icdf[0:3], 8);
 }
 
-fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &const SilkEncoderPitchAnalysis) !void {
+fn silk_encoder_encode_wb20_gains(enc: &EcEnc, signal_table: i32, gains: &const SilkEncoderGainAnalysis) !void {
+    var gain_icdf: [byte: 8] = [0: 8];
+    try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], signal_table);
+    if gains.first_msb < 0 || gains.first_msb >= 8 {
+        return error.SilkEncoderError;
+    }
+    ec_enc_icdf(enc, gains.first_msb, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try silk_encoder_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    if gains.first_lsb < 0 || gains.first_lsb >= 8 {
+        return error.SilkEncoderError;
+    }
+    ec_enc_icdf(enc, gains.first_lsb, &uniform8_icdf[0:8], 8);
+
+    var delta_gain_icdf: [byte: 41] = [0: 41];
+    try silk_encoder_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
+    var subframe: i32 = 1;
+    while subframe < SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR {
+        const symbol: i32 = gains.delta_symbols[subframe as usize];
+        if symbol < 0 || symbol > (SILK_BASIC_ENCODER_MAX_DELTA_GAIN_QUANT - SILK_BASIC_ENCODER_MIN_DELTA_GAIN_QUANT) {
+            return error.SilkEncoderError;
+        }
+        ec_enc_icdf(enc, symbol, &delta_gain_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+}
+
+fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &const SilkEncoderPitchAnalysis, gains: &const SilkEncoderGainAnalysis) !void {
     var signal_type: i32 = SILK_SIGNAL_TYPE_UNVOICED;
     var type_offset_symbol: i32 = SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL;
     if vad_active && pitch.voiced {
@@ -624,27 +783,13 @@ fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &con
     const type_icdf_len: usize = try silk_encoder_fill_type_offset_icdf(&type_icdf[0:4], vad_active);
     ec_enc_icdf(enc, type_offset_symbol, &type_icdf[0:type_icdf_len], 8);
 
-    var gain_icdf: [byte: 8] = [0: 8];
     var gain_signal_table: i32 = 0;
     if signal_type == SILK_SIGNAL_TYPE_VOICED {
         gain_signal_table = 2;
     } else if vad_active {
         gain_signal_table = 1;
     }
-    try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], gain_signal_table);
-    ec_enc_icdf(enc, 1, &gain_icdf[0:8], 8);
-
-    var uniform8_icdf: [byte: 8] = [0: 8];
-    try silk_encoder_fill_uniform8_icdf(&uniform8_icdf[0:8]);
-    ec_enc_icdf(enc, 5, &uniform8_icdf[0:8], 8);
-
-    var delta_gain_icdf: [byte: 41] = [0: 41];
-    try silk_encoder_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
-    var subframe: i32 = 1;
-    while subframe < 4 {
-        ec_enc_icdf(enc, 4, &delta_gain_icdf[0:41], 8);
-        subframe = subframe + 1;
-    }
+    try silk_encoder_encode_wb20_gains(enc, gain_signal_table, gains);
 
     var cb1_icdf: [byte: 32] = [0: 32];
     try silk_encoder_fill_nlsf_cb1_icdf(&cb1_icdf[0:32], signal_type);
@@ -679,7 +824,7 @@ fn silk_encoder_encode_wb20_side_info(enc: &EcEnc, vad_active: bool, pitch: &con
     try silk_encoder_encode_zero_pulse_blocks(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES, signal_type);
 }
 
-fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &const SilkEncoderPitchAnalysis) !usize {
+fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &const SilkEncoderPitchAnalysis, gains: &const SilkEncoderGainAnalysis) !usize {
     if payload.len < SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES {
         return error.SilkEncoderError;
     }
@@ -692,7 +837,7 @@ fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool, pitch: &
     }
     ec_enc_bit_logp(&enc, vad_symbol, 1);
     ec_enc_bit_logp(&enc, 0, 1);
-    try silk_encoder_encode_wb20_side_info(&enc, vad_active, pitch);
+    try silk_encoder_encode_wb20_side_info(&enc, vad_active, pitch, gains);
 
     const used: usize = ec_enc_done(&enc) catch {
         return error.SilkEncoderError;
@@ -725,6 +870,7 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     if vad_active {
         pitch = try silk_encoder_pitch_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, state.profile.sample_rate_hz as i32 / 1000);
     }
-    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active, &pitch);
+    const gains: SilkEncoderGainAnalysis = try silk_encoder_gain_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR);
+    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active, &pitch, &gains);
     return SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES as i32;
 }
