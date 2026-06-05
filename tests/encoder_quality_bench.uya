@@ -115,3 +115,50 @@ test "objective quality bench captures speech and music cases" {
     try assert(music_result.sample_count > voice_result.sample_count, "music objective case must record stereo 48k sample coverage");
     try assert(music_result.noise_energy > 0, "music objective case must report roundtrip noise");
 }
+
+test "practical speech encoder improves objective MSE over baseline" {
+    var baseline_config: OpusEncoderConfig = opus_encoder_config_default();
+    baseline_config.sample_rate_hz = 16000;
+    baseline_config.channels = 1;
+    baseline_config.application = OpusApplication.VOIP;
+    baseline_config.signal_hint = OpusSignalHint.VOICE;
+    baseline_config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    baseline_config.bitrate_bps = 24000;
+    baseline_config.complexity = 0;
+
+    var practical_config: OpusEncoderConfig = opus_encoder_config_default();
+    practical_config.sample_rate_hz = 16000;
+    practical_config.channels = 1;
+    practical_config.application = OpusApplication.VOIP;
+    practical_config.signal_hint = OpusSignalHint.VOICE;
+    practical_config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    practical_config.bitrate_bps = 24000;
+    practical_config.complexity = 10;
+
+    var pcm: [i16: QUALITY_TEST_SILK_FRAME_SAMPLES] = [0: QUALITY_TEST_SILK_FRAME_SAMPLES];
+    objective_quality_fill_voice_16k_mono(&pcm[0:QUALITY_TEST_SILK_FRAME_SAMPLES]);
+
+    var baseline_packet: [byte: QUALITY_TEST_PACKET_BYTES] = [0: QUALITY_TEST_PACKET_BYTES];
+    var baseline_decoded: [i16: QUALITY_TEST_SILK_FRAME_SAMPLES] = [0: QUALITY_TEST_SILK_FRAME_SAMPLES];
+    const baseline: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &baseline_config,
+        &pcm[0:QUALITY_TEST_SILK_FRAME_SAMPLES],
+        QUALITY_TEST_SILK_FRAME_SAMPLES as i32,
+        &baseline_packet[0:QUALITY_TEST_PACKET_BYTES],
+        &baseline_decoded[0:QUALITY_TEST_SILK_FRAME_SAMPLES],
+    );
+
+    var practical_packet: [byte: QUALITY_TEST_PACKET_BYTES] = [0: QUALITY_TEST_PACKET_BYTES];
+    var practical_decoded: [i16: QUALITY_TEST_SILK_FRAME_SAMPLES] = [0: QUALITY_TEST_SILK_FRAME_SAMPLES];
+    const practical: ObjectiveQualityResult = try objective_quality_measure_i16(
+        &practical_config,
+        &pcm[0:QUALITY_TEST_SILK_FRAME_SAMPLES],
+        QUALITY_TEST_SILK_FRAME_SAMPLES as i32,
+        &practical_packet[0:QUALITY_TEST_PACKET_BYTES],
+        &practical_decoded[0:QUALITY_TEST_SILK_FRAME_SAMPLES],
+    );
+
+    const required_mse_q8: u64 = (baseline.mse_q8 * 99) / 100;
+    try assert(practical.mse_q8 <= required_mse_q8, "practical speech encoder must clear the 1% objective MSE gate");
+    try assert(practical.snr_q8 >= baseline.snr_q8, "practical speech encoder must not reduce objective SNR");
+}
