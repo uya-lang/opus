@@ -4,6 +4,7 @@ use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
 use src.opus.silk.decoder.silk_decode_mono_packet_q14;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
 use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderState;
@@ -11,7 +12,31 @@ use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
+use src.opus.silk.entropy_decode.SilkEntropyDecoder;
+use src.opus.silk.entropy_decode.silk_entropy_decode_lbrr_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decode_signal_type;
+use src.opus.silk.entropy_decode.silk_entropy_decode_vad_flags;
+use src.opus.silk.entropy_decode.silk_entropy_decoder_init;
 use src.opus.silk.state.SilkDecoderState;
+
+fn fill_silk_encoder_voice_like_i16(values: &[i16]) void {
+    var i: usize = 0;
+    while i < values.len {
+        const phase: usize = i % (80 as usize);
+        var sample: i32 = 0;
+        if phase < 20 {
+            sample = 9000 - ((phase as i32) * 300);
+        } else if phase < 40 {
+            sample = 1800 - (((phase - 20) as i32) * 80);
+        } else if phase < 60 {
+            sample = -1400;
+        } else {
+            sample = 700;
+        }
+        values.ptr[i] = sample as i16;
+        i = i + 1;
+    }
+}
 
 test "silk basic encoder profile records wideband mono placeholder layout" {
     var config: OpusEncoderConfig = opus_encoder_config_default();
@@ -82,6 +107,38 @@ test "silk encoder writes wideband mono packet decodable by silk decoder" {
     var out_q14: [i32: 320] = [0: 320];
     const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
     try assert_eq_i32(decoded as i32, 320);
+}
+
+test "silk encoder VAD marks silence inactive and voice-like input active" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var silence_pcm: [i16: 320] = [0: 320];
+    var silence_packet: [byte: 1275] = [0: 1275];
+    const silence_encoded: i32 = try silk_encoder_encode_i16(&state, &silence_pcm[0:320], &silence_packet[0:1275]);
+    var silence_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&silence_entropy, &silence_packet[1:(silence_encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&silence_entropy);
+    try assert(!silence_entropy.vad_flags[0], "silent SILK input must encode an inactive VAD flag");
+    try silk_entropy_decode_lbrr_flags(&silence_entropy);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&silence_entropy, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
+
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_voice_like_i16(&voice_pcm[0:320]);
+    var voice_packet: [byte: 1275] = [0: 1275];
+    const voice_encoded: i32 = try silk_encoder_encode_i16(&state, &voice_pcm[0:320], &voice_packet[0:1275]);
+    var voice_entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&voice_entropy, &voice_packet[1:(voice_encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&voice_entropy);
+    try assert(voice_entropy.vad_flags[0], "voice-like SILK input must encode an active VAD flag");
+    try silk_entropy_decode_lbrr_flags(&voice_entropy);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&voice_entropy, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
 }
 
 test "silk encoder rejects short packet buffers before writing past them" {

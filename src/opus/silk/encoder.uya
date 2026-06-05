@@ -22,6 +22,7 @@ use src.opus.silk.tables.silk_gain_icdf_value;
 use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
 use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
 use src.opus.silk.tables.silk_rate_levels_icdf_value;
+use src.opus.silk.tables.silk_type_offset_no_vad_icdf_value;
 use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
 use src.opus.silk.tables.silk_uniform4_icdf_value;
 use src.opus.silk.tables.silk_uniform8_icdf_value;
@@ -39,6 +40,9 @@ const SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES: usize = 384;
 const SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES: usize = SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES - 1;
 const SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL: i32 = 1;
 const SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL: i32 = 5;
+const SILK_BASIC_ENCODER_VAD_MIN_AVG_ABS: u32 = 96;
+const SILK_BASIC_ENCODER_VAD_MIN_PEAK_ABS: u32 = 384;
+const SILK_BASIC_ENCODER_VAD_MIN_AVG_DELTA: u32 = 48;
 
 export struct SilkBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -54,6 +58,12 @@ export struct SilkBasicEncoderProfile {
 export struct SilkEncoderState {
     profile: SilkBasicEncoderProfile,
     initialized: bool,
+}
+
+export struct SilkEncoderVadFeatures {
+    average_abs: u32,
+    average_delta: u32,
+    peak_abs: u32,
 }
 
 export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, frame_size_48k: i32) !SilkBasicEncoderProfile {
@@ -130,15 +140,105 @@ fn silk_encoder_clear_byte(values: &[byte]) void {
     }
 }
 
-fn silk_encoder_fill_type_offset_vad_icdf(out: &[byte]) !void {
-    if out.len < 4 {
+fn silk_encoder_abs_i16(value: i16) u32 {
+    const wide: i32 = value as i32;
+    if wide < 0 {
+        return (-wide) as u32;
+    }
+    return wide as u32;
+}
+
+fn silk_encoder_abs_i32(value: i32) u32 {
+    if value < 0 {
+        return (-value) as u32;
+    }
+    return value as u32;
+}
+
+export fn silk_encoder_vad_features_i16(pcm: &[const i16], frame_samples: i32, channels: u8) !SilkEncoderVadFeatures {
+    if frame_samples <= 1 || channels == 0 || channels > 2 {
         return error.SilkEncoderError;
     }
-    var i: usize = 0;
-    while i < 4 {
-        out.ptr[i] = silk_type_offset_vad_icdf_value(i);
-        i = i + 1;
+    const frame_count: usize = frame_samples as usize;
+    const channel_count: usize = channels as usize;
+    const required_pcm: usize = frame_count * channel_count;
+    if pcm.len < required_pcm {
+        return error.SilkEncoderError;
     }
+
+    var sum_abs: u64 = 0;
+    var sum_delta: u64 = 0;
+    var peak_abs: u32 = 0;
+    var channel: usize = 0;
+    while channel < channel_count {
+        var prev: i16 = pcm.ptr[channel];
+        var prev_abs: u32 = silk_encoder_abs_i16(prev);
+        sum_abs = sum_abs + (prev_abs as u64);
+        if prev_abs > peak_abs {
+            peak_abs = prev_abs;
+        }
+
+        var frame: usize = 1;
+        while frame < frame_count {
+            const current: i16 = pcm.ptr[(frame * channel_count) + channel];
+            const current_abs: u32 = silk_encoder_abs_i16(current);
+            sum_abs = sum_abs + (current_abs as u64);
+            sum_delta = sum_delta + (silk_encoder_abs_i32((current as i32) - (prev as i32)) as u64);
+            if current_abs > peak_abs {
+                peak_abs = current_abs;
+            }
+            prev = current;
+            frame = frame + 1;
+        }
+        channel = channel + 1;
+    }
+
+    const sample_count: u64 = required_pcm as u64;
+    const delta_count: u64 = ((frame_count - 1) * channel_count) as u64;
+    return SilkEncoderVadFeatures{
+        average_abs: (sum_abs / sample_count) as u32,
+        average_delta: (sum_delta / delta_count) as u32,
+        peak_abs: peak_abs,
+    };
+}
+
+fn silk_encoder_vad_from_features(features: &const SilkEncoderVadFeatures) bool {
+    if features.average_abs >= SILK_BASIC_ENCODER_VAD_MIN_AVG_ABS && features.peak_abs >= SILK_BASIC_ENCODER_VAD_MIN_PEAK_ABS {
+        return true;
+    }
+    if features.average_abs >= (SILK_BASIC_ENCODER_VAD_MIN_AVG_ABS / 2) && features.average_delta >= SILK_BASIC_ENCODER_VAD_MIN_AVG_DELTA && features.peak_abs >= SILK_BASIC_ENCODER_VAD_MIN_PEAK_ABS {
+        return true;
+    }
+    return false;
+}
+
+export fn silk_encoder_vad_i16(pcm: &[const i16], frame_samples: i32, channels: u8) !bool {
+    const features: SilkEncoderVadFeatures = try silk_encoder_vad_features_i16(pcm, frame_samples, channels);
+    return silk_encoder_vad_from_features(&features);
+}
+
+fn silk_encoder_fill_type_offset_icdf(out: &[byte], vad_active: bool) !usize {
+    if vad_active {
+        if out.len < 4 {
+            return error.SilkEncoderError;
+        }
+        var i: usize = 0;
+        while i < 4 {
+            out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+            i = i + 1;
+        }
+        return 4 as usize;
+    }
+
+    if out.len < 2 {
+        return error.SilkEncoderError;
+    }
+    var j: usize = 0;
+    while j < 2 {
+        out.ptr[j] = silk_type_offset_no_vad_icdf_value(j);
+        j = j + 1;
+    }
+    return 2 as usize;
 }
 
 fn silk_encoder_fill_gain_icdf(out: &[byte], signal_table: i32) !void {
@@ -263,13 +363,17 @@ fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32) !void {
     }
 }
 
-fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc) !void {
+fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc, vad_active: bool) !void {
     var type_icdf: [byte: 4] = [0: 4];
-    try silk_encoder_fill_type_offset_vad_icdf(&type_icdf[0:4]);
-    ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL, &type_icdf[0:4], 8);
+    const type_icdf_len: usize = try silk_encoder_fill_type_offset_icdf(&type_icdf[0:4], vad_active);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL, &type_icdf[0:type_icdf_len], 8);
 
     var gain_icdf: [byte: 8] = [0: 8];
-    try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], 1);
+    var gain_signal_table: i32 = 0;
+    if vad_active {
+        gain_signal_table = 1;
+    }
+    try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], gain_signal_table);
     ec_enc_icdf(enc, 1, &gain_icdf[0:8], 8);
 
     var uniform8_icdf: [byte: 8] = [0: 8];
@@ -313,16 +417,20 @@ fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc) !void {
     try silk_encoder_encode_zero_pulse_blocks(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES);
 }
 
-fn silk_encoder_encode_wb20_payload(payload: &[byte]) !usize {
+fn silk_encoder_encode_wb20_payload(payload: &[byte], vad_active: bool) !usize {
     if payload.len < SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES {
         return error.SilkEncoderError;
     }
 
     var enc: EcEnc = EcEnc{};
     ec_enc_init(&enc, payload);
-    ec_enc_bit_logp(&enc, 1, 1);
+    var vad_symbol: i32 = 0;
+    if vad_active {
+        vad_symbol = 1;
+    }
+    ec_enc_bit_logp(&enc, vad_symbol, 1);
     ec_enc_bit_logp(&enc, 0, 1);
-    try silk_encoder_encode_wb20_unvoiced_side_info(&enc);
+    try silk_encoder_encode_wb20_unvoiced_side_info(&enc, vad_active);
 
     const used: usize = ec_enc_done(&enc) catch {
         return error.SilkEncoderError;
@@ -350,6 +458,7 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
 
     silk_encoder_clear_byte(&packet_out[0:SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES]);
     packet_out.ptr[0] = state.profile.toc_byte_code0;
-    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES]);
+    const vad_active: bool = try silk_encoder_vad_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels);
+    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES], vad_active);
     return SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES as i32;
 }
