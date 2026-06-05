@@ -1,8 +1,30 @@
+use src.opus.entropy.range_enc.EcEnc;
+use src.opus.entropy.range_enc.ec_enc_bit_logp;
+use src.opus.entropy.range_enc.ec_enc_check;
+use src.opus.entropy.range_enc.ec_enc_done;
+use src.opus.entropy.range_enc.ec_enc_icdf;
+use src.opus.entropy.range_enc.ec_enc_init;
 use src.opus.core.errors.validate_channels;
 use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.errors.validate_sample_rate;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
+use src.opus.silk.decoder_control.SILK_SIGNAL_TYPE_UNVOICED;
+use src.opus.silk.entropy_decode.silk_entropy_pulse_block_count;
+use src.opus.silk.nlsf.SILK_NLSF_MAX_ORDER;
+use src.opus.silk.nlsf.SILK_NLSF_QUANT_MAX_AMPLITUDE;
+use src.opus.silk.nlsf.silk_nlsf_unpack_ec_tables;
+use src.opus.silk.nlsf_tables.SILK_NLSF_CODEBOOK_WB;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb1_icdf;
+use src.opus.silk.nlsf_tables.silk_nlsf_cb2_icdf;
+use src.opus.silk.tables.silk_delta_gain_icdf_value;
+use src.opus.silk.tables.silk_gain_icdf_value;
+use src.opus.silk.tables.silk_nlsf_interpolation_factor_icdf_value;
+use src.opus.silk.tables.silk_pulses_per_block_icdf_value;
+use src.opus.silk.tables.silk_rate_levels_icdf_value;
+use src.opus.silk.tables.silk_type_offset_vad_icdf_value;
+use src.opus.silk.tables.silk_uniform4_icdf_value;
+use src.opus.silk.tables.silk_uniform8_icdf_value;
 
 export error SilkEncoderError;
 export error SilkEncoderUnsupported;
@@ -13,6 +35,10 @@ export const SILK_BASIC_ENCODER_WB_20MS_FRAME_SIZE_48K: i32 = 960;
 export const SILK_BASIC_ENCODER_WB_20MS_DURATION_US: u32 = 20000;
 export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_CONFIG_INDEX: u8 = 9;
 export const SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0: byte = 72;
+const SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES: usize = 384;
+const SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES: usize = SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES - 1;
+const SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL: i32 = 1;
+const SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL: i32 = 5;
 
 export struct SilkBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -96,6 +122,217 @@ export fn silk_encoder_is_initialized(state: &const SilkEncoderState) bool {
     return state.initialized;
 }
 
+fn silk_encoder_clear_byte(values: &[byte]) void {
+    var i: usize = 0;
+    while i < values.len {
+        values.ptr[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_type_offset_vad_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_type_offset_vad_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_gain_icdf(out: &[byte], signal_table: i32) !void {
+    if out.len < 8 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_gain_icdf_value(signal_table, i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_delta_gain_icdf(out: &[byte]) !void {
+    if out.len < 41 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 41 {
+        out.ptr[i] = silk_delta_gain_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_uniform8_icdf(out: &[byte]) !void {
+    if out.len < 8 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 8 {
+        out.ptr[i] = silk_uniform8_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_uniform4_icdf(out: &[byte]) !void {
+    if out.len < 4 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 4 {
+        out.ptr[i] = silk_uniform4_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_nlsf_cb1_icdf(out: &[byte]) !void {
+    if out.len < 32 {
+        return error.SilkEncoderError;
+    }
+    const base: usize = (SILK_SIGNAL_TYPE_UNVOICED as usize) * 32;
+    var i: usize = 0;
+    while i < 32 {
+        out.ptr[i] = silk_nlsf_cb1_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_nlsf_cb2_icdf(out: &[byte], ec_ix: i16) !void {
+    if out.len < 9 || ec_ix < 0 {
+        return error.SilkEncoderError;
+    }
+    const base: usize = ec_ix as usize;
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_nlsf_cb2_icdf(SILK_NLSF_CODEBOOK_WB, base + i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_nlsf_interpolation_icdf(out: &[byte]) !void {
+    if out.len < 5 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 5 {
+        out.ptr[i] = silk_nlsf_interpolation_factor_icdf_value(i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_rate_levels_icdf(out: &[byte]) !void {
+    if out.len < 9 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 9 {
+        out.ptr[i] = silk_rate_levels_icdf_value(SILK_SIGNAL_TYPE_UNVOICED, i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_fill_pulses_per_block_icdf(out: &[byte], rate_level: i32) !void {
+    if out.len < 18 {
+        return error.SilkEncoderError;
+    }
+    var i: usize = 0;
+    while i < 18 {
+        out.ptr[i] = silk_pulses_per_block_icdf_value(rate_level, i);
+        i = i + 1;
+    }
+}
+
+fn silk_encoder_encode_zero_pulse_blocks(enc: &EcEnc, frame_length: i32) !void {
+    const blocks_i32: i32 = silk_entropy_pulse_block_count(frame_length) catch {
+        return error.SilkEncoderError;
+    };
+    if blocks_i32 <= 0 || blocks_i32 > 20 {
+        return error.SilkEncoderError;
+    }
+
+    var rate_icdf: [byte: 9] = [0: 9];
+    try silk_encoder_fill_rate_levels_icdf(&rate_icdf[0:9]);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL, &rate_icdf[0:9], 8);
+
+    var pulse_icdf: [byte: 18] = [0: 18];
+    try silk_encoder_fill_pulses_per_block_icdf(&pulse_icdf[0:18], SILK_BASIC_ENCODER_UNVOICED_RATE_LEVEL);
+    var block: i32 = 0;
+    while block < blocks_i32 {
+        ec_enc_icdf(enc, 0, &pulse_icdf[0:18], 8);
+        block = block + 1;
+    }
+}
+
+fn silk_encoder_encode_wb20_unvoiced_side_info(enc: &EcEnc) !void {
+    var type_icdf: [byte: 4] = [0: 4];
+    try silk_encoder_fill_type_offset_vad_icdf(&type_icdf[0:4]);
+    ec_enc_icdf(enc, SILK_BASIC_ENCODER_UNVOICED_TYPE_OFFSET_SYMBOL, &type_icdf[0:4], 8);
+
+    var gain_icdf: [byte: 8] = [0: 8];
+    try silk_encoder_fill_gain_icdf(&gain_icdf[0:8], 1);
+    ec_enc_icdf(enc, 1, &gain_icdf[0:8], 8);
+
+    var uniform8_icdf: [byte: 8] = [0: 8];
+    try silk_encoder_fill_uniform8_icdf(&uniform8_icdf[0:8]);
+    ec_enc_icdf(enc, 5, &uniform8_icdf[0:8], 8);
+
+    var delta_gain_icdf: [byte: 41] = [0: 41];
+    try silk_encoder_fill_delta_gain_icdf(&delta_gain_icdf[0:41]);
+    var subframe: i32 = 1;
+    while subframe < 4 {
+        ec_enc_icdf(enc, 4, &delta_gain_icdf[0:41], 8);
+        subframe = subframe + 1;
+    }
+
+    var cb1_icdf: [byte: 32] = [0: 32];
+    try silk_encoder_fill_nlsf_cb1_icdf(&cb1_icdf[0:32]);
+    ec_enc_icdf(enc, 0, &cb1_icdf[0:32], 8);
+
+    var ec_ix: [i16: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    var pred_q8: [byte: SILK_NLSF_MAX_ORDER] = [0: SILK_NLSF_MAX_ORDER];
+    silk_nlsf_unpack_ec_tables(&ec_ix[0:SILK_NLSF_MAX_ORDER], &pred_q8[0:SILK_NLSF_MAX_ORDER], SILK_NLSF_CODEBOOK_WB, 0) catch {
+        return error.SilkEncoderError;
+    };
+
+    var order_index: usize = 0;
+    while order_index < SILK_NLSF_MAX_ORDER {
+        var cb2_icdf: [byte: 9] = [0: 9];
+        try silk_encoder_fill_nlsf_cb2_icdf(&cb2_icdf[0:9], ec_ix[order_index]);
+        ec_enc_icdf(enc, SILK_NLSF_QUANT_MAX_AMPLITUDE, &cb2_icdf[0:9], 8);
+        order_index = order_index + 1;
+    }
+
+    var interpolation_icdf: [byte: 5] = [0: 5];
+    try silk_encoder_fill_nlsf_interpolation_icdf(&interpolation_icdf[0:5]);
+    ec_enc_icdf(enc, 4, &interpolation_icdf[0:5], 8);
+
+    var seed_icdf: [byte: 4] = [0: 4];
+    try silk_encoder_fill_uniform4_icdf(&seed_icdf[0:4]);
+    ec_enc_icdf(enc, 2, &seed_icdf[0:4], 8);
+
+    try silk_encoder_encode_zero_pulse_blocks(enc, SILK_BASIC_ENCODER_WB_20MS_INPUT_FRAME_SAMPLES);
+}
+
+fn silk_encoder_encode_wb20_payload(payload: &[byte]) !usize {
+    if payload.len < SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES {
+        return error.SilkEncoderError;
+    }
+
+    var enc: EcEnc = EcEnc{};
+    ec_enc_init(&enc, payload);
+    ec_enc_bit_logp(&enc, 1, 1);
+    ec_enc_bit_logp(&enc, 0, 1);
+    try silk_encoder_encode_wb20_unvoiced_side_info(&enc);
+
+    const used: usize = ec_enc_done(&enc) catch {
+        return error.SilkEncoderError;
+    };
+    ec_enc_check(&enc) catch {
+        return error.SilkEncoderError;
+    };
+    return used;
+}
+
 export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], packet_out: &[byte]) !i32 {
     if !state.initialized {
         return error.SilkEncoderError;
@@ -107,7 +344,12 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     if state.profile.toc_byte_code0 != SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 {
         return error.SilkEncoderError;
     }
+    if packet_out.len < SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES {
+        return error.SilkEncoderError;
+    }
 
+    silk_encoder_clear_byte(&packet_out[0:SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES]);
     packet_out.ptr[0] = state.profile.toc_byte_code0;
-    return 1;
+    _ = try silk_encoder_encode_wb20_payload(&packet_out[1:SILK_BASIC_ENCODER_WB_20MS_PAYLOAD_BYTES]);
+    return SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES as i32;
 }

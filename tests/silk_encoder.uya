@@ -3,6 +3,7 @@ use std.testing.assert_eq_i32;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
 use src.opus.core.types.opus_encoder_config_default;
+use src.opus.silk.decoder.silk_decode_mono_packet_q14;
 use src.opus.silk.encoder.SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0;
 use src.opus.silk.encoder.SilkBasicEncoderProfile;
 use src.opus.silk.encoder.SilkEncoderState;
@@ -10,6 +11,7 @@ use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
+use src.opus.silk.state.SilkDecoderState;
 
 test "silk basic encoder profile records wideband mono placeholder layout" {
     var config: OpusEncoderConfig = opus_encoder_config_default();
@@ -58,7 +60,7 @@ test "silk basic encoder profile separates invalid and unsupported configs" {
     };
 }
 
-test "silk encoder writes wideband mono packet shell" {
+test "silk encoder writes wideband mono packet decodable by silk decoder" {
     var config: OpusEncoderConfig = opus_encoder_config_default();
     config.sample_rate_hz = 16000;
     config.channels = 1;
@@ -73,6 +75,11 @@ test "silk encoder writes wideband mono packet shell" {
     var pcm: [i16: 320] = [0: 320];
     var packet: [byte: 1275] = [0: 1275];
     const encoded: i32 = try silk_encoder_encode_i16(&state, &pcm[0:320], &packet[0:1275]);
-    try assert_eq_i32(encoded, 1);
+    try assert(encoded > 1, "SILK packet shell must include a decodable payload");
     try assert_eq_i32(packet[0] as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
+
+    var decoder: SilkDecoderState = SilkDecoderState{};
+    var out_q14: [i32: 320] = [0: 320];
+    const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
+    try assert_eq_i32(decoded as i32, 320);
 }
