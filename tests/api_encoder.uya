@@ -1,8 +1,10 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.api.encoder.EncoderApiError;
+use src.opus.api.encoder.EncoderApiUnsupported;
 use src.opus.api.encoder.OPUS_ENCODER_STORAGE_WORDS;
 use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_encode_i16;
 use src.opus.api.encoder.encoder_application;
 use src.opus.api.encoder.encoder_channel_count;
 use src.opus.api.encoder.encoder_init;
@@ -109,5 +111,44 @@ test "encoder api config validation maps invalid configs to api error" {
     match bad_loss {
         error.EncoderApiError => {}
         else => { try assert(false, "encoder config validation must reject out-of-range packet loss"); }
+    };
+}
+
+test "encoder encode i16 framework validates requests before unsupported modes" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var pcm: [i16: 960] = [0: 960];
+    var packet: [byte: 1275] = [0: 1275];
+
+    const uninitialized: !i32 = encoder_encode_i16(&encoder, &pcm[0:960], 960, &packet[0:1275]);
+    match uninitialized {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder encode must reject uninitialized encoders"); }
+    };
+
+    const config: OpusEncoderConfig = opus_encoder_config_default();
+    try encoder_init(&encoder, &config);
+
+    const valid_but_unsupported: !i32 = encoder_encode_i16(&encoder, &pcm[0:960], 960, &packet[0:1275]);
+    match valid_but_unsupported {
+        error.EncoderApiUnsupported => {}
+        else => { try assert(false, "encoder encode framework must leave actual encoding to later tasks"); }
+    };
+
+    const bad_frame: !i32 = encoder_encode_i16(&encoder, &pcm[0:960], 123, &packet[0:1275]);
+    match bad_frame {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder encode must reject non-Opus frame durations"); }
+    };
+
+    const short_pcm: !i32 = encoder_encode_i16(&encoder, &pcm[0:959], 960, &packet[0:1275]);
+    match short_pcm {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder encode must reject short PCM input"); }
+    };
+
+    const empty_packet: !i32 = encoder_encode_i16(&encoder, &pcm[0:960], 960, &packet[0:0]);
+    match empty_packet {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder encode must reject empty packet output buffers"); }
     };
 }

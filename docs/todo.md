@@ -458,7 +458,7 @@
 - [x] 实现 `api/encoder.uya`。
 - [x] 实现 `encoder_init`。
 - [x] 实现 encoder config 校验。
-- [ ] 实现 `encoder_encode_i16` 框架。
+- [x] 实现 `encoder_encode_i16` 框架。
 - [ ] 实现 CELT-only Basic encoder。
 - [ ] 支持 FB/20ms/stereo。
 - [ ] 实现基本 energy quantization。

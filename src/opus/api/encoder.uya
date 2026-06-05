@@ -1,4 +1,7 @@
+use src.opus.core.constants.MAX_FRAME_SAMPLES_48K;
+use src.opus.core.constants.SAMPLE_RATE_48K;
 use src.opus.core.errors.validate_encoder_config;
+use src.opus.core.errors.validate_frame_size_48k;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
@@ -82,11 +85,53 @@ fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConf
     encoder.initialized = true;
 }
 
+fn encoder_frame_size_48k_for_input(encoder: &const OpusEncoderState, frame_size: i32) !i32 {
+    if frame_size <= 0 || encoder.config.sample_rate_hz == 0 {
+        return error.EncoderApiError;
+    }
+    const numerator: u64 = (frame_size as u64) * (SAMPLE_RATE_48K as u64);
+    const denominator: u64 = encoder.config.sample_rate_hz as u64;
+    if (numerator % denominator) != 0 {
+        return error.EncoderApiError;
+    }
+    const frame_size_48k: u64 = numerator / denominator;
+    if frame_size_48k > (MAX_FRAME_SAMPLES_48K as u64) {
+        return error.EncoderApiError;
+    }
+    validate_frame_size_48k(frame_size_48k as u32) catch {
+        return error.EncoderApiError;
+    };
+    return frame_size_48k as i32;
+}
+
+fn encoder_validate_encode_request(encoder: &const OpusEncoderState, pcm: &[const i16], frame_size: i32, packet_out: &[byte]) !void {
+    if !encoder.initialized {
+        return error.EncoderApiError;
+    }
+    try encoder_validate_config(&encoder.config);
+    _ = try encoder_frame_size_48k_for_input(encoder, frame_size);
+    const required_pcm: usize = (frame_size as usize) * (encoder.config.channels as usize);
+    if required_pcm > pcm.len {
+        return error.EncoderApiError;
+    }
+    if packet_out.len == 0 {
+        return error.EncoderApiError;
+    }
+}
+
 export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {
     if !encoder_storage_fits_state() {
         return error.EncoderApiError;
     }
     try encoder_init_state(encoder_state(encoder), config);
+}
+
+export fn encoder_encode_i16(encoder: &OpusEncoder, pcm: &[const i16], frame_size: i32, packet_out: &[byte]) !i32 {
+    if !encoder_storage_fits_state() {
+        return error.EncoderApiError;
+    }
+    try encoder_validate_encode_request(encoder_state_const(encoder), pcm, frame_size, packet_out);
+    return error.EncoderApiUnsupported;
 }
 
 export fn encoder_is_initialized(encoder: &const OpusEncoder) bool {
