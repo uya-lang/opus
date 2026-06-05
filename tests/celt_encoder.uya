@@ -122,6 +122,7 @@ test "celt basic encoder profile records fullband frame layout" {
     try assert_eq_i32(profile.toc_byte_code0 as i32, 252);
     try assert_eq_i32(profile.bitrate_bps as i32, 64000);
     try assert(profile.vbr == true, "profile must retain VBR mode");
+    try assert_eq_i32(profile.complexity as i32, 5);
 }
 
 test "celt basic encoder profile separates invalid and unsupported configs" {
@@ -265,6 +266,32 @@ test "celt encoder vbr allocation varies packet length with input activity" {
     try assert_eq_i32(active_packet[0] as i32, 252);
 }
 
+test "celt encoder low complexity uses fixed vbr budget" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.bitrate_bps = 64000;
+    config.vbr = true;
+    config.complexity = 0;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var silence_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&silence_state, &profile);
+    var silence_pcm: [i16: 1920] = [0: 1920];
+    var silence_packet: [byte: 1275] = [0: 1275];
+    const silence_encoded: i32 = try celt_encoder_encode_i16(&silence_state, &silence_pcm[0:1920], &silence_packet[0:1275]);
+
+    var active_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&active_state, &profile);
+    var active_pcm: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&active_pcm[0:1920], 30000);
+    var active_packet: [byte: 1275] = [0: 1275];
+    const active_encoded: i32 = try celt_encoder_encode_i16(&active_state, &active_pcm[0:1920], &active_packet[0:1275]);
+
+    try assert_eq_i32(silence_encoded, 160);
+    try assert_eq_i32(active_encoded, 160);
+}
+
 test "celt encoder transient detection flags sudden attacks" {
     var steady: [i16: 1920] = [0: 1920];
     fill_constant_stereo(&steady[0:1920], 4000);
@@ -318,6 +345,32 @@ test "celt encoder writes stereo intensity allocation decision" {
     const opposed_alloc: CeltRateFrameAllocation = try decode_celt_encoder_packet_allocation(&opposed_packet[0:(opposed_encoded as usize)], opposed_encoded);
     try assert_eq_i32(opposed_alloc.intensity, 0);
     try assert_eq_i32(opposed_alloc.dual_stereo, 0);
+}
+
+test "celt encoder low complexity skips transient and intensity decisions" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    config.complexity = 0;
+    const profile: CeltBasicEncoderProfile = try celt_basic_encoder_profile_init(&config, 960);
+
+    var linked_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&linked_state, &profile);
+    var linked: [i16: 1920] = [0: 1920];
+    fill_constant_stereo(&linked[0:1920], 5000);
+    var linked_packet: [byte: 1275] = [0: 1275];
+    const linked_encoded: i32 = try celt_encoder_encode_i16(&linked_state, &linked[0:1920], &linked_packet[0:1275]);
+    const linked_alloc: CeltRateFrameAllocation = try decode_celt_encoder_packet_allocation(&linked_packet[0:(linked_encoded as usize)], linked_encoded);
+    try assert_eq_i32(linked_alloc.intensity, 0);
+    try assert_eq_i32(linked_alloc.dual_stereo, 0);
+
+    var attack_state: CeltEncoderState = CeltEncoderState{};
+    try celt_encoder_state_init(&attack_state, &profile);
+    var attack: [i16: 1920] = [0: 1920];
+    fill_attack_stereo(&attack[0:1920]);
+    var attack_packet: [byte: 1275] = [0: 1275];
+    const attack_encoded: i32 = try celt_encoder_encode_i16(&attack_state, &attack[0:1920], &attack_packet[0:1275]);
+    try assert(!try decode_celt_encoder_packet_transient_flag(&attack_packet[0:(attack_encoded as usize)], attack_encoded), "complexity 0 must skip transient detection");
 }
 
 test "celt encoder writes detected transient global flag" {

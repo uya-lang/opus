@@ -85,6 +85,7 @@ const SILK_BASIC_ENCODER_NSQ_MAX_PULSE: i32 = 8;
 const SILK_BASIC_ENCODER_NSQ_SHORT_TERM_PRED_Q8: i32 = 192;
 const SILK_BASIC_ENCODER_NSQ_PITCH_PRED_Q8: i32 = 192;
 const SILK_BASIC_ENCODER_NSQ_ERROR_FEEDBACK_Q8: i32 = 160;
+const SILK_BASIC_ENCODER_COMPLEXITY_PITCH_MIN: u8 = 4;
 
 export struct SilkBasicEncoderProfile {
     sample_rate_hz: u32,
@@ -98,6 +99,7 @@ export struct SilkBasicEncoderProfile {
     inband_fec: bool,
     packet_loss_percent: u8,
     dtx: bool,
+    complexity: u8,
 }
 
 export struct SilkEncoderState {
@@ -178,6 +180,7 @@ export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
         inband_fec: config.inband_fec,
         packet_loss_percent: config.packet_loss_percent,
         dtx: config.dtx,
+        complexity: config.complexity,
     };
 }
 
@@ -1433,7 +1436,7 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     silk_encoder_clear_byte(&packet_out[0:SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES]);
     packet_out.ptr[0] = state.profile.toc_byte_code0;
     var pitch: SilkEncoderPitchAnalysis = silk_encoder_pitch_empty(0);
-    if vad_active {
+    if vad_active && state.profile.complexity >= SILK_BASIC_ENCODER_COMPLEXITY_PITCH_MIN {
         pitch = try silk_encoder_pitch_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, state.profile.sample_rate_hz as i32 / 1000);
     }
     const gains: SilkEncoderGainAnalysis = try silk_encoder_gain_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, SILK_BASIC_ENCODER_WB_20MS_NB_SUBFR);

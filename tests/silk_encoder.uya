@@ -201,6 +201,7 @@ test "silk basic encoder profile records wideband mono placeholder layout" {
     try assert(!profile.inband_fec, "default SILK profile must preserve disabled FEC");
     try assert_eq_i32(profile.packet_loss_percent as i32, 0);
     try assert(!profile.dtx, "default SILK profile must preserve disabled DTX");
+    try assert_eq_i32(profile.complexity as i32, 5);
 }
 
 test "silk basic encoder profile separates invalid and unsupported configs" {
@@ -453,6 +454,30 @@ test "silk encoder writes voiced pitch side info for periodic input" {
     var out_q14: [i32: 320] = [0: 320];
     const decoded: usize = try silk_decode_mono_packet_q14(&decoder, &packet[0:(encoded as usize)], &out_q14[0:320]);
     try assert_eq_i32(decoded as i32, 320);
+}
+
+test "silk encoder low complexity skips voiced pitch side info" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.complexity = 0;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var periodic: [i16: 320] = [0: 320];
+    fill_silk_encoder_periodic_i16(&periodic[0:320], 80);
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try silk_encoder_encode_i16(&state, &periodic[0:320], &packet[0:1275]);
+
+    var entropy: SilkEntropyDecoder = SilkEntropyDecoder{};
+    try silk_entropy_decoder_init(&entropy, &packet[1:(encoded as usize)], 1, 1);
+    try silk_entropy_decode_vad_flags(&entropy);
+    try assert(entropy.vad_flags[0], "low-complexity periodic input must still be VAD active");
+    try silk_entropy_decode_lbrr_flags(&entropy);
+    try assert_eq_i32(try silk_entropy_decode_signal_type(&entropy, 0, 0), SILK_SIGNAL_TYPE_UNVOICED);
 }
 
 test "silk encoder gain analysis tracks subframe levels" {

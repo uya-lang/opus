@@ -493,7 +493,7 @@
 - [x] 实现 CELT stereo intensity decision。
 - [x] 实现 in-band FEC encoder。
 - [x] 实现 DTX。
-- [ ] 实现 complexity 0..10 的主要开关。
+- [x] 实现 complexity 0..10 的主要开关。
 - [ ] 建立 objective quality bench。
 - [ ] 建立主观样本集。
 
