@@ -1,0 +1,88 @@
+export const OGG_OPUS_CAPTURE_PATTERN_LEN: usize = 4;
+const OGG_OPUS_CAPTURE_PATTERN: [byte: 4] = [79, 103, 103, 83];
+
+export const OGG_OPUS_STREAM_VERSION: u8 = 0;
+export const OGG_OPUS_PAGE_HEADER_LEN: usize = 27;
+export const OGG_OPUS_MAX_PAGE_SEGMENTS: usize = 255;
+export const OGG_OPUS_MAX_LACING_VALUE: u8 = 255;
+export const OGG_OPUS_CRC_OFFSET: usize = 22;
+export const OGG_OPUS_CRC_LEN: usize = 4;
+
+export const OGG_OPUS_HEADER_TYPE_CONTINUED_PACKET: u8 = 1;
+export const OGG_OPUS_HEADER_TYPE_BOS: u8 = 2;
+export const OGG_OPUS_HEADER_TYPE_EOS: u8 = 4;
+
+export const OPUS_HEAD_MAGIC_LEN: usize = 8;
+const OPUS_HEAD_MAGIC: [byte: 8] = [79, 112, 117, 115, 72, 101, 97, 100];
+export const OPUS_HEAD_VERSION: u8 = 1;
+export const OPUS_HEAD_MIN_LEN: usize = 19;
+export const OPUS_HEAD_VERSION_OFFSET: usize = 8;
+export const OPUS_HEAD_CHANNELS_OFFSET: usize = 9;
+export const OPUS_HEAD_PRE_SKIP_OFFSET: usize = 10;
+export const OPUS_HEAD_INPUT_SAMPLE_RATE_OFFSET: usize = 12;
+export const OPUS_HEAD_OUTPUT_GAIN_OFFSET: usize = 16;
+export const OPUS_HEAD_MAPPING_FAMILY_OFFSET: usize = 18;
+
+export const OPUS_TAGS_MAGIC_LEN: usize = 8;
+const OPUS_TAGS_MAGIC: [byte: 8] = [79, 112, 117, 115, 84, 97, 103, 115];
+export const OPUS_TAGS_MIN_LEN: usize = 16;
+
+export error InvalidCapturePattern;
+export error UnsupportedOggVersion;
+export error InvalidHeader;
+export error InvalidPage;
+export error InvalidCrc;
+export error TruncatedPage;
+export error TooManySegments;
+export error InvalidGranulePosition;
+export error MissingOpusHead;
+export error MissingOpusTags;
+export error ChainedStreamUnsupported;
+
+export struct OggOpusStreamState {
+    serial: u32,
+    next_sequence: u32,
+    last_granule_position: i64,
+    seen_bos: bool,
+    seen_eos: bool,
+    has_continued_packet: bool,
+}
+
+export fn ogg_opus_stream_state_default(serial: u32) OggOpusStreamState {
+    return OggOpusStreamState{
+        serial: serial,
+        next_sequence: 0,
+        last_granule_position: -1,
+        seen_bos: false,
+        seen_eos: false,
+        has_continued_packet: false,
+    };
+}
+
+export fn ogg_opus_capture_pattern_byte(index: usize) byte {
+    if index < OGG_OPUS_CAPTURE_PATTERN_LEN {
+        return OGG_OPUS_CAPTURE_PATTERN[index];
+    }
+    return 0;
+}
+
+export fn opus_head_magic_byte(index: usize) byte {
+    if index < OPUS_HEAD_MAGIC_LEN {
+        return OPUS_HEAD_MAGIC[index];
+    }
+    return 0;
+}
+
+export fn opus_tags_magic_byte(index: usize) byte {
+    if index < OPUS_TAGS_MAGIC_LEN {
+        return OPUS_TAGS_MAGIC[index];
+    }
+    return 0;
+}
+
+export fn ogg_opus_validate_page_version(version: u8) !void {
+    if version == OGG_OPUS_STREAM_VERSION {
+        return;
+    }
+    return error.UnsupportedOggVersion;
+}

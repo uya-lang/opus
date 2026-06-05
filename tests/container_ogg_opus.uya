@@ -1,0 +1,58 @@
+use std.testing.assert;
+use std.testing.assert_eq_i32;
+use src.opus.container.ogg_opus.OggOpusStreamState;
+use src.opus.container.ogg_opus.OGG_OPUS_CAPTURE_PATTERN_LEN;
+use src.opus.container.ogg_opus.OGG_OPUS_MAX_PAGE_SEGMENTS;
+use src.opus.container.ogg_opus.OGG_OPUS_PAGE_HEADER_LEN;
+use src.opus.container.ogg_opus.OGG_OPUS_STREAM_VERSION;
+use src.opus.container.ogg_opus.OPUS_HEAD_MAGIC_LEN;
+use src.opus.container.ogg_opus.OPUS_HEAD_MIN_LEN;
+use src.opus.container.ogg_opus.OPUS_HEAD_VERSION;
+use src.opus.container.ogg_opus.OPUS_TAGS_MAGIC_LEN;
+use src.opus.container.ogg_opus.ogg_opus_capture_pattern_byte;
+use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
+use src.opus.container.ogg_opus.ogg_opus_validate_page_version;
+use src.opus.container.ogg_opus.opus_head_magic_byte;
+use src.opus.container.ogg_opus.opus_tags_magic_byte;
+
+test "ogg opus module exposes RFC magic values" {
+    try assert_eq_i32(OGG_OPUS_CAPTURE_PATTERN_LEN as i32, 4);
+    try assert_eq_i32(ogg_opus_capture_pattern_byte(0) as i32, 79);
+    try assert_eq_i32(ogg_opus_capture_pattern_byte(1) as i32, 103);
+    try assert_eq_i32(ogg_opus_capture_pattern_byte(2) as i32, 103);
+    try assert_eq_i32(ogg_opus_capture_pattern_byte(3) as i32, 83);
+
+    try assert_eq_i32(OPUS_HEAD_MAGIC_LEN as i32, 8);
+    try assert_eq_i32(opus_head_magic_byte(0) as i32, 79);
+    try assert_eq_i32(opus_head_magic_byte(7) as i32, 100);
+    try assert_eq_i32(OPUS_TAGS_MAGIC_LEN as i32, 8);
+    try assert_eq_i32(opus_tags_magic_byte(0) as i32, 79);
+    try assert_eq_i32(opus_tags_magic_byte(7) as i32, 115);
+}
+
+test "ogg opus module exposes page and header limits" {
+    try assert_eq_i32(OGG_OPUS_STREAM_VERSION as i32, 0);
+    try assert_eq_i32(OPUS_HEAD_VERSION as i32, 1);
+    try assert_eq_i32(OPUS_HEAD_MIN_LEN as i32, 19);
+    try assert_eq_i32(OGG_OPUS_PAGE_HEADER_LEN as i32, 27);
+    try assert_eq_i32(OGG_OPUS_MAX_PAGE_SEGMENTS as i32, 255);
+}
+
+test "ogg opus stream state starts at beginning of logical stream" {
+    const state: OggOpusStreamState = ogg_opus_stream_state_default(42);
+    try assert_eq_i32(state.serial as i32, 42);
+    try assert_eq_i32(state.next_sequence as i32, 0);
+    try assert_eq_i32(state.last_granule_position as i32, -1);
+    try assert(!state.seen_bos, "fresh stream must not have seen BOS");
+    try assert(!state.seen_eos, "fresh stream must not have seen EOS");
+    try assert(!state.has_continued_packet, "fresh stream must not continue a packet");
+}
+
+test "ogg opus module separates container version errors" {
+    try ogg_opus_validate_page_version(OGG_OPUS_STREAM_VERSION);
+    const bad: !void = ogg_opus_validate_page_version(1);
+    match bad {
+        error.UnsupportedOggVersion => {}
+        else => { try assert(false, "unsupported Ogg page version must be a container error"); }
+    }
+}
