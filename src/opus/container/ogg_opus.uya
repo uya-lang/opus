@@ -126,6 +126,30 @@ fn opus_head_read_le_i16(packet: &[byte], offset: usize) i16 {
     return value as i16;
 }
 
+fn opus_head_write_le_u16(out: &[byte], offset: usize, value: u16) void {
+    out.ptr[offset] = (value & (255 as u16)) as byte;
+    out.ptr[offset + 1] = ((value >> 8) & (255 as u16)) as byte;
+}
+
+fn opus_head_write_le_u32(out: &[byte], offset: usize, value: u32) void {
+    out.ptr[offset] = (value & (255 as u32)) as byte;
+    out.ptr[offset + 1] = ((value >> 8) & (255 as u32)) as byte;
+    out.ptr[offset + 2] = ((value >> 16) & (255 as u32)) as byte;
+    out.ptr[offset + 3] = ((value >> 24) & (255 as u32)) as byte;
+}
+
+fn opus_head_i16_to_u16(value: i16) u16 {
+    const wide: i32 = value as i32;
+    if wide < 0 {
+        return (wide + 65536) as u16;
+    }
+    return wide as u16;
+}
+
+fn opus_head_write_le_i16(out: &[byte], offset: usize, value: i16) void {
+    opus_head_write_le_u16(out, offset, opus_head_i16_to_u16(value));
+}
+
 fn opus_head_magic_matches(packet: &[byte]) bool {
     var i: usize = 0;
     while i < OPUS_HEAD_MAGIC_LEN {
@@ -169,6 +193,56 @@ fn opus_head_validate_mapped_channels(mapping_family: u8, channel_count: u8) !vo
     if mapping_family == OPUS_HEAD_MAPPING_FAMILY_1 && channel_count > 8 {
         return error.InvalidHeader;
     }
+}
+
+fn opus_head_validate_mapping_values(head: &const OpusHead) !void {
+    if head.stream_count == 0 {
+        return error.InvalidHeader;
+    }
+    if head.coupled_count > head.stream_count {
+        return error.InvalidHeader;
+    }
+
+    const decoded_channels: u16 = (head.stream_count as u16) + (head.coupled_count as u16);
+    if decoded_channels == 0 || decoded_channels > OPUS_HEAD_MAX_CHANNELS as u16 {
+        return error.InvalidHeader;
+    }
+
+    var i: usize = 0;
+    while i < head.channel_count as usize {
+        const mapped: u8 = head.channel_mapping[i];
+        if mapped != OPUS_HEAD_MAPPING_SILENT && (mapped as u16) >= decoded_channels {
+            return error.InvalidHeader;
+        }
+        i = i + 1;
+    }
+}
+
+export fn ogg_opus_head_encoded_len(head: &const OpusHead) !usize {
+    try opus_head_validate_version(head.version);
+    try opus_head_validate_mapped_channels(head.mapping_family, head.channel_count);
+
+    if head.mapping_family == OPUS_HEAD_MAPPING_FAMILY_0 {
+        if head.has_mapping_table {
+            return error.InvalidHeader;
+        }
+        if head.stream_count != 1 {
+            return error.InvalidHeader;
+        }
+        if head.channel_count == 1 && head.coupled_count != 0 {
+            return error.InvalidHeader;
+        }
+        if head.channel_count == 2 && head.coupled_count != 1 {
+            return error.InvalidHeader;
+        }
+        return OPUS_HEAD_MIN_LEN;
+    }
+
+    if !head.has_mapping_table {
+        return error.InvalidHeader;
+    }
+    try opus_head_validate_mapping_values(head);
+    return opus_head_mapping_required_len(head.channel_count);
 }
 
 export fn ogg_opus_parse_head(packet: &[byte], head: &OpusHead) !void {
@@ -249,4 +323,36 @@ export fn ogg_opus_parse_head(packet: &[byte], head: &OpusHead) !void {
         has_mapping_table: has_mapping_table,
         channel_mapping: mapping,
     };
+}
+
+export fn ogg_opus_write_head(head: &const OpusHead, out: &[byte]) !usize {
+    const encoded_len: usize = try ogg_opus_head_encoded_len(head);
+    if out.len < encoded_len {
+        return error.TruncatedHeader;
+    }
+
+    var i: usize = 0;
+    while i < OPUS_HEAD_MAGIC_LEN {
+        out.ptr[i] = OPUS_HEAD_MAGIC[i];
+        i = i + 1;
+    }
+
+    out.ptr[OPUS_HEAD_VERSION_OFFSET] = head.version;
+    out.ptr[OPUS_HEAD_CHANNELS_OFFSET] = head.channel_count;
+    opus_head_write_le_u16(out, OPUS_HEAD_PRE_SKIP_OFFSET, head.pre_skip);
+    opus_head_write_le_u32(out, OPUS_HEAD_INPUT_SAMPLE_RATE_OFFSET, head.input_sample_rate_hz);
+    opus_head_write_le_i16(out, OPUS_HEAD_OUTPUT_GAIN_OFFSET, head.output_gain_q8);
+    out.ptr[OPUS_HEAD_MAPPING_FAMILY_OFFSET] = head.mapping_family;
+
+    if head.mapping_family != OPUS_HEAD_MAPPING_FAMILY_0 {
+        out.ptr[19] = head.stream_count;
+        out.ptr[20] = head.coupled_count;
+        var channel: usize = 0;
+        while channel < head.channel_count as usize {
+            out.ptr[OPUS_HEAD_MAPPING_TABLE_OFFSET + channel] = head.channel_mapping[channel];
+            channel = channel + 1;
+        }
+    }
+
+    return encoded_len;
 }

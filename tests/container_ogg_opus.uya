@@ -12,9 +12,11 @@ use src.opus.container.ogg_opus.OPUS_HEAD_MIN_LEN;
 use src.opus.container.ogg_opus.OPUS_HEAD_VERSION;
 use src.opus.container.ogg_opus.OPUS_TAGS_MAGIC_LEN;
 use src.opus.container.ogg_opus.ogg_opus_capture_pattern_byte;
+use src.opus.container.ogg_opus.ogg_opus_head_encoded_len;
 use src.opus.container.ogg_opus.ogg_opus_parse_head;
 use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
 use src.opus.container.ogg_opus.ogg_opus_validate_page_version;
+use src.opus.container.ogg_opus.ogg_opus_write_head;
 use src.opus.container.ogg_opus.opus_head_magic_byte;
 use src.opus.container.ogg_opus.opus_tags_magic_byte;
 
@@ -220,5 +222,142 @@ test "opus head parser validates mapping table constraints" {
     match mapping_res {
         error.InvalidHeader => {}
         else => { try assert(false, "mapping index must target decoded channels or silence"); }
+    }
+}
+
+test "opus head writer encodes family 0 stereo header" {
+    var mapping: [u8: OPUS_HEAD_MAX_CHANNELS] = [255: OPUS_HEAD_MAX_CHANNELS];
+    mapping[0] = 0;
+    mapping[1] = 1;
+    const head: OpusHead = OpusHead{
+        version: 1,
+        channel_count: 2,
+        pre_skip: 384,
+        input_sample_rate_hz: 48000,
+        output_gain_q8: -512,
+        mapping_family: 0,
+        stream_count: 1,
+        coupled_count: 1,
+        has_mapping_table: false,
+        channel_mapping: mapping,
+    };
+    var packet: [byte: 32] = [170: 32];
+    const written: usize = try ogg_opus_write_head(&head, &packet[0:32]);
+    try assert_eq_i32(written as i32, 19);
+    try assert_eq_i32((try ogg_opus_head_encoded_len(&head)) as i32, 19);
+    try assert_eq_i32(packet[0] as i32, 79);
+    try assert_eq_i32(packet[7] as i32, 100);
+    try assert_eq_i32(packet[8] as i32, 1);
+    try assert_eq_i32(packet[9] as i32, 2);
+    try assert_eq_i32(packet[10] as i32, 128);
+    try assert_eq_i32(packet[11] as i32, 1);
+    try assert_eq_i32(packet[12] as i32, 128);
+    try assert_eq_i32(packet[13] as i32, 187);
+    try assert_eq_i32(packet[16] as i32, 0);
+    try assert_eq_i32(packet[17] as i32, 254);
+    try assert_eq_i32(packet[18] as i32, 0);
+    try assert_eq_i32(packet[19] as i32, 170);
+
+    var parsed: OpusHead = OpusHead{};
+    try ogg_opus_parse_head(&packet[0:written], &parsed);
+    try assert_eq_i32(parsed.pre_skip as i32, 384);
+    try assert_eq_i32(parsed.output_gain_q8 as i32, -512);
+}
+
+test "opus head writer encodes mapped multistream header" {
+    var mapping: [u8: OPUS_HEAD_MAX_CHANNELS] = [255: OPUS_HEAD_MAX_CHANNELS];
+    mapping[0] = 0;
+    mapping[1] = 4;
+    mapping[2] = 1;
+    mapping[3] = 2;
+    mapping[4] = 3;
+    mapping[5] = 5;
+    const head: OpusHead = OpusHead{
+        version: 1,
+        channel_count: 6,
+        pre_skip: 0,
+        input_sample_rate_hz: 0,
+        output_gain_q8: 0,
+        mapping_family: 1,
+        stream_count: 4,
+        coupled_count: 2,
+        has_mapping_table: true,
+        channel_mapping: mapping,
+    };
+    var packet: [byte: 32] = [0: 32];
+    const written: usize = try ogg_opus_write_head(&head, &packet[0:32]);
+    try assert_eq_i32(written as i32, 27);
+    try assert_eq_i32((try ogg_opus_head_encoded_len(&head)) as i32, 27);
+    try assert_eq_i32(packet[18] as i32, 1);
+    try assert_eq_i32(packet[19] as i32, 4);
+    try assert_eq_i32(packet[20] as i32, 2);
+    try assert_eq_i32(packet[21] as i32, 0);
+    try assert_eq_i32(packet[22] as i32, 4);
+    try assert_eq_i32(packet[26] as i32, 5);
+
+    var parsed: OpusHead = OpusHead{};
+    try ogg_opus_parse_head(&packet[0:written], &parsed);
+    try assert_eq_i32(parsed.channel_count as i32, 6);
+    try assert_eq_i32(parsed.channel_mapping[1] as i32, 4);
+}
+
+test "opus head writer rejects invalid headers and short output buffers" {
+    var mapping: [u8: OPUS_HEAD_MAX_CHANNELS] = [255: OPUS_HEAD_MAX_CHANNELS];
+    mapping[0] = 0;
+    mapping[1] = 1;
+    const family0: OpusHead = OpusHead{
+        version: 1,
+        channel_count: 2,
+        pre_skip: 0,
+        input_sample_rate_hz: 0,
+        output_gain_q8: 0,
+        mapping_family: 0,
+        stream_count: 1,
+        coupled_count: 1,
+        has_mapping_table: false,
+        channel_mapping: mapping,
+    };
+    var short_packet: [byte: 18] = [0: 18];
+    const short_res: !usize = ogg_opus_write_head(&family0, &short_packet[0:18]);
+    match short_res {
+        error.TruncatedHeader => {}
+        else => { try assert(false, "OpusHead writer must reject short buffers"); }
+    }
+
+    const invalid_family0: OpusHead = OpusHead{
+        version: 1,
+        channel_count: 3,
+        pre_skip: 0,
+        input_sample_rate_hz: 0,
+        output_gain_q8: 0,
+        mapping_family: 0,
+        stream_count: 1,
+        coupled_count: 1,
+        has_mapping_table: false,
+        channel_mapping: mapping,
+    };
+    const invalid_family_res: !usize = ogg_opus_head_encoded_len(&invalid_family0);
+    match invalid_family_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "family 0 writer must reject more than two channels"); }
+    }
+
+    mapping[2] = 3;
+    const invalid_mapping: OpusHead = OpusHead{
+        version: 1,
+        channel_count: 3,
+        pre_skip: 0,
+        input_sample_rate_hz: 0,
+        output_gain_q8: 0,
+        mapping_family: 255,
+        stream_count: 1,
+        coupled_count: 1,
+        has_mapping_table: true,
+        channel_mapping: mapping,
+    };
+    const invalid_mapping_res: !usize = ogg_opus_head_encoded_len(&invalid_mapping);
+    match invalid_mapping_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "writer must reject mapping outside decoded channels"); }
     }
 }

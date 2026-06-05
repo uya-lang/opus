@@ -509,7 +509,7 @@
 
 - [x] 实现 `container/ogg_opus.uya`。
 - [x] 解析 `OpusHead`。
-- [ ] 编码 `OpusHead`。
+- [x] 编码 `OpusHead`。
 - [ ] 解析 `OpusTags`。
 - [ ] 编码 `OpusTags`。
 - [ ] 实现 Ogg page parser。
