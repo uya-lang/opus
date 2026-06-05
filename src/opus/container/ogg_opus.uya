@@ -16,12 +16,17 @@ export const OPUS_HEAD_MAGIC_LEN: usize = 8;
 const OPUS_HEAD_MAGIC: [byte: 8] = [79, 112, 117, 115, 72, 101, 97, 100];
 export const OPUS_HEAD_VERSION: u8 = 1;
 export const OPUS_HEAD_MIN_LEN: usize = 19;
+export const OPUS_HEAD_MAPPING_TABLE_OFFSET: usize = 21;
+export const OPUS_HEAD_MAX_CHANNELS: usize = 255;
 export const OPUS_HEAD_VERSION_OFFSET: usize = 8;
 export const OPUS_HEAD_CHANNELS_OFFSET: usize = 9;
 export const OPUS_HEAD_PRE_SKIP_OFFSET: usize = 10;
 export const OPUS_HEAD_INPUT_SAMPLE_RATE_OFFSET: usize = 12;
 export const OPUS_HEAD_OUTPUT_GAIN_OFFSET: usize = 16;
 export const OPUS_HEAD_MAPPING_FAMILY_OFFSET: usize = 18;
+export const OPUS_HEAD_MAPPING_FAMILY_0: u8 = 0;
+export const OPUS_HEAD_MAPPING_FAMILY_1: u8 = 1;
+export const OPUS_HEAD_MAPPING_SILENT: u8 = 255;
 
 export const OPUS_TAGS_MAGIC_LEN: usize = 8;
 const OPUS_TAGS_MAGIC: [byte: 8] = [79, 112, 117, 115, 84, 97, 103, 115];
@@ -29,9 +34,11 @@ export const OPUS_TAGS_MIN_LEN: usize = 16;
 
 export error InvalidCapturePattern;
 export error UnsupportedOggVersion;
+export error UnsupportedOpusHeadVersion;
 export error InvalidHeader;
 export error InvalidPage;
 export error InvalidCrc;
+export error TruncatedHeader;
 export error TruncatedPage;
 export error TooManySegments;
 export error InvalidGranulePosition;
@@ -46,6 +53,19 @@ export struct OggOpusStreamState {
     seen_bos: bool,
     seen_eos: bool,
     has_continued_packet: bool,
+}
+
+export struct OpusHead {
+    version: u8,
+    channel_count: u8,
+    pre_skip: u16,
+    input_sample_rate_hz: u32,
+    output_gain_q8: i16,
+    mapping_family: u8,
+    stream_count: u8,
+    coupled_count: u8,
+    has_mapping_table: bool,
+    channel_mapping: [u8: OPUS_HEAD_MAX_CHANNELS],
 }
 
 export fn ogg_opus_stream_state_default(serial: u32) OggOpusStreamState {
@@ -85,4 +105,148 @@ export fn ogg_opus_validate_page_version(version: u8) !void {
         return;
     }
     return error.UnsupportedOggVersion;
+}
+
+fn opus_head_read_le_u16(packet: &[byte], offset: usize) u16 {
+    return (packet.ptr[offset] as u16) | ((packet.ptr[offset + 1] as u16) << 8);
+}
+
+fn opus_head_read_le_u32(packet: &[byte], offset: usize) u32 {
+    return (packet.ptr[offset] as u32)
+        | ((packet.ptr[offset + 1] as u32) << 8)
+        | ((packet.ptr[offset + 2] as u32) << 16)
+        | ((packet.ptr[offset + 3] as u32) << 24);
+}
+
+fn opus_head_read_le_i16(packet: &[byte], offset: usize) i16 {
+    const value: u16 = opus_head_read_le_u16(packet, offset);
+    if value >= 32768 {
+        return ((value as i32) - 65536) as i16;
+    }
+    return value as i16;
+}
+
+fn opus_head_magic_matches(packet: &[byte]) bool {
+    var i: usize = 0;
+    while i < OPUS_HEAD_MAGIC_LEN {
+        if packet.ptr[i] != OPUS_HEAD_MAGIC[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn opus_head_clear_mapping(mapping: &[u8]) void {
+    var i: usize = 0;
+    while i < mapping.len {
+        mapping.ptr[i] = OPUS_HEAD_MAPPING_SILENT;
+        i = i + 1;
+    }
+}
+
+fn opus_head_mapping_required_len(channel_count: u8) usize {
+    return OPUS_HEAD_MAPPING_TABLE_OFFSET + (channel_count as usize);
+}
+
+fn opus_head_validate_version(version: u8) !void {
+    if (version & (240 as u8)) == 0 {
+        return;
+    }
+    return error.UnsupportedOpusHeadVersion;
+}
+
+fn opus_head_validate_mapped_channels(mapping_family: u8, channel_count: u8) !void {
+    if channel_count == 0 {
+        return error.InvalidHeader;
+    }
+    if mapping_family == OPUS_HEAD_MAPPING_FAMILY_0 {
+        if channel_count > 2 {
+            return error.InvalidHeader;
+        }
+        return;
+    }
+    if mapping_family == OPUS_HEAD_MAPPING_FAMILY_1 && channel_count > 8 {
+        return error.InvalidHeader;
+    }
+}
+
+export fn ogg_opus_parse_head(packet: &[byte], head: &OpusHead) !void {
+    if packet.len < OPUS_HEAD_MIN_LEN {
+        return error.TruncatedHeader;
+    }
+    if !opus_head_magic_matches(packet) {
+        return error.InvalidHeader;
+    }
+
+    const version: u8 = packet.ptr[OPUS_HEAD_VERSION_OFFSET];
+    try opus_head_validate_version(version);
+
+    const channel_count: u8 = packet.ptr[OPUS_HEAD_CHANNELS_OFFSET];
+    const mapping_family: u8 = packet.ptr[OPUS_HEAD_MAPPING_FAMILY_OFFSET];
+    try opus_head_validate_mapped_channels(mapping_family, channel_count);
+
+    var mapping: [u8: OPUS_HEAD_MAX_CHANNELS] = [0: OPUS_HEAD_MAX_CHANNELS];
+    opus_head_clear_mapping(&mapping[0:OPUS_HEAD_MAX_CHANNELS]);
+
+    var stream_count: u8 = 1;
+    var coupled_count: u8 = 0;
+    var has_mapping_table: bool = false;
+
+    if mapping_family == OPUS_HEAD_MAPPING_FAMILY_0 {
+        if version == OPUS_HEAD_VERSION && packet.len != OPUS_HEAD_MIN_LEN {
+            return error.InvalidHeader;
+        }
+        mapping[0] = 0;
+        if channel_count == 2 {
+            coupled_count = 1;
+            mapping[1] = 1;
+        }
+    } else {
+        const required_len: usize = opus_head_mapping_required_len(channel_count);
+        if packet.len < required_len {
+            return error.TruncatedHeader;
+        }
+        if version == OPUS_HEAD_VERSION && packet.len != required_len {
+            return error.InvalidHeader;
+        }
+
+        stream_count = packet.ptr[19];
+        coupled_count = packet.ptr[20];
+        if stream_count == 0 {
+            return error.InvalidHeader;
+        }
+        if coupled_count > stream_count {
+            return error.InvalidHeader;
+        }
+
+        const decoded_channels: u16 = (stream_count as u16) + (coupled_count as u16);
+        if decoded_channels == 0 || decoded_channels > OPUS_HEAD_MAX_CHANNELS as u16 {
+            return error.InvalidHeader;
+        }
+
+        var i: usize = 0;
+        while i < channel_count as usize {
+            const mapped: u8 = packet.ptr[OPUS_HEAD_MAPPING_TABLE_OFFSET + i];
+            if mapped != OPUS_HEAD_MAPPING_SILENT && (mapped as u16) >= decoded_channels {
+                return error.InvalidHeader;
+            }
+            mapping[i] = mapped;
+            i = i + 1;
+        }
+        has_mapping_table = true;
+    }
+
+    *head = OpusHead{
+        version: version,
+        channel_count: channel_count,
+        pre_skip: opus_head_read_le_u16(packet, OPUS_HEAD_PRE_SKIP_OFFSET),
+        input_sample_rate_hz: opus_head_read_le_u32(packet, OPUS_HEAD_INPUT_SAMPLE_RATE_OFFSET),
+        output_gain_q8: opus_head_read_le_i16(packet, OPUS_HEAD_OUTPUT_GAIN_OFFSET),
+        mapping_family: mapping_family,
+        stream_count: stream_count,
+        coupled_count: coupled_count,
+        has_mapping_table: has_mapping_table,
+        channel_mapping: mapping,
+    };
 }

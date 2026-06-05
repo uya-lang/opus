@@ -1,15 +1,18 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.container.ogg_opus.OpusHead;
 use src.opus.container.ogg_opus.OggOpusStreamState;
 use src.opus.container.ogg_opus.OGG_OPUS_CAPTURE_PATTERN_LEN;
 use src.opus.container.ogg_opus.OGG_OPUS_MAX_PAGE_SEGMENTS;
 use src.opus.container.ogg_opus.OGG_OPUS_PAGE_HEADER_LEN;
 use src.opus.container.ogg_opus.OGG_OPUS_STREAM_VERSION;
+use src.opus.container.ogg_opus.OPUS_HEAD_MAX_CHANNELS;
 use src.opus.container.ogg_opus.OPUS_HEAD_MAGIC_LEN;
 use src.opus.container.ogg_opus.OPUS_HEAD_MIN_LEN;
 use src.opus.container.ogg_opus.OPUS_HEAD_VERSION;
 use src.opus.container.ogg_opus.OPUS_TAGS_MAGIC_LEN;
 use src.opus.container.ogg_opus.ogg_opus_capture_pattern_byte;
+use src.opus.container.ogg_opus.ogg_opus_parse_head;
 use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
 use src.opus.container.ogg_opus.ogg_opus_validate_page_version;
 use src.opus.container.ogg_opus.opus_head_magic_byte;
@@ -34,6 +37,7 @@ test "ogg opus module exposes page and header limits" {
     try assert_eq_i32(OGG_OPUS_STREAM_VERSION as i32, 0);
     try assert_eq_i32(OPUS_HEAD_VERSION as i32, 1);
     try assert_eq_i32(OPUS_HEAD_MIN_LEN as i32, 19);
+    try assert_eq_i32(OPUS_HEAD_MAX_CHANNELS as i32, 255);
     try assert_eq_i32(OGG_OPUS_PAGE_HEADER_LEN as i32, 27);
     try assert_eq_i32(OGG_OPUS_MAX_PAGE_SEGMENTS as i32, 255);
 }
@@ -54,5 +58,167 @@ test "ogg opus module separates container version errors" {
     match bad {
         error.UnsupportedOggVersion => {}
         else => { try assert(false, "unsupported Ogg page version must be a container error"); }
+    }
+}
+
+test "opus head parser reads family 0 stereo header" {
+    const header: [byte: 19] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 2,
+        128, 1,
+        128, 187, 0, 0,
+        0, 254,
+        0,
+    ];
+    var head: OpusHead = OpusHead{};
+    try ogg_opus_parse_head(&header[0:19], &head);
+
+    try assert_eq_i32(head.version as i32, 1);
+    try assert_eq_i32(head.channel_count as i32, 2);
+    try assert_eq_i32(head.pre_skip as i32, 384);
+    try assert_eq_i32(head.input_sample_rate_hz as i32, 48000);
+    try assert_eq_i32(head.output_gain_q8 as i32, -512);
+    try assert_eq_i32(head.mapping_family as i32, 0);
+    try assert_eq_i32(head.stream_count as i32, 1);
+    try assert_eq_i32(head.coupled_count as i32, 1);
+    try assert_eq_i32(head.channel_mapping[0] as i32, 0);
+    try assert_eq_i32(head.channel_mapping[1] as i32, 1);
+    try assert(!head.has_mapping_table, "family 0 must omit mapping table");
+}
+
+test "opus head parser reads mapped multistream header" {
+    const header: [byte: 27] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 6,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        1,
+        4, 2,
+        0, 4, 1, 2, 3, 5,
+    ];
+    var head: OpusHead = OpusHead{};
+    try ogg_opus_parse_head(&header[0:27], &head);
+
+    try assert_eq_i32(head.channel_count as i32, 6);
+    try assert_eq_i32(head.mapping_family as i32, 1);
+    try assert_eq_i32(head.stream_count as i32, 4);
+    try assert_eq_i32(head.coupled_count as i32, 2);
+    try assert(head.has_mapping_table, "family 1 must carry mapping table");
+    try assert_eq_i32(head.channel_mapping[0] as i32, 0);
+    try assert_eq_i32(head.channel_mapping[1] as i32, 4);
+    try assert_eq_i32(head.channel_mapping[5] as i32, 5);
+}
+
+test "opus head parser accepts compatible minor version with trailing fields" {
+    const header: [byte: 21] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        15, 1,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        0,
+        222, 173,
+    ];
+    var head: OpusHead = OpusHead{};
+    try ogg_opus_parse_head(&header[0:21], &head);
+    try assert_eq_i32(head.version as i32, 15);
+    try assert_eq_i32(head.channel_count as i32, 1);
+}
+
+test "opus head parser rejects malformed headers as container errors" {
+    const truncated: [byte: 18] = [0: 18];
+    var head: OpusHead = OpusHead{};
+    const truncated_res: !void = ogg_opus_parse_head(&truncated[0:18], &head);
+    match truncated_res {
+        error.TruncatedHeader => {}
+        else => { try assert(false, "short OpusHead must be a container truncation"); }
+    }
+
+    var bad_magic: [byte: 19] = [
+        79, 112, 117, 115, 84, 97, 103, 115,
+        1, 1,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        0,
+    ];
+    const magic_res: !void = ogg_opus_parse_head(&bad_magic[0:19], &head);
+    match magic_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "bad OpusHead magic must be invalid header"); }
+    }
+
+    bad_magic[0] = 79;
+    bad_magic[1] = 112;
+    bad_magic[2] = 117;
+    bad_magic[3] = 115;
+    bad_magic[4] = 72;
+    bad_magic[5] = 101;
+    bad_magic[6] = 97;
+    bad_magic[7] = 100;
+    bad_magic[8] = 16;
+    const version_res: !void = ogg_opus_parse_head(&bad_magic[0:19], &head);
+    match version_res {
+        error.UnsupportedOpusHeadVersion => {}
+        else => { try assert(false, "incompatible OpusHead version must be separated"); }
+    }
+
+    bad_magic[8] = 1;
+    bad_magic[9] = 0;
+    const channel_res: !void = ogg_opus_parse_head(&bad_magic[0:19], &head);
+    match channel_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "zero channel OpusHead must be invalid"); }
+    }
+}
+
+test "opus head parser validates mapping table constraints" {
+    const family0_extra: [byte: 21] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 2,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        0,
+        1, 1,
+    ];
+    var head: OpusHead = OpusHead{};
+    const family0_res: !void = ogg_opus_parse_head(&family0_extra[0:21], &head);
+    match family0_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "version 1 family 0 OpusHead must omit mapping table"); }
+    }
+
+    const short_mapping: [byte: 23] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 4,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        255,
+        2, 1,
+        0, 1,
+    ];
+    const short_res: !void = ogg_opus_parse_head(&short_mapping[0:23], &head);
+    match short_res {
+        error.TruncatedHeader => {}
+        else => { try assert(false, "mapped OpusHead must include one mapping byte per channel"); }
+    }
+
+    const bad_mapping: [byte: 24] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 3,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        255,
+        1, 1,
+        0, 1, 3,
+    ];
+    const mapping_res: !void = ogg_opus_parse_head(&bad_mapping[0:24], &head);
+    match mapping_res {
+        error.InvalidHeader => {}
+        else => { try assert(false, "mapping index must target decoded channels or silence"); }
     }
 }

@@ -508,7 +508,7 @@
 ## 18. Ogg Opus
 
 - [x] 实现 `container/ogg_opus.uya`。
-- [ ] 解析 `OpusHead`。
+- [x] 解析 `OpusHead`。
 - [ ] 编码 `OpusHead`。
 - [ ] 解析 `OpusTags`。
 - [ ] 编码 `OpusTags`。
