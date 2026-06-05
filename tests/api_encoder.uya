@@ -1,10 +1,17 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.api.encoder.EncoderApiError;
 use src.opus.api.encoder.OPUS_ENCODER_STORAGE_WORDS;
 use src.opus.api.encoder.OpusEncoder;
+use src.opus.api.encoder.encoder_application;
+use src.opus.api.encoder.encoder_channel_count;
+use src.opus.api.encoder.encoder_init;
+use src.opus.api.encoder.encoder_is_initialized;
+use src.opus.api.encoder.encoder_sample_rate_hz;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
 use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.OpusSignalHint;
 use src.opus.core.types.opus_encoder_config_default;
 
 test "encoder api exposes opaque storage backed handle" {
@@ -19,4 +26,48 @@ test "encoder api exposes opaque storage backed handle" {
     try assert_eq_i32(config.channels as i32, 1);
     try assert_eq_i32(config.application as i32, OpusApplication.AUDIO as i32);
     try assert_eq_i32(config.max_bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+}
+
+test "encoder init validates config and records state" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    try assert(!encoder_is_initialized(&encoder), "fresh encoder must not report initialized state");
+
+    const config: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 16000,
+        channels: 2,
+        application: OpusApplication.VOIP,
+        signal_hint: OpusSignalHint.VOICE,
+        bitrate_bps: 64000,
+        complexity: 10,
+        max_bandwidth: OpusBandwidth.WIDEBAND,
+        vbr: false,
+        inband_fec: true,
+        packet_loss_percent: 20,
+    };
+    try encoder_init(&encoder, &config);
+
+    try assert(encoder_is_initialized(&encoder), "encoder init must record initialized state");
+    try assert_eq_i32(encoder_sample_rate_hz(&encoder) as i32, 16000);
+    try assert_eq_i32(encoder_channel_count(&encoder) as i32, 2);
+    try assert_eq_i32(encoder_application(&encoder) as i32, OpusApplication.VOIP as i32);
+
+    const bad_rate: OpusEncoderConfig = OpusEncoderConfig{
+        sample_rate_hz: 44100,
+        channels: 1,
+        application: OpusApplication.AUDIO,
+        signal_hint: OpusSignalHint.AUTO,
+        bitrate_bps: 0,
+        complexity: 5,
+        max_bandwidth: OpusBandwidth.FULLBAND,
+        vbr: true,
+        inband_fec: false,
+        packet_loss_percent: 0,
+    };
+    var bad_encoder: OpusEncoder = OpusEncoder{};
+    const bad_rate_result: !void = encoder_init(&bad_encoder, &bad_rate);
+    match bad_rate_result {
+        error.EncoderApiError => {}
+        else => { try assert(false, "encoder init must map invalid config to API error"); }
+    };
+    try assert(!encoder_is_initialized(&bad_encoder), "failed init must not mark encoder initialized");
 }

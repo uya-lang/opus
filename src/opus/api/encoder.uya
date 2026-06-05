@@ -1,8 +1,61 @@
+use src.opus.core.errors.validate_encoder_config;
+use src.opus.core.types.OpusApplication;
+use src.opus.core.types.OpusEncoderConfig;
+
 export error EncoderApiError;
 export error EncoderApiUnsupported;
 
 export const OPUS_ENCODER_STORAGE_WORDS: usize = 1024;
+const OPUS_ENCODER_STORAGE_BYTES: usize = OPUS_ENCODER_STORAGE_WORDS * @size_of(usize);
+
+struct OpusEncoderState {
+    config: OpusEncoderConfig,
+    initialized: bool,
+}
 
 export struct OpusEncoder {
     storage: [usize: OPUS_ENCODER_STORAGE_WORDS],
+}
+
+fn encoder_storage_fits_state() bool {
+    return @size_of(OpusEncoderState) <= OPUS_ENCODER_STORAGE_BYTES;
+}
+
+fn encoder_state(encoder: &OpusEncoder) &OpusEncoderState {
+    return ((&encoder.storage as &usize) as &OpusEncoderState);
+}
+
+fn encoder_state_const(encoder: &const OpusEncoder) &const OpusEncoderState {
+    return ((&encoder.storage as &const usize) as &const OpusEncoderState);
+}
+
+fn encoder_init_state(encoder: &OpusEncoderState, config: &const OpusEncoderConfig) !void {
+    validate_encoder_config(config) catch {
+        return error.EncoderApiError;
+    };
+    encoder.config = *config;
+    encoder.initialized = true;
+}
+
+export fn encoder_init(encoder: &OpusEncoder, config: &const OpusEncoderConfig) !void {
+    if !encoder_storage_fits_state() {
+        return error.EncoderApiError;
+    }
+    try encoder_init_state(encoder_state(encoder), config);
+}
+
+export fn encoder_is_initialized(encoder: &const OpusEncoder) bool {
+    return encoder_state_const(encoder).initialized;
+}
+
+export fn encoder_sample_rate_hz(encoder: &const OpusEncoder) u32 {
+    return encoder_state_const(encoder).config.sample_rate_hz;
+}
+
+export fn encoder_channel_count(encoder: &const OpusEncoder) u8 {
+    return encoder_state_const(encoder).config.channels;
+}
+
+export fn encoder_application(encoder: &const OpusEncoder) OpusApplication {
+    return encoder_state_const(encoder).config.application;
 }

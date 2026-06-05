@@ -456,7 +456,7 @@
 ## 16. Basic Encoder
 
 - [x] 实现 `api/encoder.uya`。
-- [ ] 实现 `encoder_init`。
+- [x] 实现 `encoder_init`。
 - [ ] 实现 encoder config 校验。
 - [ ] 实现 `encoder_encode_i16` 框架。
 - [ ] 实现 CELT-only Basic encoder。
