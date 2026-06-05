@@ -137,6 +137,28 @@ test "multistream decoder accepts silent mapped output channels" {
     try assert_eq_i32((try multistream_decoder_mapping_at(&decoder, 1)) as i32, OPUS_MULTISTREAM_MAPPING_SILENT as i32);
 }
 
+test "multistream decoder init rejects illegal mapping without initializing state" {
+    var mapping: [u8: OPUS_MULTISTREAM_MAX_CHANNELS] = [0: OPUS_MULTISTREAM_MAX_CHANNELS];
+    mapping[0] = 0;
+    mapping[1] = 1;
+    const config: MultistreamDecoderConfig = MultistreamDecoderConfig{
+        sample_rate_hz: 48000,
+        channel_count: 2,
+        stream_count: 1,
+        coupled_count: 0,
+        mapping_family: 255,
+        mapping: mapping,
+    };
+
+    var decoder: MultistreamDecoder = MultistreamDecoder{};
+    const bad_init: !void = multistream_decoder_init(&decoder, &config);
+    match bad_init {
+        error.MultistreamApiError => {}
+        else => { try assert(false, "decoder init must reject mapping values outside decoded channel count"); }
+    };
+    try assert(!multistream_decoder_is_initialized(&decoder), "failed init must not mark multistream decoder initialized");
+}
+
 test "multistream decoder metadata storage is not sized for max decoder slots" {
     try assert(OPUS_MULTISTREAM_DECODER_STORAGE_WORDS < 1024, "metadata storage must stay small while decoder slots live in an external pool");
 }
