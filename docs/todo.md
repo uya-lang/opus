@@ -499,6 +499,9 @@
 
 验收标准：
 
+- [x] 定义 Practical encoder objective quality gate。
+- [ ] 提升 Practical encoder 在 speech 常见 bitrate 下的 objective quality。
+- [ ] 提升 Practical encoder 在 music 常见 bitrate 下的 objective quality。
 - [ ] 在常见 bitrate 下质量明显优于 Basic encoder。
 - [ ] Practical encoder 仍保持全部 decoder 互操作。
 

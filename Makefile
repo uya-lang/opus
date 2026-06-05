@@ -64,6 +64,7 @@ test: check
 	done
 	@python3 $(SILK_ENCODER_LIBOPUS_CHECK)
 	@python3 tools/check_tables.py
+	@python3 tests/test_objective_quality_gate.py
 	@python3 tests/test_subjective_samples.py
 
 conformance:
