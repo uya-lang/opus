@@ -443,7 +443,7 @@
 - [x] 实现按实际 `stream_count` 持有 decoder slots 的 pool。
 - [x] 支持 caller-provided multistream decoder storage。
 - [x] 测试 mono。
-- [ ] 测试 stereo。
+- [x] 测试 stereo。
 - [ ] 测试 5.1 mapping。
 - [ ] 测试非法 mapping。
 

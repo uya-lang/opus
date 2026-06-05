@@ -176,7 +176,7 @@ test "multistream decoder pool uses actual stream count slots" {
     try assert_eq_i32(stereo_decoded, 120);
 }
 
-test "multistream decoder storage decodes through caller-provided slots" {
+test "multistream decoder storage decodes family0 stereo" {
     var multistream_decoder: MultistreamDecoder = MultistreamDecoder{};
     const multistream_config: MultistreamDecoderConfig = try multistream_decoder_config_family0(48000, 2);
     try multistream_decoder_init(&multistream_decoder, &multistream_config);
