@@ -96,6 +96,7 @@ test "encoder init validates config and records state" {
         vbr: false,
         inband_fec: true,
         packet_loss_percent: 20,
+        dtx: true,
     };
     try encoder_init(&encoder, &config);
 
@@ -115,6 +116,7 @@ test "encoder init validates config and records state" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 0,
+        dtx: false,
     };
     var bad_encoder: OpusEncoder = OpusEncoder{};
     const bad_rate_result: !void = encoder_init(&bad_encoder, &bad_rate);
@@ -384,6 +386,34 @@ test "encoder writes basic silk only wideband mono packet" {
     try assert_eq_i32(info.duration_samples_48k as i32, 960);
     try assert_eq_i32(info.payload_offset as i32, 1);
     try assert_eq_i32(info.payload_len as i32, encoded - 1);
+}
+
+test "encoder api returns zero bytes for dtx inactive silk voice frame" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.application = OpusApplication.VOIP;
+    config.signal_hint = OpusSignalHint.VOICE;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.dtx = true;
+    try encoder_init(&encoder, &config);
+
+    var silence_pcm: [i16: 640] = [0: 640];
+    var silence_packet: [byte: 1275] = [77: 1275];
+    const silence_encoded: i32 = try encoder_encode_i16(&encoder, &silence_pcm[0:640], 640, &silence_packet[0:1275]);
+    try assert_eq_i32(silence_encoded, 0);
+    try assert_eq_i32(silence_packet[0] as i32, 77);
+
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_voice_like_i16(&voice_pcm[0:320]);
+    var voice_packet: [byte: 1275] = [0: 1275];
+    const voice_encoded: i32 = try encoder_encode_i16(&encoder, &voice_pcm[0:320], 320, &voice_packet[0:1275]);
+    try assert(voice_encoded > 1, "active voice must not be suppressed by DTX");
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&voice_packet[0:(voice_encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.SILK as i32);
 }
 
 test "encoder bandwidth decision caps fullband request to wideband for 16k mono" {

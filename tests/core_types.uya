@@ -87,4 +87,5 @@ test "encoder default config has explicit non-measured defaults" {
     try assert(cfg.vbr == true, "default vbr");
     try assert(cfg.inband_fec == false, "default fec");
     try assert_eq_i32(cfg.packet_loss_percent as i32, 0);
+    try assert(cfg.dtx == false, "default dtx");
 }

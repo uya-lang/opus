@@ -200,6 +200,7 @@ test "silk basic encoder profile records wideband mono placeholder layout" {
     try assert_eq_i32(profile.toc_byte_code0 as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
     try assert(!profile.inband_fec, "default SILK profile must preserve disabled FEC");
     try assert_eq_i32(profile.packet_loss_percent as i32, 0);
+    try assert(!profile.dtx, "default SILK profile must preserve disabled DTX");
 }
 
 test "silk basic encoder profile separates invalid and unsupported configs" {
@@ -361,6 +362,31 @@ test "silk encoder leaves lbrr clear when fec is disabled or inactive" {
     try silk_entropy_decode_lbrr_flags(&inactive_entropy);
     try assert(!inactive_entropy.vad_flags[0], "silence must remain VAD inactive");
     try assert(!inactive_entropy.lbrr_channel_flags[0], "inactive speech must not spend LBRR bits");
+}
+
+test "silk encoder returns zero bytes for dtx inactive voice frame" {
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 16000;
+    config.channels = 1;
+    config.max_bandwidth = OpusBandwidth.WIDEBAND;
+    config.dtx = true;
+    const profile: SilkBasicEncoderProfile = try silk_basic_encoder_profile_init(&config, 960);
+
+    var state: SilkEncoderState = SilkEncoderState{};
+    try silk_encoder_state_init(&state, &profile);
+
+    var silence_pcm: [i16: 320] = [0: 320];
+    var silence_packet: [byte: 1275] = [77: 1275];
+    const silence_encoded: i32 = try silk_encoder_encode_i16(&state, &silence_pcm[0:320], &silence_packet[0:1275]);
+    try assert_eq_i32(silence_encoded, 0);
+    try assert_eq_i32(silence_packet[0] as i32, 77);
+
+    var voice_pcm: [i16: 320] = [0: 320];
+    fill_silk_encoder_voice_like_i16(&voice_pcm[0:320]);
+    var voice_packet: [byte: 1275] = [0: 1275];
+    const voice_encoded: i32 = try silk_encoder_encode_i16(&state, &voice_pcm[0:320], &voice_packet[0:1275]);
+    try assert(voice_encoded > 1, "active voice must not be suppressed by DTX");
+    try assert_eq_i32(voice_packet[0] as i32, SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 as i32);
 }
 
 test "silk encoder pitch analysis detects periodic wideband lag" {

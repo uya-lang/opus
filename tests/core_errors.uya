@@ -99,6 +99,7 @@ test "encoder config validation checks bounded tuning fields" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 100,
+        dtx: false,
     };
     try validate_encoder_config(&valid);
 
@@ -113,6 +114,7 @@ test "encoder config validation checks bounded tuning fields" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 0,
+        dtx: false,
     };
     const complexity_result: !void = validate_encoder_config(&bad_complexity);
     match complexity_result {
@@ -131,6 +133,7 @@ test "encoder config validation checks bounded tuning fields" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 101,
+        dtx: false,
     };
     const loss_result: !void = validate_encoder_config(&bad_loss);
     match loss_result {
@@ -149,6 +152,7 @@ test "encoder config validation checks bounded tuning fields" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 0,
+        dtx: false,
     };
     const low_bitrate_result: !void = validate_encoder_config(&bad_low_bitrate);
     match low_bitrate_result {
@@ -167,6 +171,7 @@ test "encoder config validation checks bounded tuning fields" {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 0,
+        dtx: false,
     };
     const high_bitrate_result: !void = validate_encoder_config(&bad_high_bitrate);
     match high_bitrate_result {

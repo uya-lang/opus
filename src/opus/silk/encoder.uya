@@ -97,6 +97,7 @@ export struct SilkBasicEncoderProfile {
     toc_byte_code0: byte,
     inband_fec: bool,
     packet_loss_percent: u8,
+    dtx: bool,
 }
 
 export struct SilkEncoderState {
@@ -176,6 +177,7 @@ export fn silk_basic_encoder_profile_init(config: &const OpusEncoderConfig, fram
         toc_byte_code0: SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0,
         inband_fec: config.inband_fec,
         packet_loss_percent: config.packet_loss_percent,
+        dtx: config.dtx,
     };
 }
 
@@ -1420,13 +1422,16 @@ export fn silk_encoder_encode_i16(state: &SilkEncoderState, pcm: &[const i16], p
     if state.profile.toc_byte_code0 != SILK_BASIC_ENCODER_WB_20MS_MONO_TOC_BYTE_CODE0 {
         return error.SilkEncoderError;
     }
+    const vad_active: bool = try silk_encoder_vad_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels);
+    if state.profile.dtx && !vad_active {
+        return 0;
+    }
     if packet_out.len < SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES {
         return error.SilkEncoderError;
     }
 
     silk_encoder_clear_byte(&packet_out[0:SILK_BASIC_ENCODER_WB_20MS_PACKET_BYTES]);
     packet_out.ptr[0] = state.profile.toc_byte_code0;
-    const vad_active: bool = try silk_encoder_vad_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels);
     var pitch: SilkEncoderPitchAnalysis = silk_encoder_pitch_empty(0);
     if vad_active {
         pitch = try silk_encoder_pitch_analyze_i16(&pcm[0:required_pcm], state.profile.input_frame_size_samples, state.profile.channels, state.profile.sample_rate_hz as i32 / 1000);

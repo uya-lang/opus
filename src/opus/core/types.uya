@@ -57,6 +57,7 @@ export struct OpusEncoderConfig {
     vbr: bool,
     inband_fec: bool,
     packet_loss_percent: u8,
+    dtx: bool,
 }
 
 export fn opus_decoder_config_default() OpusDecoderConfig {
@@ -75,5 +76,6 @@ export fn opus_encoder_config_default() OpusEncoderConfig {
         vbr: true,
         inband_fec: false,
         packet_loss_percent: 0,
+        dtx: false,
     };
 }

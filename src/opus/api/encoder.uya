@@ -20,6 +20,7 @@ use src.opus.silk.encoder.silk_basic_encoder_profile_init;
 use src.opus.silk.encoder.silk_encoder_encode_i16;
 use src.opus.silk.encoder.silk_encoder_is_initialized;
 use src.opus.silk.encoder.silk_encoder_state_init;
+use src.opus.silk.encoder.silk_encoder_vad_i16;
 use src.opus.packet.repacketizer.Repacketizer;
 use src.opus.packet.repacketizer.repacketizer_add_packet;
 use src.opus.packet.repacketizer.repacketizer_init;
@@ -404,7 +405,28 @@ fn encoder_encode_mode_i16(encoder: &OpusEncoderState, mode: OpusMode, config: &
     return error.EncoderApiUnsupported;
 }
 
+fn encoder_should_emit_dtx_i16(config: &const OpusEncoderConfig, mode: OpusMode, pcm: &[const i16], frame_size_48k: i32) !bool {
+    if !config.dtx || mode != OpusMode.SILK {
+        return false;
+    }
+
+    const input_frame_samples: usize = try encoder_input_samples_for_48k(config, frame_size_48k);
+    const input_len: usize = input_frame_samples * (config.channels as usize);
+    if input_len > pcm.len {
+        return error.EncoderApiError;
+    }
+    const vad_active: bool = silk_encoder_vad_i16(&pcm[0:input_len], input_frame_samples as i32, config.channels) catch {
+        return error.EncoderApiError;
+    };
+    return !vad_active;
+}
+
 fn encoder_encode_decided_duration_i16(encoder: &OpusEncoderState, mode: OpusMode, config: &const OpusEncoderConfig, pcm: &[const i16], frame_decision: &const EncoderFrameDurationDecision, packet_out: &[byte]) !i32 {
+    const total_frame_size_48k: i32 = frame_decision.subframe_size_48k * (frame_decision.frame_count as i32);
+    if try encoder_should_emit_dtx_i16(config, mode, pcm, total_frame_size_48k) {
+        return 0;
+    }
+
     if frame_decision.frame_count == 1 {
         return encoder_encode_mode_i16(encoder, mode, config, pcm, frame_decision.subframe_size_48k, packet_out);
     }
