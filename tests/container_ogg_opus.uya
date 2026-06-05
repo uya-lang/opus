@@ -1,5 +1,6 @@
 use std.testing.assert;
 use std.testing.assert_eq_i32;
+use src.opus.container.ogg_opus.OpusTags;
 use src.opus.container.ogg_opus.OpusHead;
 use src.opus.container.ogg_opus.OggOpusStreamState;
 use src.opus.container.ogg_opus.OGG_OPUS_CAPTURE_PATTERN_LEN;
@@ -10,10 +11,12 @@ use src.opus.container.ogg_opus.OPUS_HEAD_MAX_CHANNELS;
 use src.opus.container.ogg_opus.OPUS_HEAD_MAGIC_LEN;
 use src.opus.container.ogg_opus.OPUS_HEAD_MIN_LEN;
 use src.opus.container.ogg_opus.OPUS_HEAD_VERSION;
+use src.opus.container.ogg_opus.OPUS_TAGS_MAX_COMMENTS;
 use src.opus.container.ogg_opus.OPUS_TAGS_MAGIC_LEN;
 use src.opus.container.ogg_opus.ogg_opus_capture_pattern_byte;
 use src.opus.container.ogg_opus.ogg_opus_head_encoded_len;
 use src.opus.container.ogg_opus.ogg_opus_parse_head;
+use src.opus.container.ogg_opus.ogg_opus_parse_tags;
 use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
 use src.opus.container.ogg_opus.ogg_opus_validate_page_version;
 use src.opus.container.ogg_opus.ogg_opus_write_head;
@@ -359,5 +362,80 @@ test "opus head writer rejects invalid headers and short output buffers" {
     match invalid_mapping_res {
         error.InvalidHeader => {}
         else => { try assert(false, "writer must reject mapping outside decoded channels"); }
+    }
+}
+
+test "opus tags parser reads vendor comments and trailing bytes as spans" {
+    const packet: [byte: 50] = [
+        79, 112, 117, 115, 84, 97, 103, 115,
+        4, 0, 0, 0,
+        85, 121, 97, 33,
+        2, 0, 0, 0,
+        11, 0, 0, 0,
+        65, 82, 84, 73, 83, 84, 61, 85, 121, 97, 33,
+        9, 0, 0, 0,
+        84, 73, 84, 76, 69, 61, 79, 110, 101,
+        0, 0,
+    ];
+    var tags: OpusTags = OpusTags{};
+    try ogg_opus_parse_tags(&packet[0:50], &tags);
+
+    try assert_eq_i32(tags.vendor.offset as i32, 12);
+    try assert_eq_i32(tags.vendor.len as i32, 4);
+    try assert_eq_i32(tags.comment_count as i32, 2);
+    try assert_eq_i32(tags.comments[0].offset as i32, 24);
+    try assert_eq_i32(tags.comments[0].len as i32, 11);
+    try assert_eq_i32(tags.comments[1].offset as i32, 39);
+    try assert_eq_i32(tags.comments[1].len as i32, 9);
+    try assert_eq_i32(tags.trailing.offset as i32, 48);
+    try assert_eq_i32(tags.trailing.len as i32, 2);
+}
+
+test "opus tags parser exposes a bounded comment table" {
+    try assert_eq_i32(OPUS_TAGS_MAX_COMMENTS as i32, 128);
+    const too_many: [byte: 16] = [
+        79, 112, 117, 115, 84, 97, 103, 115,
+        0, 0, 0, 0,
+        129, 0, 0, 0,
+    ];
+    var tags: OpusTags = OpusTags{};
+    const too_many_res: !void = ogg_opus_parse_tags(&too_many[0:16], &tags);
+    match too_many_res {
+        error.TooManyComments => {}
+        else => { try assert(false, "OpusTags parser must cap comment spans"); }
+    }
+}
+
+test "opus tags parser rejects malformed tags as container errors" {
+    const truncated: [byte: 11] = [0: 11];
+    var tags: OpusTags = OpusTags{};
+    const truncated_res: !void = ogg_opus_parse_tags(&truncated[0:11], &tags);
+    match truncated_res {
+        error.TruncatedTags => {}
+        else => { try assert(false, "short OpusTags must be a container truncation"); }
+    }
+
+    const bad_magic: [byte: 16] = [
+        79, 112, 117, 115, 72, 101, 97, 100,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+    ];
+    const magic_res: !void = ogg_opus_parse_tags(&bad_magic[0:16], &tags);
+    match magic_res {
+        error.InvalidTags => {}
+        else => { try assert(false, "bad OpusTags magic must be invalid tags"); }
+    }
+
+    const short_comment: [byte: 22] = [
+        79, 112, 117, 115, 84, 97, 103, 115,
+        0, 0, 0, 0,
+        1, 0, 0, 0,
+        5, 0, 0, 0,
+        65, 66,
+    ];
+    const comment_res: !void = ogg_opus_parse_tags(&short_comment[0:22], &tags);
+    match comment_res {
+        error.TruncatedTags => {}
+        else => { try assert(false, "truncated OpusTags comment must be rejected"); }
     }
 }

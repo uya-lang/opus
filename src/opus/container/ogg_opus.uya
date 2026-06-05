@@ -31,16 +31,22 @@ export const OPUS_HEAD_MAPPING_SILENT: u8 = 255;
 export const OPUS_TAGS_MAGIC_LEN: usize = 8;
 const OPUS_TAGS_MAGIC: [byte: 8] = [79, 112, 117, 115, 84, 97, 103, 115];
 export const OPUS_TAGS_MIN_LEN: usize = 16;
+export const OPUS_TAGS_VENDOR_LEN_OFFSET: usize = 8;
+export const OPUS_TAGS_VENDOR_OFFSET: usize = 12;
+export const OPUS_TAGS_MAX_COMMENTS: usize = 128;
 
 export error InvalidCapturePattern;
 export error UnsupportedOggVersion;
 export error UnsupportedOpusHeadVersion;
 export error InvalidHeader;
+export error InvalidTags;
 export error InvalidPage;
 export error InvalidCrc;
 export error TruncatedHeader;
+export error TruncatedTags;
 export error TruncatedPage;
 export error TooManySegments;
+export error TooManyComments;
 export error InvalidGranulePosition;
 export error MissingOpusHead;
 export error MissingOpusTags;
@@ -66,6 +72,18 @@ export struct OpusHead {
     coupled_count: u8,
     has_mapping_table: bool,
     channel_mapping: [u8: OPUS_HEAD_MAX_CHANNELS],
+}
+
+export struct OggOpusSpan {
+    offset: usize,
+    len: usize,
+}
+
+export struct OpusTags {
+    vendor: OggOpusSpan,
+    comment_count: u32,
+    comments: [OggOpusSpan: OPUS_TAGS_MAX_COMMENTS],
+    trailing: OggOpusSpan,
 }
 
 export fn ogg_opus_stream_state_default(serial: u32) OggOpusStreamState {
@@ -355,4 +373,62 @@ export fn ogg_opus_write_head(head: &const OpusHead, out: &[byte]) !usize {
     }
 
     return encoded_len;
+}
+
+fn opus_tags_magic_matches(packet: &[byte]) bool {
+    var i: usize = 0;
+    while i < OPUS_TAGS_MAGIC_LEN {
+        if packet.ptr[i] != OPUS_TAGS_MAGIC[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn opus_tags_require_range(packet_len: usize, offset: usize, len: usize) !void {
+    if offset > packet_len {
+        return error.TruncatedTags;
+    }
+    if len > packet_len - offset {
+        return error.TruncatedTags;
+    }
+}
+
+export fn ogg_opus_parse_tags(packet: &[byte], tags: &OpusTags) !void {
+    if packet.len < OPUS_TAGS_VENDOR_OFFSET {
+        return error.TruncatedTags;
+    }
+    if !opus_tags_magic_matches(packet) {
+        return error.InvalidTags;
+    }
+
+    const vendor_len: usize = opus_head_read_le_u32(packet, OPUS_TAGS_VENDOR_LEN_OFFSET) as usize;
+    try opus_tags_require_range(packet.len, OPUS_TAGS_VENDOR_OFFSET, vendor_len);
+
+    const comment_count_offset: usize = OPUS_TAGS_VENDOR_OFFSET + vendor_len;
+    try opus_tags_require_range(packet.len, comment_count_offset, 4);
+    const comment_count: u32 = opus_head_read_le_u32(packet, comment_count_offset);
+    if comment_count as usize > OPUS_TAGS_MAX_COMMENTS {
+        return error.TooManyComments;
+    }
+
+    var parsed: OpusTags = OpusTags{};
+    parsed.vendor = OggOpusSpan{ offset: OPUS_TAGS_VENDOR_OFFSET, len: vendor_len };
+    parsed.comment_count = comment_count;
+
+    var cursor: usize = comment_count_offset + 4;
+    var comment_index: usize = 0;
+    while comment_index < comment_count as usize {
+        try opus_tags_require_range(packet.len, cursor, 4);
+        const comment_len: usize = opus_head_read_le_u32(packet, cursor) as usize;
+        cursor = cursor + 4;
+        try opus_tags_require_range(packet.len, cursor, comment_len);
+        parsed.comments[comment_index] = OggOpusSpan{ offset: cursor, len: comment_len };
+        cursor = cursor + comment_len;
+        comment_index = comment_index + 1;
+    }
+
+    parsed.trailing = OggOpusSpan{ offset: cursor, len: packet.len - cursor };
+    *tags = parsed;
 }
