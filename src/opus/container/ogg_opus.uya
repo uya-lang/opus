@@ -5,8 +5,15 @@ export const OGG_OPUS_STREAM_VERSION: u8 = 0;
 export const OGG_OPUS_PAGE_HEADER_LEN: usize = 27;
 export const OGG_OPUS_MAX_PAGE_SEGMENTS: usize = 255;
 export const OGG_OPUS_MAX_LACING_VALUE: u8 = 255;
+export const OGG_OPUS_PAGE_VERSION_OFFSET: usize = 4;
+export const OGG_OPUS_HEADER_TYPE_OFFSET: usize = 5;
+export const OGG_OPUS_GRANULE_POSITION_OFFSET: usize = 6;
+export const OGG_OPUS_SERIAL_OFFSET: usize = 14;
+export const OGG_OPUS_SEQUENCE_OFFSET: usize = 18;
 export const OGG_OPUS_CRC_OFFSET: usize = 22;
 export const OGG_OPUS_CRC_LEN: usize = 4;
+export const OGG_OPUS_SEGMENT_COUNT_OFFSET: usize = 26;
+export const OGG_OPUS_SEGMENT_TABLE_OFFSET: usize = 27;
 
 export const OGG_OPUS_HEADER_TYPE_CONTINUED_PACKET: u8 = 1;
 export const OGG_OPUS_HEADER_TYPE_BOS: u8 = 2;
@@ -36,6 +43,7 @@ export const OPUS_TAGS_VENDOR_OFFSET: usize = 12;
 export const OPUS_TAGS_MAX_COMMENTS: usize = 128;
 
 const OPUS_TAGS_U32_MAX_AS_USIZE: usize = 4294967295;
+const OGG_OPUS_I64_BYTE7_SCALE: i64 = 72057594037927936;
 
 export error InvalidCapturePattern;
 export error UnsupportedOggVersion;
@@ -63,6 +71,28 @@ export struct OggOpusStreamState {
     has_continued_packet: bool,
 }
 
+export struct OggOpusSpan {
+    offset: usize,
+    len: usize,
+}
+
+export struct OggPage {
+    version: u8,
+    header_type: u8,
+    is_continued: bool,
+    is_bos: bool,
+    is_eos: bool,
+    granule_position: i64,
+    serial: u32,
+    sequence: u32,
+    checksum: u32,
+    segment_count: u8,
+    segments: [u8: OGG_OPUS_MAX_PAGE_SEGMENTS],
+    header_len: usize,
+    payload: OggOpusSpan,
+    total_len: usize,
+}
+
 export struct OpusHead {
     version: u8,
     channel_count: u8,
@@ -74,11 +104,6 @@ export struct OpusHead {
     coupled_count: u8,
     has_mapping_table: bool,
     channel_mapping: [u8: OPUS_HEAD_MAX_CHANNELS],
-}
-
-export struct OggOpusSpan {
-    offset: usize,
-    len: usize,
 }
 
 export struct OpusTags {
@@ -125,6 +150,82 @@ export fn ogg_opus_validate_page_version(version: u8) !void {
         return;
     }
     return error.UnsupportedOggVersion;
+}
+
+fn ogg_opus_capture_matches(packet: &[byte]) bool {
+    var i: usize = 0;
+    while i < OGG_OPUS_CAPTURE_PATTERN_LEN {
+        if packet.ptr[i] != OGG_OPUS_CAPTURE_PATTERN[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn ogg_opus_read_le_i64(packet: &[byte], offset: usize) i64 {
+    var lower: i64 = 0;
+    var i: usize = 0;
+    while i < 7 {
+        lower = lower | ((packet.ptr[offset + i] as i64) << ((i as i32) * 8));
+        i = i + 1;
+    }
+
+    const high: i64 = packet.ptr[offset + 7] as i64;
+    if high < 128 {
+        return lower | (high << 56);
+    }
+    return lower + ((high - 256) * OGG_OPUS_I64_BYTE7_SCALE);
+}
+
+export fn ogg_opus_parse_page(packet: &[byte], page: &OggPage) !void {
+    if packet.len < OGG_OPUS_PAGE_HEADER_LEN {
+        return error.TruncatedPage;
+    }
+    if !ogg_opus_capture_matches(packet) {
+        return error.InvalidCapturePattern;
+    }
+
+    const version: u8 = packet.ptr[OGG_OPUS_PAGE_VERSION_OFFSET];
+    try ogg_opus_validate_page_version(version);
+
+    const segment_count: u8 = packet.ptr[OGG_OPUS_SEGMENT_COUNT_OFFSET];
+    const header_len: usize = OGG_OPUS_PAGE_HEADER_LEN + (segment_count as usize);
+    if packet.len < header_len {
+        return error.TruncatedPage;
+    }
+
+    var segments: [u8: OGG_OPUS_MAX_PAGE_SEGMENTS] = [0: OGG_OPUS_MAX_PAGE_SEGMENTS];
+    var payload_len: usize = 0;
+    var i: usize = 0;
+    while i < segment_count as usize {
+        const value: u8 = packet.ptr[OGG_OPUS_SEGMENT_TABLE_OFFSET + i];
+        segments[i] = value;
+        payload_len = payload_len + (value as usize);
+        i = i + 1;
+    }
+
+    if payload_len > packet.len - header_len {
+        return error.TruncatedPage;
+    }
+
+    const header_type: u8 = packet.ptr[OGG_OPUS_HEADER_TYPE_OFFSET];
+    *page = OggPage{
+        version: version,
+        header_type: header_type,
+        is_continued: (header_type & OGG_OPUS_HEADER_TYPE_CONTINUED_PACKET) != 0,
+        is_bos: (header_type & OGG_OPUS_HEADER_TYPE_BOS) != 0,
+        is_eos: (header_type & OGG_OPUS_HEADER_TYPE_EOS) != 0,
+        granule_position: ogg_opus_read_le_i64(packet, OGG_OPUS_GRANULE_POSITION_OFFSET),
+        serial: opus_head_read_le_u32(packet, OGG_OPUS_SERIAL_OFFSET),
+        sequence: opus_head_read_le_u32(packet, OGG_OPUS_SEQUENCE_OFFSET),
+        checksum: opus_head_read_le_u32(packet, OGG_OPUS_CRC_OFFSET),
+        segment_count: segment_count,
+        segments: segments,
+        header_len: header_len,
+        payload: OggOpusSpan{ offset: header_len, len: payload_len },
+        total_len: header_len + payload_len,
+    };
 }
 
 fn opus_head_read_le_u16(packet: &[byte], offset: usize) u16 {

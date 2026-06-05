@@ -2,6 +2,7 @@ use std.testing.assert;
 use std.testing.assert_eq_i32;
 use src.opus.container.ogg_opus.OpusTags;
 use src.opus.container.ogg_opus.OpusHead;
+use src.opus.container.ogg_opus.OggPage;
 use src.opus.container.ogg_opus.OggOpusStreamState;
 use src.opus.container.ogg_opus.OGG_OPUS_CAPTURE_PATTERN_LEN;
 use src.opus.container.ogg_opus.OGG_OPUS_MAX_PAGE_SEGMENTS;
@@ -16,6 +17,7 @@ use src.opus.container.ogg_opus.OPUS_TAGS_MAGIC_LEN;
 use src.opus.container.ogg_opus.ogg_opus_capture_pattern_byte;
 use src.opus.container.ogg_opus.ogg_opus_head_encoded_len;
 use src.opus.container.ogg_opus.ogg_opus_parse_head;
+use src.opus.container.ogg_opus.ogg_opus_parse_page;
 use src.opus.container.ogg_opus.ogg_opus_parse_tags;
 use src.opus.container.ogg_opus.ogg_opus_stream_state_default;
 use src.opus.container.ogg_opus.ogg_opus_tags_encoded_len;
@@ -510,5 +512,136 @@ test "opus tags writer validates output buffer and source spans" {
     match span_res {
         error.InvalidTags => {}
         else => { try assert(false, "OpusTags writer must reject source spans outside input"); }
+    }
+}
+
+test "ogg page parser reads header segment table and payload span" {
+    const page: [byte: 47] = [
+        79, 103, 103, 83,
+        0, 2,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        120, 86, 52, 18,
+        0, 0, 0, 0,
+        68, 51, 34, 17,
+        1,
+        19,
+        79, 112, 117, 115, 72, 101, 97, 100,
+        1, 1,
+        0, 0,
+        0, 0, 0, 0,
+        0, 0,
+        0,
+    ];
+    var parsed: OggPage = OggPage{};
+    try ogg_opus_parse_page(&page[0:47], &parsed);
+
+    try assert_eq_i32(parsed.version as i32, 0);
+    try assert_eq_i32(parsed.header_type as i32, 2);
+    try assert(parsed.is_bos, "page must expose BOS flag");
+    try assert(!parsed.is_eos, "page must not expose EOS flag");
+    try assert_eq_i32(parsed.granule_position as i32, 0);
+    try assert_eq_i32(parsed.serial as i32, 0x12345678);
+    try assert_eq_i32(parsed.sequence as i32, 0);
+    try assert_eq_i32(parsed.checksum as i32, 0x11223344);
+    try assert_eq_i32(parsed.segment_count as i32, 1);
+    try assert_eq_i32(parsed.segments[0] as i32, 19);
+    try assert_eq_i32(parsed.header_len as i32, 28);
+    try assert_eq_i32(parsed.payload.offset as i32, 28);
+    try assert_eq_i32(parsed.payload.len as i32, 19);
+    try assert_eq_i32(parsed.total_len as i32, 47);
+}
+
+test "ogg page parser allows trailing bytes after one parsed page" {
+    var page: [byte: 288] = [0: 288];
+    page[0] = 79;
+    page[1] = 103;
+    page[2] = 103;
+    page[3] = 83;
+    page[4] = 0;
+    page[5] = 5;
+    var i: usize = 0;
+    while i < 8 {
+        page[6 + i] = 255;
+        i = i + 1;
+    }
+    page[14] = 1;
+    page[18] = 7;
+    page[26] = 2;
+    page[27] = 255;
+    page[28] = 1;
+    page[29] = 17;
+    page[284] = 99;
+    page[285] = 1;
+    page[286] = 2;
+    page[287] = 3;
+
+    var parsed: OggPage = OggPage{};
+    try ogg_opus_parse_page(&page[0:288], &parsed);
+    try assert(parsed.is_continued, "page must expose continued flag");
+    try assert(parsed.is_eos, "page must expose EOS flag");
+    try assert_eq_i32(parsed.granule_position as i32, -1);
+    try assert_eq_i32(parsed.segment_count as i32, 2);
+    try assert_eq_i32(parsed.payload.offset as i32, 29);
+    try assert_eq_i32(parsed.payload.len as i32, 256);
+    try assert_eq_i32(parsed.total_len as i32, 285);
+}
+
+test "ogg page parser rejects malformed pages as container errors" {
+    const short_page: [byte: 26] = [0: 26];
+    var parsed: OggPage = OggPage{};
+    const short_res: !void = ogg_opus_parse_page(&short_page[0:26], &parsed);
+    match short_res {
+        error.TruncatedPage => {}
+        else => { try assert(false, "short Ogg page must be truncated"); }
+    }
+
+    var bad_capture: [byte: 27] = [0: 27];
+    bad_capture[0] = 79;
+    bad_capture[1] = 112;
+    bad_capture[2] = 117;
+    bad_capture[3] = 115;
+    const capture_res: !void = ogg_opus_parse_page(&bad_capture[0:27], &parsed);
+    match capture_res {
+        error.InvalidCapturePattern => {}
+        else => { try assert(false, "bad Ogg capture must be separated"); }
+    }
+
+    bad_capture[0] = 79;
+    bad_capture[1] = 103;
+    bad_capture[2] = 103;
+    bad_capture[3] = 83;
+    bad_capture[4] = 1;
+    const version_res: !void = ogg_opus_parse_page(&bad_capture[0:27], &parsed);
+    match version_res {
+        error.UnsupportedOggVersion => {}
+        else => { try assert(false, "unsupported Ogg page version must be separated"); }
+    }
+
+    var truncated_table: [byte: 27] = [0: 27];
+    truncated_table[0] = 79;
+    truncated_table[1] = 103;
+    truncated_table[2] = 103;
+    truncated_table[3] = 83;
+    truncated_table[26] = 1;
+    const table_res: !void = ogg_opus_parse_page(&truncated_table[0:27], &parsed);
+    match table_res {
+        error.TruncatedPage => {}
+        else => { try assert(false, "missing segment table must be truncated"); }
+    }
+
+    const truncated_payload: [byte: 28] = [
+        79, 103, 103, 83,
+        0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0,
+        1,
+        2,
+    ];
+    const payload_res: !void = ogg_opus_parse_page(&truncated_payload[0:28], &parsed);
+    match payload_res {
+        error.TruncatedPage => {}
+        else => { try assert(false, "missing page payload must be truncated"); }
     }
 }

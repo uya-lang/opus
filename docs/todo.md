@@ -512,7 +512,7 @@
 - [x] 编码 `OpusHead`。
 - [x] 解析 `OpusTags`。
 - [x] 编码 `OpusTags`。
-- [ ] 实现 Ogg page parser。
+- [x] 实现 Ogg page parser。
 - [ ] 实现 lacing。
 - [ ] 实现 CRC。
 - [ ] 实现 granule position。
