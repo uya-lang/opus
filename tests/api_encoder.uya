@@ -12,9 +12,12 @@ use src.opus.api.encoder.encoder_init;
 use src.opus.api.encoder.encoder_is_initialized;
 use src.opus.api.encoder.encoder_sample_rate_hz;
 use src.opus.api.encoder.encoder_validate_config;
+use src.opus.api.decoder.decoder_get_packet_info;
 use src.opus.core.types.OpusApplication;
 use src.opus.core.types.OpusBandwidth;
+use src.opus.core.types.OpusMode;
 use src.opus.core.types.OpusEncoderConfig;
+use src.opus.core.types.PacketInfo;
 use src.opus.core.types.OpusSignalHint;
 use src.opus.core.types.opus_encoder_config_default;
 
@@ -166,11 +169,9 @@ test "encoder encode dispatches valid fullband frames into celt state" {
     var pcm: [i16: 1920] = [0: 1920];
     var packet: [byte: 1275] = [0: 1275];
     try assert(!encoder_celt_is_initialized(&encoder), "freshly initialized encoder must not pre-mark CELT state");
-    const celt_dispatch: !i32 = encoder_encode_i16(&encoder, &pcm[0:1920], 960, &packet[0:1275]);
-    match celt_dispatch {
-        error.EncoderApiUnsupported => {}
-        else => { try assert(false, "CELT dispatch must leave packet production to later tasks"); }
-    };
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:1920], 960, &packet[0:1275]);
+    try assert(encoded > 1, "CELT range encode must produce TOC plus payload bytes");
+    try assert_eq_i32(packet[0] as i32, 252);
     try assert(encoder_celt_is_initialized(&encoder), "fullband encode requests must reach CELT state dispatch");
 
     config.max_bandwidth = OpusBandwidth.WIDEBAND;
@@ -182,4 +183,28 @@ test "encoder encode dispatches valid fullband frames into celt state" {
         else => { try assert(false, "non-fullband CELT profile should stay unsupported for now"); }
     };
     try assert(!encoder_celt_is_initialized(&encoder), "unsupported CELT profiles must not mark state initialized");
+}
+
+test "encoder range encode output is parseable as a CELT packet" {
+    var encoder: OpusEncoder = OpusEncoder{};
+    var config: OpusEncoderConfig = opus_encoder_config_default();
+    config.sample_rate_hz = 48000;
+    config.channels = 2;
+    config.max_bandwidth = OpusBandwidth.FULLBAND;
+    try encoder_init(&encoder, &config);
+
+    var pcm: [i16: 1920] = [0: 1920];
+    var packet: [byte: 1275] = [0: 1275];
+    const encoded: i32 = try encoder_encode_i16(&encoder, &pcm[0:1920], 960, &packet[0:1275]);
+
+    var info: PacketInfo = PacketInfo{};
+    try decoder_get_packet_info(&packet[0:(encoded as usize)], &info);
+    try assert_eq_i32(info.mode as i32, OpusMode.CELT as i32);
+    try assert_eq_i32(info.bandwidth as i32, OpusBandwidth.FULLBAND as i32);
+    try assert_eq_i32(info.channels as i32, 2);
+    try assert_eq_i32(info.frame_count as i32, 1);
+    try assert_eq_i32(info.frame_duration_us as i32, 20000);
+    try assert_eq_i32(info.duration_samples_48k as i32, 960);
+    try assert_eq_i32(info.payload_offset as i32, 1);
+    try assert_eq_i32(info.payload_len as i32, encoded - 1);
 }
